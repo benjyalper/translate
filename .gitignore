@@ -1,0 +1,4 @@
+JobScraper/node_modules/
+JobScraper/package-lock.json
+generate-samples.js
+generate-viewers.js
