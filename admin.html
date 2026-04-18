@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>Admin — Translation Jobs | Benjy Alper</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    :root{
+      --accent:#4f46e5;--accent2:#7c3aed;--ink:#0a0a0f;--mid:#6b7280;
+      --light:#f8f8fc;--card:#fff;--border:#e5e7eb;--radius:14px;
+    }
+    body{font-family:'Inter',sans-serif;background:var(--light);color:var(--ink);min-height:100vh}
+
+    /* ── LOCK SCREEN ── */
+    #lock-screen{
+      position:fixed;inset:0;z-index:1000;
+      background:linear-gradient(135deg,#0a0a0f 0%,#1c1c2e 60%,#312e81 100%);
+      display:flex;align-items:center;justify-content:center;
+    }
+    .lock-box{
+      background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.15);
+      backdrop-filter:blur(20px);border-radius:20px;padding:3rem 2.5rem;
+      width:min(420px,90vw);text-align:center;
+    }
+    .lock-icon{font-size:2.8rem;margin-bottom:1rem}
+    .lock-title{color:#fff;font-size:1.5rem;font-weight:700;margin-bottom:.4rem}
+    .lock-sub{color:#94a3b8;font-size:.88rem;margin-bottom:2rem}
+    .lock-input{
+      width:100%;padding:.85rem 1.2rem;border-radius:10px;
+      background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);
+      color:#fff;font-size:1rem;font-family:'Inter',sans-serif;
+      outline:none;text-align:center;letter-spacing:.1em;
+      transition:border-color .2s;
+    }
+    .lock-input:focus{border-color:#818cf8}
+    .lock-input::placeholder{color:rgba(255,255,255,.3);letter-spacing:normal}
+    .lock-btn{
+      margin-top:1rem;width:100%;padding:.85rem;border-radius:10px;
+      background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;
+      font-size:.95rem;font-weight:700;cursor:pointer;border:none;
+      transition:transform .15s,opacity .15s;
+    }
+    .lock-btn:hover{transform:translateY(-1px);opacity:.92}
+    .lock-error{color:#f87171;font-size:.82rem;margin-top:.8rem;height:1.2rem}
+
+    /* ── ADMIN APP ── */
+    #admin-app{display:none}
+    .topbar{
+      background:#0a0a0f;padding:1rem 3vw;
+      display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:1rem;
+    }
+    .topbar-left{display:flex;align-items:center;gap:.8rem}
+    .topbar-logo{color:#a5b4fc;font-size:1rem;font-weight:700;text-decoration:none}
+    .topbar-badge{
+      font-size:.7rem;font-weight:700;padding:.25rem .7rem;border-radius:50px;
+      background:rgba(79,70,229,.3);color:#a5b4fc;letter-spacing:.08em;text-transform:uppercase;
+    }
+    .topbar-right{display:flex;align-items:center;gap:.8rem}
+    .btn-scrape{
+      padding:.55rem 1.3rem;border-radius:50px;background:linear-gradient(135deg,#4f46e5,#7c3aed);
+      color:#fff;font-size:.82rem;font-weight:700;border:none;cursor:pointer;
+      transition:transform .15s,opacity .2s;display:flex;align-items:center;gap:.4rem;
+    }
+    .btn-scrape:hover{transform:translateY(-1px)}
+    .btn-scrape:disabled{opacity:.5;cursor:not-allowed;transform:none}
+    .btn-logout{
+      padding:.5rem 1rem;border-radius:50px;background:transparent;
+      border:1px solid #374151;color:#6b7280;font-size:.8rem;font-weight:600;cursor:pointer;
+    }
+    .btn-logout:hover{border-color:#6b7280;color:#9ca3af}
+
+    /* ── STATS BAR ── */
+    .stats-bar{
+      background:#fff;border-bottom:1px solid var(--border);
+      padding:.9rem 3vw;display:flex;align-items:center;gap:2rem;flex-wrap:wrap;
+    }
+    .stat{display:flex;flex-direction:column}
+    .stat-n{font-size:1.4rem;font-weight:800;color:var(--accent);line-height:1}
+    .stat-l{font-size:.72rem;color:var(--mid);margin-top:.15rem;text-transform:uppercase;letter-spacing:.06em}
+    .last-updated{margin-left:auto;font-size:.78rem;color:var(--mid)}
+
+    /* ── MAIN ── */
+    .main{max-width:1200px;margin:0 auto;padding:2rem 3vw}
+
+    /* ── CONTROLS ── */
+    .controls{display:flex;gap:.8rem;flex-wrap:wrap;margin-bottom:1.8rem;align-items:center}
+    .search-input{
+      flex:1;min-width:200px;padding:.6rem 1rem;border-radius:50px;
+      border:1px solid var(--border);background:#fff;font-size:.9rem;
+      color:var(--ink);outline:none;transition:border-color .2s;
+    }
+    .search-input:focus{border-color:var(--accent)}
+    .filter-select{
+      padding:.6rem 1rem;border-radius:50px;border:1px solid var(--border);
+      background:#fff;font-size:.85rem;color:var(--ink);cursor:pointer;outline:none;
+    }
+    .sort-btn{
+      padding:.6rem 1.1rem;border-radius:50px;border:1px solid var(--border);
+      background:#fff;font-size:.8rem;font-weight:600;color:var(--mid);cursor:pointer;
+      transition:all .15s;
+    }
+    .sort-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+
+    /* ── JOBS GRID ── */
+    .jobs-count{font-size:.82rem;color:var(--mid);margin-bottom:1rem}
+    .jobs-grid{display:flex;flex-direction:column;gap:1rem}
+    .job-card{
+      background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+      padding:1.4rem 1.6rem;display:grid;
+      grid-template-columns:1fr auto;gap:.5rem 1.5rem;
+      transition:box-shadow .2s,border-color .2s;
+    }
+    .job-card:hover{box-shadow:0 4px 24px rgba(79,70,229,.1);border-color:#c7d2fe}
+    .job-left{}
+    .job-header{display:flex;align-items:flex-start;gap:1rem;margin-bottom:.5rem}
+    .source-badge{
+      flex-shrink:0;font-size:.68rem;font-weight:700;padding:.2rem .6rem;
+      border-radius:50px;letter-spacing:.06em;text-transform:uppercase;
+      white-space:nowrap;margin-top:.2rem;
+    }
+    .src-remoteok{background:#e0f2fe;color:#0369a1}
+    .src-weworkremotely{background:#dcfce7;color:#15803d}
+    .src-workingnomads{background:#fef9c3;color:#854d0e}
+    .src-remotive{background:#fce7f3;color:#9d174d}
+    .src-linkedin{background:#dbeafe;color:#1d4ed8}
+    .src-other{background:#f3f4f6;color:#374151}
+    .job-title{font-size:1rem;font-weight:700;color:var(--ink);margin-bottom:.2rem}
+    .job-company{font-size:.85rem;color:var(--mid);margin-bottom:.5rem}
+    .job-meta{display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:.7rem}
+    .job-meta-item{font-size:.78rem;color:var(--mid);display:flex;align-items:center;gap:.3rem}
+    .job-tags{display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.6rem}
+    .job-tag{font-size:.68rem;padding:.2rem .6rem;border-radius:50px;background:#f3f4f6;color:#374151;font-weight:500}
+    .job-desc{font-size:.83rem;color:var(--mid);line-height:1.6;max-height:3.6em;overflow:hidden;position:relative}
+    .job-desc.expanded{max-height:none}
+    .expand-btn{font-size:.75rem;color:var(--accent);cursor:pointer;font-weight:600;background:none;border:none;padding:0;margin-top:.3rem}
+    .job-right{display:flex;flex-direction:column;align-items:flex-end;justify-content:space-between;gap:.8rem}
+    .job-date{font-size:.75rem;color:var(--mid);white-space:nowrap}
+    .job-salary{font-size:.78rem;font-weight:600;color:#15803d}
+    .apply-btn{
+      padding:.65rem 1.5rem;border-radius:50px;
+      background:linear-gradient(135deg,var(--accent),var(--accent2));
+      color:#fff;font-size:.85rem;font-weight:700;text-decoration:none;
+      white-space:nowrap;border:none;cursor:pointer;
+      transition:transform .15s,box-shadow .15s;display:inline-block;text-align:center;
+    }
+    .apply-btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(79,70,229,.35)}
+
+    /* ── JOB BOARDS PANEL ── */
+    .boards-section{margin-top:3rem}
+    .boards-title{font-size:1rem;font-weight:700;color:var(--ink);margin-bottom:1rem;padding-bottom:.5rem;border-bottom:1px solid var(--border)}
+    .boards-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:.8rem}
+    .board-card{
+      background:var(--card);border:1px solid var(--border);border-radius:12px;
+      padding:1rem 1.2rem;display:flex;align-items:center;justify-content:space-between;
+      transition:border-color .2s,box-shadow .2s;text-decoration:none;
+    }
+    .board-card:hover{border-color:var(--accent);box-shadow:0 2px 12px rgba(79,70,229,.1)}
+    .board-name{font-size:.88rem;font-weight:700;color:var(--ink)}
+    .board-sub{font-size:.72rem;color:var(--mid);margin-top:.15rem}
+    .board-arrow{color:var(--accent);font-size:.9rem}
+
+    /* ── EMPTY ── */
+    .empty{text-align:center;padding:4rem 2rem;color:var(--mid)}
+    .empty-icon{font-size:3rem;margin-bottom:1rem}
+    .empty-title{font-size:1rem;font-weight:600;color:var(--ink);margin-bottom:.4rem}
+
+    /* ── SCRAPING STATUS ── */
+    .scrape-toast{
+      position:fixed;bottom:2rem;right:2rem;
+      background:#0a0a0f;color:#fff;padding:1rem 1.5rem;border-radius:12px;
+      font-size:.88rem;font-weight:500;z-index:500;
+      display:none;align-items:center;gap:.6rem;
+      box-shadow:0 8px 32px rgba(0,0,0,.3);
+    }
+    .scrape-toast.show{display:flex}
+    .spinner{width:16px;height:16px;border:2px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+
+    @media(max-width:600px){
+      .job-card{grid-template-columns:1fr}
+      .job-right{align-items:flex-start;flex-direction:row;flex-wrap:wrap}
+      .apply-btn{padding:.55rem 1.2rem}
+    }
+  </style>
+</head>
+<body>
+
+<!-- LOCK SCREEN -->
+<div id="lock-screen">
+  <div class="lock-box">
+    <div class="lock-icon">🔐</div>
+    <div class="lock-title">Admin Access</div>
+    <div class="lock-sub">Enter your password to view translation jobs</div>
+    <input type="password" id="pw-input" class="lock-input" placeholder="Password" onkeydown="if(event.key==='Enter')unlock()"/>
+    <button class="lock-btn" onclick="unlock()">Unlock</button>
+    <div class="lock-error" id="lock-error"></div>
+  </div>
+</div>
+
+<!-- ADMIN APP -->
+<div id="admin-app">
+
+  <div class="topbar">
+    <div class="topbar-left">
+      <a href="index.html" class="topbar-logo">← Benjy Alper</a>
+      <span class="topbar-badge">Admin · Jobs</span>
+    </div>
+    <div class="topbar-right">
+      <button class="btn-scrape" id="scrape-btn" onclick="runScraper()">⚡ Refresh Jobs</button>
+      <button class="btn-logout" onclick="logout()">Log out</button>
+    </div>
+  </div>
+
+  <div class="stats-bar">
+    <div class="stat"><div class="stat-n" id="stat-total">—</div><div class="stat-l">Jobs found</div></div>
+    <div class="stat"><div class="stat-n" id="stat-sources">—</div><div class="stat-l">Sources</div></div>
+    <div class="stat"><div class="stat-n" id="stat-new">—</div><div class="stat-l">From today</div></div>
+    <div class="last-updated" id="last-updated">Loading…</div>
+  </div>
+
+  <div class="main">
+    <div class="controls">
+      <input type="text" class="search-input" id="search-input" placeholder="🔍  Search jobs, companies, keywords…" oninput="renderJobs()"/>
+      <select class="filter-select" id="source-filter" onchange="renderJobs()">
+        <option value="">All Sources</option>
+        <option value="RemoteOK">RemoteOK</option>
+        <option value="WeWorkRemotely">WeWorkRemotely</option>
+        <option value="WorkingNomads">WorkingNomads</option>
+        <option value="Remotive">Remotive</option>
+        <option value="LinkedIn">LinkedIn</option>
+      </select>
+      <button class="sort-btn active" id="sort-date" onclick="setSort('date')">Newest First</button>
+      <button class="sort-btn" id="sort-rel" onclick="setSort('rel')">Most Relevant</button>
+    </div>
+
+    <div class="jobs-count" id="jobs-count"></div>
+    <div class="jobs-grid" id="jobs-grid"></div>
+
+    <!-- DIRECT JOB BOARDS -->
+    <div class="boards-section">
+      <div class="boards-title">📋 Translation Job Boards (Direct)</div>
+      <div class="boards-grid">
+        <a href="https://www.proz.com/jobseekers/jobs?search%5Bpair%5D%5Bsource%5D=Hebrew&search%5Bpair%5D%5Btarget%5D=English" target="_blank" class="board-card">
+          <div><div class="board-name">ProZ.com</div><div class="board-sub">Largest translation board</div></div>
+          <span class="board-arrow">→</span>
+        </a>
+        <a href="https://www.translatorscafe.com/cafe/searchjobs.asp?sourceLang=Hebrew&targetLang=English" target="_blank" class="board-card">
+          <div><div class="board-name">TranslatorsCafe</div><div class="board-sub">Hebrew → English jobs</div></div>
+          <span class="board-arrow">→</span>
+        </a>
+        <a href="https://www.upwork.com/nx/search/jobs/?q=hebrew+english+translator&sort=recency" target="_blank" class="board-card">
+          <div><div class="board-name">Upwork</div><div class="board-sub">Freelance translation</div></div>
+          <span class="board-arrow">→</span>
+        </a>
+        <a href="https://www.linkedin.com/jobs/search/?keywords=hebrew+english+translator&f_WT=2" target="_blank" class="board-card">
+          <div><div class="board-name">LinkedIn</div><div class="board-sub">Remote translation roles</div></div>
+          <span class="board-arrow">→</span>
+        </a>
+        <a href="https://www.indeed.com/jobs?q=hebrew+english+translator&l=Remote" target="_blank" class="board-card">
+          <div><div class="board-name">Indeed</div><div class="board-sub">Translation jobs</div></div>
+          <span class="board-arrow">→</span>
+        </a>
+        <a href="https://www.atanet.org/get-involved/job-listings/" target="_blank" class="board-card">
+          <div><div class="board-name">ATA Job Board</div><div class="board-sub">American Translators Assoc.</div></div>
+          <span class="board-arrow">→</span>
+        </a>
+        <a href="https://www.freelancer.com/jobs/translation/?languages=Hebrew" target="_blank" class="board-card">
+          <div><div class="board-name">Freelancer</div><div class="board-sub">Translation projects</div></div>
+          <span class="board-arrow">→</span>
+        </a>
+        <a href="https://www.guru.com/d/jobs/q/hebrew+english+translation/" target="_blank" class="board-card">
+          <div><div class="board-name">Guru</div><div class="board-sub">Hebrew translation gigs</div></div>
+          <span class="board-arrow">→</span>
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="scrape-toast" id="scrape-toast">
+  <div class="spinner"></div>
+  <span id="toast-msg">Refreshing jobs…</span>
+</div>
+
+<script>
+// ── PASSWORD ──────────────────────────────────────────────
+// Change this to your preferred password
+const ADMIN_PW = 'benjytrans';
+
+function unlock() {
+  const val = document.getElementById('pw-input').value;
+  if (val === ADMIN_PW) {
+    sessionStorage.setItem('admin_auth', '1');
+    document.getElementById('lock-screen').style.display = 'none';
+    document.getElementById('admin-app').style.display = 'block';
+    loadJobs();
+  } else {
+    document.getElementById('lock-error').textContent = 'Incorrect password. Try again.';
+    document.getElementById('pw-input').value = '';
+    document.getElementById('pw-input').focus();
+    setTimeout(() => document.getElementById('lock-error').textContent = '', 3000);
+  }
+}
+
+function logout() {
+  sessionStorage.removeItem('admin_auth');
+  location.reload();
+}
+
+// Auto-unlock if already authenticated this session
+if (sessionStorage.getItem('admin_auth') === '1') {
+  document.getElementById('lock-screen').style.display = 'none';
+  document.getElementById('admin-app').style.display = 'block';
+}
+
+// ── DATA ──────────────────────────────────────────────────
+let allJobs = [];
+let sortMode = 'date';
+
+async function loadJobs() {
+  try {
+    const res = await fetch('JobScraper/jobs-data.json?t=' + Date.now());
+    if (!res.ok) throw new Error('File not found');
+    const data = await res.json();
+    allJobs = data.jobs || [];
+
+    document.getElementById('stat-total').textContent = allJobs.length;
+    const sources = [...new Set(allJobs.map(j => j.source))];
+    document.getElementById('stat-sources').textContent = sources.length;
+    const tod = today();
+    document.getElementById('stat-new').textContent = allJobs.filter(j => j.postedDate === tod).length;
+    if (data.lastUpdated) {
+      const d = new Date(data.lastUpdated);
+      document.getElementById('last-updated').textContent = 'Last scraped: ' + d.toLocaleString();
+    }
+    renderJobs();
+  } catch (e) {
+    document.getElementById('jobs-grid').innerHTML = `<div class="empty"><div class="empty-icon">📂</div><div class="empty-title">No jobs data yet</div><p>Click <strong>Refresh Jobs</strong> to run the scraper.</p></div>`;
+    document.getElementById('stat-total').textContent = '0';
+    document.getElementById('stat-sources').textContent = '0';
+    document.getElementById('stat-new').textContent = '0';
+    document.getElementById('last-updated').textContent = 'Never scraped';
+  }
+}
+
+function today() { return new Date().toISOString().slice(0, 10); }
+
+function setSort(mode) {
+  sortMode = mode;
+  document.getElementById('sort-date').classList.toggle('active', mode === 'date');
+  document.getElementById('sort-rel').classList.toggle('active', mode === 'rel');
+  renderJobs();
+}
+
+function srcClass(source) {
+  const map = {
+    'RemoteOK': 'src-remoteok',
+    'WeWorkRemotely': 'src-weworkremotely',
+    'WorkingNomads': 'src-workingnomads',
+    'Remotive': 'src-remotive',
+    'LinkedIn': 'src-linkedin',
+  };
+  return map[source] || 'src-other';
+}
+
+function renderJobs() {
+  const q = (document.getElementById('search-input').value || '').toLowerCase();
+  const src = document.getElementById('source-filter').value;
+
+  let jobs = allJobs.filter(j => {
+    const text = (j.title + ' ' + j.company + ' ' + j.description + ' ' + (j.tags||[]).join(' ')).toLowerCase();
+    return (!q || text.includes(q)) && (!src || j.source === src);
+  });
+
+  if (sortMode === 'rel') {
+    // Prioritise jobs with "hebrew" in title
+    jobs.sort((a, b) => {
+      const aHeb = /hebrew/i.test(a.title) ? 1 : 0;
+      const bHeb = /hebrew/i.test(b.title) ? 1 : 0;
+      return bHeb - aHeb || new Date(b.postedDate) - new Date(a.postedDate);
+    });
+  } else {
+    jobs.sort((a, b) => new Date(b.postedDate) - new Date(a.postedDate));
+  }
+
+  document.getElementById('jobs-count').textContent = `Showing ${jobs.length} job${jobs.length !== 1 ? 's' : ''}`;
+
+  if (jobs.length === 0) {
+    document.getElementById('jobs-grid').innerHTML = `<div class="empty"><div class="empty-icon">🔍</div><div class="empty-title">No jobs match your search</div></div>`;
+    return;
+  }
+
+  document.getElementById('jobs-grid').innerHTML = jobs.map((j, idx) => `
+    <div class="job-card">
+      <div class="job-left">
+        <div class="job-header">
+          <div>
+            <div class="job-title">${esc(j.title)}</div>
+            <div class="job-company">${esc(j.company)}</div>
+          </div>
+          <span class="source-badge ${srcClass(j.source)}">${esc(j.source)}</span>
+        </div>
+        <div class="job-meta">
+          <span class="job-meta-item">📍 ${esc(j.location)}</span>
+          <span class="job-meta-item">💼 ${esc(j.type)}</span>
+          ${j.salary ? `<span class="job-meta-item">💰 ${esc(j.salary)}</span>` : ''}
+        </div>
+        ${j.tags && j.tags.length ? `<div class="job-tags">${j.tags.map(t=>`<span class="job-tag">${esc(t)}</span>`).join('')}</div>` : ''}
+        ${j.description ? `
+          <div class="job-desc" id="desc-${idx}">${esc(j.description)}</div>
+          <button class="expand-btn" id="exp-${idx}" onclick="toggleDesc(${idx})">Show more</button>
+        ` : ''}
+      </div>
+      <div class="job-right">
+        <div class="job-date">📅 ${j.postedDate}</div>
+        <a href="${esc(j.url)}" target="_blank" class="apply-btn">Apply →</a>
+      </div>
+    </div>
+  `).join('');
+}
+
+function toggleDesc(idx) {
+  const el = document.getElementById('desc-' + idx);
+  const btn = document.getElementById('exp-' + idx);
+  el.classList.toggle('expanded');
+  btn.textContent = el.classList.contains('expanded') ? 'Show less' : 'Show more';
+}
+
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── SCRAPER TRIGGER ───────────────────────────────────────
+// Because this is a static site, "Refresh Jobs" opens a helper page
+// instructing how to run the scraper. In a server environment this
+// could hit an API endpoint.
+function runScraper() {
+  const btn = document.getElementById('scrape-btn');
+  const toast = document.getElementById('scrape-toast');
+  const toastMsg = document.getElementById('toast-msg');
+
+  // Show instructions
+  const msg = `To refresh jobs, run this command in your terminal:\n\ncd "${window.location.pathname.replace('/admin.html','').replace(/\//g,'\\').slice(1)}\\JobScraper"\nnode scraper.js\n\nThen reload this page.`;
+  if (confirm('Run the scraper now?\n\n' + msg + '\n\nClick OK to open the instructions, or Cancel to dismiss.')) {
+    toastMsg.textContent = 'Refreshing after scraper runs — reload the page when done.';
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 5000);
+  }
+}
+
+// Auto-load if unlocked on page load
+if (sessionStorage.getItem('admin_auth') === '1') {
+  loadJobs();
+}
+</script>
+</body>
+</html>

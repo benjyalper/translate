@@ -1,0 +1,14 @@
+{
+  "name": "job-scraper",
+  "version": "1.0.0",
+  "description": "Hebrew-English translation job scraper",
+  "main": "scraper.js",
+  "scripts": {
+    "scrape": "node scraper.js"
+  },
+  "dependencies": {
+    "axios": "^1.4.0",
+    "cheerio": "^1.0.0-rc.12",
+    "rss-parser": "^3.13.0"
+  }
+}
