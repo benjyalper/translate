@@ -14,9 +14,9 @@ const path = require('path');
 const OUT_FILE = path.join(__dirname, 'jobs-data.json');
 const parser = new Parser({ timeout: 12000 });
 
-// Keywords that indicate a translation-relevant job
-const TITLE_KEYWORDS = /translat|interpret|linguist|locali[sz]|language|hebrew|trilingu|bilingu|proofreader|subtitl|transcrib/i;
-const DESC_KEYWORDS  = /hebrew|translat|locali[sz]|linguist/i;
+// Job must mention Hebrew specifically — either in title or description
+const HEBREW_REQUIRED = /hebrew/i;
+const TITLE_KEYWORDS  = /translat|interpret|linguist|locali[sz]|proofreader|subtitl|transcrib/i;
 
 function makeId(src, str) {
   return src + '-' + Buffer.from(str.slice(0, 50)).toString('base64').replace(/[^a-z0-9]/gi,'').slice(0, 20);
@@ -34,7 +34,9 @@ function parseDate(d) {
 }
 
 function isRelevant(title, desc) {
-  return TITLE_KEYWORDS.test(title) || DESC_KEYWORDS.test(desc);
+  const text = title + ' ' + desc;
+  // Must mention Hebrew AND be translation-related
+  return HEBREW_REQUIRED.test(text) && (TITLE_KEYWORDS.test(title) || TITLE_KEYWORDS.test(desc));
 }
 
 // ── SOURCE 1: RemoteOK API ────────────────────────────────
@@ -159,47 +161,97 @@ async function scrapeRemotive() {
   }
 }
 
-// ── SOURCE 5: LinkedIn public RSS (attempt) ───────────────
+// ── SOURCE 5: LinkedIn (Hebrew-specific search) ───────────
 async function scrapeLinkedIn() {
-  console.log('  Scraping LinkedIn jobs...');
-  try {
-    const { data } = await axios.get(
-      'https://www.linkedin.com/jobs/search/?keywords=hebrew+english+translator&f_WT=2&f_JT=C,P,T',
-      {
+  console.log('  Scraping LinkedIn (hebrew translation)...');
+  const searches = [
+    'https://www.linkedin.com/jobs/search/?keywords=hebrew+english+translator&f_WT=2',
+    'https://www.linkedin.com/jobs/search/?keywords=hebrew+translator&f_WT=2',
+    'https://www.linkedin.com/jobs/search/?keywords=%22hebrew+to+english%22+translator',
+  ];
+  const jobs = [];
+  for (const url of searches) {
+    try {
+      const { data } = await axios.get(url, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
           'Accept': 'text/html',
           'Accept-Language': 'en-US,en;q=0.9',
         },
         timeout: 12000,
+      });
+      const $ = cheerio.load(data);
+      $('.base-card, .job-search-card').each((i, el) => {
+        if (i > 15) return;
+        const title = clean($('.base-search-card__title, .job-search-card__title', el).text());
+        const company = clean($('.base-search-card__subtitle, .job-search-card__company-name', el).text());
+        const location = clean($('.job-search-card__location', el).text());
+        const href = $('a.base-card__full-link, a.job-search-card__list-item-link', el).attr('href') || '';
+        if (title && title.length > 3) {
+          jobs.push({
+            id: makeId('li', title + company + url),
+            title, company: company || 'Company',
+            location: location || 'Remote',
+            type: 'Remote / Hybrid',
+            description: '',
+            url: href.split('?')[0] || url,
+            source: 'LinkedIn',
+            postedDate: today(),
+            tags: [],
+            salary: '',
+          });
+        }
+      });
+    } catch (e) { /* continue */ }
+  }
+  // Deduplicate within LinkedIn results
+  const seen = new Set();
+  const unique = jobs.filter(j => { if (seen.has(j.id)) return false; seen.add(j.id); return true; });
+  console.log(`  ✓ LinkedIn: ${unique.length} jobs found`);
+  return unique;
+}
+
+// ── SOURCE 6: Indeed (international, Hebrew-specific) ─────
+async function scrapeIndeedHebrew() {
+  console.log('  Scraping Indeed (hebrew translation)...');
+  try {
+    const { data } = await axios.get(
+      'https://www.indeed.com/jobs?q=hebrew+english+translator&l=&remotejobs=1&sort=date',
+      {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml',
+          'Accept-Language': 'en-US,en;q=0.9',
+        },
+        timeout: 15000,
       }
     );
     const $ = cheerio.load(data);
     const jobs = [];
-    $('.base-card, .job-search-card').each((i, el) => {
+    $('[data-jk], .job_seen_beacon, .tapItem').each((i, el) => {
       if (i > 20) return;
-      const title = clean($('.base-search-card__title, .job-search-card__title', el).text());
-      const company = clean($('.base-search-card__subtitle, .job-search-card__company-name', el).text());
-      const location = clean($('.job-search-card__location', el).text());
-      const href = $('a.base-card__full-link, a.job-search-card__list-item-link', el).attr('href') || '';
-      if (title && isRelevant(title, '')) {
-        jobs.push({
-          id: makeId('li', title + company),
-          title, company, location: location || 'Remote',
-          type: 'Remote / Hybrid',
-          description: '',
-          url: href.split('?')[0],
-          source: 'LinkedIn',
-          postedDate: today(),
-          tags: [],
-          salary: '',
-        });
-      }
+      const title = clean($('.jobTitle span, h2.jobTitle span, [data-testid="jobTitle"]', el).text());
+      const company = clean($('.companyName, [data-testid="company-name"]', el).text());
+      const location = clean($('.companyLocation, [data-testid="text-location"]', el).text());
+      const jk = $(el).attr('data-jk') || $(el).find('[data-jk]').attr('data-jk') || '';
+      if (!title || title.length < 3) return;
+      jobs.push({
+        id: makeId('indeed', title + company + jk),
+        title, company: company || 'Company',
+        location: location || 'Remote',
+        type: 'Remote',
+        description: '',
+        url: jk ? `https://www.indeed.com/viewjob?jk=${jk}` : 'https://www.indeed.com/jobs?q=hebrew+english+translator',
+        source: 'Indeed',
+        postedDate: today(),
+        tags: [],
+        salary: '',
+      });
     });
-    console.log(`  ✓ LinkedIn: ${jobs.length} relevant`);
+    console.log(`  ✓ Indeed: ${jobs.length} jobs found`);
     return jobs;
   } catch (e) {
-    console.warn(`  ✗ LinkedIn: ${e.message}`);
+    console.warn(`  ✗ Indeed: ${e.message}`);
     return [];
   }
 }
@@ -227,6 +279,7 @@ async function main() {
     scrapeWorkingNomads(),
     scrapeRemotive(),
     scrapeLinkedIn(),
+    scrapeIndeedHebrew(),
   ]);
 
   const allJobs = results.flatMap(r => r.status === 'fulfilled' ? r.value : []);
