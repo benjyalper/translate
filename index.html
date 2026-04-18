@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Benjy Alper | Professional Translator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --ink: #0a0a0f;
+      --slate: #1c1c2e;
+      --accent: #4f46e5;
+      --accent2: #7c3aed;
+      --gold: #f59e0b;
+      --light: #f8f8fc;
+      --mid: #6b7280;
+      --border: #e5e7eb;
+      --card: #ffffff;
+      --radius: 16px;
+      --shadow: 0 4px 32px rgba(79,70,229,0.08);
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--light);
+      color: var(--ink);
+      line-height: 1.6;
+    }
+
+    /* ── CONTACT BAR ── */
+    .contact-bar {
+      background: var(--ink); color: #fff;
+      display: flex; align-items: center; justify-content: center;
+      gap: 2.5rem; padding: 0.55rem 7vw; flex-wrap: wrap;
+    }
+    .cbar-item {
+      font-size: 0.82rem; font-weight: 500; color: #cbd5e1;
+      text-decoration: none; display: flex; align-items: center; gap: 0.4rem;
+      transition: color 0.2s;
+    }
+    .cbar-item:hover { color: #fff; }
+    .cbar-wa { color: #4ade80; }
+    .cbar-wa:hover { color: #86efac; }
+
+    /* ── NAV ── */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      background: rgba(248,248,252,0.85);
+      backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 7vw; height: 68px;
+    }
+    .nav-logo {
+      font-family: 'Playfair Display', serif;
+      font-size: 1.25rem; font-weight: 700;
+      color: var(--accent);
+      letter-spacing: -0.01em;
+      text-decoration: none;
+    }
+    .nav-links { display: flex; gap: 2rem; list-style: none; }
+    .nav-links a {
+      text-decoration: none; font-size: 0.9rem; font-weight: 500;
+      color: var(--mid); transition: color 0.2s;
+    }
+    .nav-links a:hover { color: var(--accent); }
+    .nav-cta {
+      background: var(--accent); color: #fff;
+      padding: 0.5rem 1.4rem; border-radius: 50px;
+      text-decoration: none; font-size: 0.88rem; font-weight: 600;
+      transition: background 0.2s, transform 0.15s;
+    }
+    .nav-cta:hover { background: var(--accent2); transform: translateY(-1px); }
+
+    /* ── HERO ── */
+    .hero {
+      min-height: 100vh;
+      display: grid; grid-template-columns: 1fr 1fr;
+      align-items: center; gap: 4rem;
+      padding: 100px 7vw 80px;
+      position: relative;
+      background:
+        linear-gradient(135deg, rgba(248,248,252,0.93) 0%, rgba(237,233,254,0.88) 100%),
+        url('https://images.unsplash.com/photo-1486325212027-8081e485255e?w=1600&q=80') center/cover no-repeat;
+    }
+    .hero-text { max-width: 560px; }
+    .hero-eyebrow {
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      font-size: 0.78rem; font-weight: 600; letter-spacing: 0.12em;
+      text-transform: uppercase; color: var(--accent);
+      background: rgba(79,70,229,0.08); border-radius: 50px;
+      padding: 0.35rem 1rem; margin-bottom: 1.5rem;
+    }
+    .hero-eyebrow::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+    .hero-title {
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(2.4rem, 4vw, 3.6rem);
+      font-weight: 700; line-height: 1.1;
+      color: var(--ink); margin-bottom: 1.2rem;
+    }
+    .hero-title span { color: var(--accent); }
+    .hero-sub {
+      font-size: 1.1rem; color: var(--mid);
+      font-weight: 400; margin-bottom: 2.2rem;
+      max-width: 480px;
+    }
+    .hero-actions { display: flex; gap: 1rem; flex-wrap: wrap; }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #fff; padding: 0.85rem 2rem; border-radius: 50px;
+      text-decoration: none; font-weight: 600; font-size: 0.95rem;
+      box-shadow: 0 8px 24px rgba(79,70,229,0.3);
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 12px 32px rgba(79,70,229,0.4); }
+    .btn-secondary {
+      border: 2px solid var(--accent); color: var(--accent);
+      padding: 0.85rem 2rem; border-radius: 50px;
+      text-decoration: none; font-weight: 600; font-size: 0.95rem;
+      transition: background 0.2s, color 0.2s;
+    }
+    .btn-secondary:hover { background: var(--accent); color: #fff; }
+
+    .hero-stats {
+      display: flex; gap: 2.5rem; margin-top: 3rem;
+      padding-top: 2rem; border-top: 1px solid var(--border);
+    }
+    .stat-num { font-size: 1.9rem; font-weight: 800; color: var(--ink); line-height: 1; }
+    .stat-label { font-size: 0.8rem; color: var(--mid); margin-top: 0.3rem; }
+
+    /* ── PROFILE PHOTO ── */
+    .hero-photo {
+      display: flex; justify-content: center; align-items: center;
+    }
+    .photo-wrap {
+      position: relative; width: min(380px, 100%);
+    }
+    .photo-placeholder {
+      width: 100%; aspect-ratio: 3/4;
+      border-radius: 28px;
+      background: linear-gradient(160deg, #c7d2fe 0%, #ddd6fe 50%, #ede9fe 100%);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 1rem;
+      border: 3px dashed #a5b4fc;
+      color: var(--accent); font-size: 0.9rem; font-weight: 500;
+      box-shadow: var(--shadow);
+    }
+    .photo-icon { font-size: 3.5rem; opacity: 0.4; }
+    .photo-badge {
+      position: absolute; bottom: -18px; right: -18px;
+      background: var(--gold); border-radius: 50px;
+      padding: 0.6rem 1.2rem;
+      font-size: 0.82rem; font-weight: 700; color: #fff;
+      box-shadow: 0 4px 16px rgba(245,158,11,0.4);
+      white-space: nowrap;
+    }
+    .photo-tag {
+      position: absolute; top: 20px; left: -20px;
+      background: var(--card); border-radius: 14px;
+      padding: 0.7rem 1.1rem;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+      font-size: 0.82rem; font-weight: 600;
+      display: flex; align-items: center; gap: 0.4rem;
+    }
+    .photo-tag-dot { width: 8px; height: 8px; border-radius: 50%; background: #10b981; }
+
+    /* ── SECTION SHARED ── */
+    section { padding: 100px 7vw; }
+    .section-label {
+      font-size: 0.75rem; font-weight: 700; letter-spacing: 0.14em;
+      text-transform: uppercase; color: var(--accent); margin-bottom: 0.7rem;
+    }
+    .section-title {
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(1.8rem, 3vw, 2.6rem); font-weight: 700;
+      color: var(--ink); margin-bottom: 1rem; line-height: 1.2;
+    }
+    .section-sub { font-size: 1rem; color: var(--mid); max-width: 540px; margin-bottom: 3rem; }
+
+    /* ── SERVICES ── */
+    #services { background: var(--card); }
+    .services-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1.5rem;
+    }
+    .service-card {
+      background: var(--light); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 2rem;
+      transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+    }
+    .service-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 12px 40px rgba(79,70,229,0.1);
+      border-color: #a5b4fc;
+    }
+    .service-icon {
+      width: 52px; height: 52px; border-radius: 14px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.4rem; margin-bottom: 1.2rem;
+    }
+    .service-title { font-size: 1.05rem; font-weight: 700; color: var(--ink); margin-bottom: 0.5rem; }
+    .service-desc { font-size: 0.88rem; color: var(--mid); line-height: 1.6; }
+    .service-langs {
+      margin-top: 1rem; display: flex; gap: 0.4rem; flex-wrap: wrap;
+    }
+    .lang-tag {
+      font-size: 0.72rem; font-weight: 600; padding: 0.25rem 0.7rem;
+      border-radius: 50px; background: rgba(79,70,229,0.08); color: var(--accent);
+    }
+
+    /* ── SAMPLES ── */
+    #samples { background: var(--light); }
+    .samples-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 1.5rem;
+    }
+    .sample-card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius); overflow: hidden;
+      transition: transform 0.2s, box-shadow 0.2s;
+      display: flex; flex-direction: column;
+    }
+    .sample-card:hover { transform: translateY(-4px); box-shadow: var(--shadow); }
+    .sample-header {
+      padding: 1.5rem 1.5rem 1rem;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: flex-start; gap: 1rem;
+    }
+    .sample-type-icon {
+      width: 44px; height: 44px; border-radius: 10px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.3rem;
+    }
+    .sample-type-icon.doc { background: #dbeafe; }
+    .sample-type-icon.legal { background: #d1fae5; }
+    .sample-type-icon.tech { background: #fef3c7; }
+    .sample-type-icon.medical { background: #fce7f3; }
+    .sample-type-icon.lit { background: #ede9fe; }
+    .sample-meta { flex: 1; }
+    .sample-title { font-size: 0.95rem; font-weight: 700; color: var(--ink); margin-bottom: 0.3rem; }
+    .sample-cat {
+      font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em;
+      text-transform: uppercase; color: var(--mid);
+    }
+    .sample-body { padding: 1rem 1.5rem 1.5rem; flex: 1; }
+    .sample-excerpt {
+      font-size: 0.84rem; color: var(--mid); line-height: 1.65;
+      font-style: italic;
+    }
+    .sample-footer {
+      padding: 0.75rem 1.5rem;
+      border-top: 1px solid var(--border);
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .sample-langs { font-size: 0.78rem; font-weight: 600; color: var(--accent); }
+    .sample-link {
+      font-size: 0.78rem; font-weight: 600; color: var(--accent);
+      text-decoration: none; display: flex; align-items: center; gap: 0.3rem;
+      transition: gap 0.15s;
+    }
+    .sample-link:hover { gap: 0.55rem; }
+
+    .samples-note {
+      margin-top: 2rem; padding: 1.2rem 1.6rem;
+      background: rgba(79,70,229,0.05); border: 1px solid #c7d2fe;
+      border-radius: 12px; font-size: 0.85rem; color: var(--mid);
+      display: flex; gap: 0.7rem; align-items: flex-start;
+    }
+    .samples-note strong { color: var(--accent); }
+
+    /* ── ABOUT ── */
+    #about {
+      color: #fff;
+      position: relative;
+      background:
+        linear-gradient(135deg, rgba(28,28,46,0.92) 0%, rgba(10,10,15,0.88) 100%),
+        url('https://images.unsplash.com/photo-1449824913935-59a10b8d2000?w=1600&q=80') center/cover no-repeat;
+    }
+    #about .section-label { color: #a5b4fc; }
+    #about .section-title { color: #fff; }
+    #about .section-sub { color: #94a3b8; }
+    .about-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 5rem; align-items: center;
+    }
+    .about-text p {
+      color: #cbd5e1; font-size: 1rem; line-height: 1.8; margin-bottom: 1.2rem;
+    }
+    .cert-list { margin-top: 2rem; display: flex; flex-direction: column; gap: 0.8rem; }
+    .cert-item {
+      display: flex; align-items: center; gap: 0.8rem;
+      font-size: 0.9rem; color: #cbd5e1;
+    }
+    .cert-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gold); flex-shrink: 0; }
+    .about-skills { display: flex; flex-direction: column; gap: 1.5rem; }
+    .skill-row {}
+    .skill-header { display: flex; justify-content: space-between; font-size: 0.88rem; font-weight: 600; color: #e2e8f0; margin-bottom: 0.5rem; }
+    .skill-bar { height: 6px; background: rgba(255,255,255,0.1); border-radius: 50px; overflow: hidden; }
+    .skill-fill { height: 100%; border-radius: 50px; background: linear-gradient(90deg, var(--accent), var(--accent2)); }
+
+    /* ── TESTIMONIALS ── */
+    #testimonials { background: var(--card); }
+    .testi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; }
+    .testi-card {
+      background: var(--light); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 2rem;
+    }
+    .testi-quote { font-size: 2rem; color: var(--accent); line-height: 1; margin-bottom: 1rem; }
+    .testi-text { font-size: 0.92rem; color: var(--mid); line-height: 1.7; margin-bottom: 1.5rem; font-style: italic; }
+    .testi-author { font-size: 0.88rem; font-weight: 700; color: var(--ink); }
+    .testi-role { font-size: 0.78rem; color: var(--mid); }
+
+    /* ── CONTACT ── */
+    #contact {
+      text-align: center; color: #fff;
+      position: relative;
+      background:
+        linear-gradient(135deg, rgba(79,70,229,0.88) 0%, rgba(124,58,237,0.92) 100%),
+        url('https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?w=1600&q=80') center/cover no-repeat;
+    }
+    #contact .section-label { color: #c7d2fe; }
+    #contact .section-title { color: #fff; }
+    #contact .section-sub { color: rgba(255,255,255,0.8); margin: 0 auto 2.5rem; }
+    .contact-actions { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; margin-bottom: 3rem; }
+    .btn-white {
+      background: #fff; color: var(--accent);
+      padding: 0.9rem 2.2rem; border-radius: 50px;
+      text-decoration: none; font-weight: 700; font-size: 0.95rem;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+      transition: transform 0.2s;
+    }
+    .btn-white:hover { transform: translateY(-2px); }
+    .btn-outline-white {
+      border: 2px solid rgba(255,255,255,0.6); color: #fff;
+      padding: 0.9rem 2.2rem; border-radius: 50px;
+      text-decoration: none; font-weight: 700; font-size: 0.95rem;
+      transition: background 0.2s, border-color 0.2s;
+    }
+    .btn-outline-white:hover { background: rgba(255,255,255,0.1); border-color: #fff; }
+    .contact-details {
+      display: flex; gap: 2.5rem; justify-content: center; flex-wrap: wrap;
+    }
+    .contact-item { color: rgba(255,255,255,0.85); font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem; }
+    .contact-item a { color: inherit; text-decoration: none; }
+    .contact-item a:hover { text-decoration: underline; }
+
+    /* ── CONTACT FORM ── */
+    .contact-form-wrap {
+      max-width: 680px; margin: 0 auto 2.5rem;
+      background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.25);
+      border-radius: var(--radius); padding: 2rem; backdrop-filter: blur(8px);
+    }
+    .contact-form { display: flex; flex-direction: column; gap: 1.2rem; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2rem; }
+    .form-group { display: flex; flex-direction: column; gap: 0.4rem; }
+    .form-group label { font-size: 0.82rem; font-weight: 600; color: rgba(255,255,255,0.85); letter-spacing: 0.04em; }
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+      background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 10px; padding: 0.7rem 1rem;
+      color: #fff; font-size: 0.92rem; font-family: 'Inter', sans-serif;
+      outline: none; transition: border-color 0.2s, background 0.2s;
+    }
+    .form-group input::placeholder,
+    .form-group textarea::placeholder { color: rgba(255,255,255,0.45); }
+    .form-group select option { background: #4f46e5; color: #fff; }
+    .form-group input:focus,
+    .form-group select:focus,
+    .form-group textarea:focus { border-color: rgba(255,255,255,0.7); background: rgba(255,255,255,0.2); }
+    .form-group textarea { resize: vertical; min-height: 110px; }
+    .form-actions { display: flex; align-items: center; gap: 1.2rem; flex-wrap: wrap; }
+    .btn-form-submit {
+      background: #fff; color: var(--accent); border: none; cursor: pointer;
+      padding: 0.8rem 2rem; border-radius: 50px; font-weight: 700; font-size: 0.95rem;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.15); transition: transform 0.2s;
+    }
+    .btn-form-submit:hover { transform: translateY(-2px); }
+    .email-copy-wrap { display: flex; align-items: center; gap: 0.6rem; }
+    .email-addr { font-size: 0.88rem; color: rgba(255,255,255,0.8); }
+    .btn-copy {
+      background: transparent; border: 1px solid rgba(255,255,255,0.4);
+      color: #fff; border-radius: 50px; padding: 0.3rem 0.9rem;
+      font-size: 0.78rem; font-weight: 600; cursor: pointer; transition: background 0.2s;
+    }
+    .btn-copy:hover { background: rgba(255,255,255,0.15); }
+    .copy-confirm { font-size: 0.78rem; color: #a7f3d0; opacity: 0; transition: opacity 0.3s; }
+    @media (max-width: 600px) { .form-row { grid-template-columns: 1fr; } .form-actions { flex-direction: column; align-items: flex-start; } }
+
+    /* ── FOOTER ── */
+    footer {
+      background: var(--ink); color: #64748b;
+      text-align: center; padding: 2rem;
+      font-size: 0.82rem;
+    }
+    footer span { color: var(--accent); }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width: 900px) {
+      .hero { grid-template-columns: 1fr; padding-top: 120px; }
+      .hero-photo { order: -1; }
+      .photo-wrap { max-width: 280px; }
+      .about-grid { grid-template-columns: 1fr; gap: 3rem; }
+      nav { padding: 0 5vw; }
+      .nav-links { display: none; }
+      section { padding: 70px 5vw; }
+      .hero { padding: 100px 5vw 60px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- CONTACT BAR -->
+<div class="contact-bar">
+  <a href="mailto:benjyalper@hotmail.com" class="cbar-item">✉️ benjyalper@hotmail.com</a>
+  <a href="tel:+972509916633" class="cbar-item">📞 +972 50-991-6633</a>
+  <a href="https://wa.me/972509916633" target="_blank" class="cbar-item cbar-wa">💬 WhatsApp</a>
+</div>
+
+<!-- NAV -->
+<nav>
+  <a href="#" class="nav-logo">Benjy Alper</a>
+  <ul class="nav-links">
+    <li><a href="#services">Services</a></li>
+    <li><a href="#samples">Samples</a></li>
+    <li><a href="#about">About</a></li>
+    <li><a href="#testimonials">Testimonials</a></li>
+  </ul>
+  <a href="#contact" class="nav-cta">Get a Quote</a>
+</nav>
+
+<!-- HERO -->
+<section class="hero" id="home">
+  <div class="hero-text">
+    <div class="hero-eyebrow">Hebrew &amp; English Translation</div>
+    <h1 class="hero-title">
+      Words That<br/>
+      <span>Cross Borders</span><br/>
+      With Precision
+    </h1>
+    <p class="hero-sub">
+      Professional Hebrew–English translation services for legal, medical, business, literary, and technical documents — delivered with cultural fluency and meticulous accuracy.
+    </p>
+    <div class="hero-actions">
+      <a href="#contact" class="btn-primary">Request a Quote</a>
+      <a href="#samples" class="btn-secondary">View Samples</a>
+    </div>
+    <div class="hero-stats">
+      <div>
+        <div class="stat-num">10+</div>
+        <div class="stat-label">Years of experience</div>
+      </div>
+      <div>
+        <div class="stat-num">500+</div>
+        <div class="stat-label">Projects completed</div>
+      </div>
+      <div>
+        <div class="stat-num">2</div>
+        <div class="stat-label">Language directions</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="hero-photo">
+    <div class="photo-wrap">
+      <img src="benjy.png" alt="Benjy Alper" style="width:100%;aspect-ratio:3/4;object-fit:cover;object-position:center top;border-radius:28px;box-shadow:0 8px 40px rgba(79,70,229,0.15);" />
+      <div class="photo-badge">🌐 Certified Translator</div>
+      <div class="photo-tag">
+        <div class="photo-tag-dot"></div>
+        Available for projects
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SERVICES -->
+<section id="services">
+  <div class="section-label">What I Do</div>
+  <h2 class="section-title">Translation Services</h2>
+  <p class="section-sub">Specialized expertise across diverse domains — every translation carries the weight of both languages equally.</p>
+  <div class="services-grid">
+
+    <div class="service-card">
+      <div class="service-icon">⚖️</div>
+      <div class="service-title">Legal Translation</div>
+      <div class="service-desc">Contracts, court documents, affidavits, immigration papers, and legal correspondence — precise terminology, zero ambiguity.</div>
+      <div class="service-langs"><span class="lang-tag">Hebrew → English</span><span class="lang-tag">English → Hebrew</span></div>
+    </div>
+
+    <div class="service-card">
+      <div class="service-icon">🏢</div>
+      <div class="service-title">Business &amp; Financial</div>
+      <div class="service-desc">Corporate reports, financial statements, business plans, investor materials, and official correspondence.</div>
+      <div class="service-langs"><span class="lang-tag">Hebrew → English</span><span class="lang-tag">English → Hebrew</span></div>
+    </div>
+
+    <div class="service-card">
+      <div class="service-icon">🩺</div>
+      <div class="service-title">Medical &amp; Scientific</div>
+      <div class="service-desc">Clinical studies, patient records, pharmaceutical documents, and academic research papers.</div>
+      <div class="service-langs"><span class="lang-tag">Hebrew → English</span><span class="lang-tag">English → Hebrew</span></div>
+    </div>
+
+    <div class="service-card">
+      <div class="service-icon">💻</div>
+      <div class="service-title">Technical &amp; Software</div>
+      <div class="service-desc">User manuals, software UI strings, technical specifications, and engineering documentation.</div>
+      <div class="service-langs"><span class="lang-tag">Hebrew → English</span><span class="lang-tag">English → Hebrew</span></div>
+    </div>
+
+    <div class="service-card">
+      <div class="service-icon">📖</div>
+      <div class="service-title">Literary &amp; Cultural</div>
+      <div class="service-desc">Books, articles, scripts, and creative content — translated with voice, tone, and cultural resonance intact.</div>
+      <div class="service-langs"><span class="lang-tag">Hebrew → English</span><span class="lang-tag">English → Hebrew</span></div>
+    </div>
+
+    <div class="service-card">
+      <div class="service-icon">🎓</div>
+      <div class="service-title">Academic &amp; Educational</div>
+      <div class="service-desc">Dissertations, research papers, educational materials, and academic credentials — formatted to institutional standards.</div>
+      <div class="service-langs"><span class="lang-tag">Hebrew → English</span><span class="lang-tag">English → Hebrew</span></div>
+    </div>
+
+  </div>
+</section>
+
+<!-- SAMPLE WORKS -->
+<section id="samples">
+  <div class="section-label">Portfolio</div>
+  <h2 class="section-title">Sample Works</h2>
+  <p class="section-sub">A selection of translated excerpts across domains. Full documents available upon request.</p>
+
+  <div class="samples-grid">
+
+    <div class="sample-card">
+      <div class="sample-header">
+        <div class="sample-type-icon legal">⚖️</div>
+        <div class="sample-meta">
+          <div class="sample-title">Commercial Lease Agreement</div>
+          <div class="sample-cat">Legal · Contract</div>
+        </div>
+      </div>
+      <div class="sample-body">
+        <p class="sample-excerpt">"The lessee undertakes to use the premises solely for the purpose stated herein and shall not sublet, assign, or otherwise transfer any rights under this agreement without the prior written consent of the lessor…"</p>
+      </div>
+      <div class="sample-footer">
+        <span class="sample-langs">Hebrew → English</span>
+        <a href="HebEngExamples/01-Commercial-Lease-Agreement.html" class="sample-link">View full ›</a>
+      </div>
+    </div>
+
+    <div class="sample-card">
+      <div class="sample-header">
+        <div class="sample-type-icon doc">📄</div>
+        <div class="sample-meta">
+          <div class="sample-title">Corporate Annual Report</div>
+          <div class="sample-cat">Business · Financial</div>
+        </div>
+      </div>
+      <div class="sample-body">
+        <p class="sample-excerpt">"The company recorded a 14% increase in revenue year-over-year, driven primarily by growth in the SaaS division and the successful integration of two strategic acquisitions completed in Q3…"</p>
+      </div>
+      <div class="sample-footer">
+        <span class="sample-langs">Hebrew → English</span>
+        <a href="HebEngExamples/02-Corporate-Annual-Report.html" class="sample-link">View full ›</a>
+      </div>
+    </div>
+
+    <div class="sample-card">
+      <div class="sample-header">
+        <div class="sample-type-icon medical">🩺</div>
+        <div class="sample-meta">
+          <div class="sample-title">Clinical Trial Summary</div>
+          <div class="sample-cat">Medical · Research</div>
+        </div>
+      </div>
+      <div class="sample-body">
+        <p class="sample-excerpt">"The double-blind, placebo-controlled study enrolled 312 participants across three sites. Primary endpoints included reduction in systolic blood pressure and improvement in patient-reported quality-of-life scores…"</p>
+      </div>
+      <div class="sample-footer">
+        <span class="sample-langs">Hebrew → English</span>
+        <a href="HebEngExamples/03-Clinical-Trial-Summary.html" class="sample-link">View full ›</a>
+      </div>
+    </div>
+
+    <div class="sample-card">
+      <div class="sample-header">
+        <div class="sample-type-icon tech">💻</div>
+        <div class="sample-meta">
+          <div class="sample-title">Software User Manual</div>
+          <div class="sample-cat">Technical · Software</div>
+        </div>
+      </div>
+      <div class="sample-body">
+        <p class="sample-excerpt">"To configure multi-factor authentication, navigate to Account Settings &gt; Security, and select Enable MFA. You will be prompted to scan a QR code using an authenticator app of your choice…"</p>
+      </div>
+      <div class="sample-footer">
+        <span class="sample-langs">English → Hebrew</span>
+        <a href="HebEngExamples/04-Software-User-Manual.html" class="sample-link">View full ›</a>
+      </div>
+    </div>
+
+    <div class="sample-card">
+      <div class="sample-header">
+        <div class="sample-type-icon lit">📖</div>
+        <div class="sample-meta">
+          <div class="sample-title">Short Story — Literary Excerpt</div>
+          <div class="sample-cat">Literary · Fiction</div>
+        </div>
+      </div>
+      <div class="sample-body">
+        <p class="sample-excerpt">"He stood at the edge of the market, watching the vendors fold their stalls like origami prayers. The city exhaled its daily breath of cardamom and diesel. Something in him always stilled here, between noon and silence…"</p>
+      </div>
+      <div class="sample-footer">
+        <span class="sample-langs">Hebrew → English</span>
+        <a href="HebEngExamples/05-Short-Story-Literary-Excerpt.html" class="sample-link">View full ›</a>
+      </div>
+    </div>
+
+    <div class="sample-card">
+      <div class="sample-header">
+        <div class="sample-type-icon doc">🎓</div>
+        <div class="sample-meta">
+          <div class="sample-title">Academic Research Paper</div>
+          <div class="sample-cat">Academic · Psychology</div>
+        </div>
+      </div>
+      <div class="sample-body">
+        <p class="sample-excerpt">"The findings suggest a statistically significant correlation between early bilingual exposure and enhanced executive function in school-age children (p &lt; 0.01), with effect sizes consistent with prior meta-analyses…"</p>
+      </div>
+      <div class="sample-footer">
+        <span class="sample-langs">Hebrew → English</span>
+        <a href="HebEngExamples/06-Academic-Research-Paper.html" class="sample-link">View full ›</a>
+      </div>
+    </div>
+
+  </div>
+
+</section>
+
+<!-- ABOUT -->
+<section id="about">
+  <div class="section-label">About Me</div>
+  <h2 class="section-title">Behind the Translation</h2>
+  <div class="about-grid">
+    <div class="about-text">
+      <p>
+        I'm Benjy Alper, a professional Hebrew–English translator with over a decade of hands-on experience spanning legal, medical, business, literary, and technical domains.
+      </p>
+      <p>
+        Born and raised bilingually, I bring a native-level command of both languages and a deep sensitivity to cultural nuance — the difference between a technically correct translation and one that truly resonates.
+      </p>
+      <p>
+        I work with law firms, hospitals, startups, publishers, and individual clients. Whether it's a certified document for immigration, a financial prospectus for investors, or a novel that needs to sing in a new language — I treat every project with the same rigor and care.
+      </p>
+      <div class="cert-list">
+        <div class="cert-item"><div class="cert-dot"></div> Certified translator — recognized translation credentials</div>
+        <div class="cert-item"><div class="cert-dot"></div> Trados Studio &amp; memoQ CAT tools proficiency</div>
+        <div class="cert-item"><div class="cert-dot"></div> Strict NDA and confidentiality standards</div>
+        <div class="cert-item"><div class="cert-dot"></div> Fast turnaround with no compromise on quality</div>
+      </div>
+    </div>
+    <div class="about-skills">
+      <div style="color:#94a3b8;font-size:0.85rem;margin-bottom:1rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;">Language &amp; Domain Proficiency</div>
+      <div class="skill-row">
+        <div class="skill-header"><span>Hebrew → English</span><span>98%</span></div>
+        <div class="skill-bar"><div class="skill-fill" style="width:98%"></div></div>
+      </div>
+      <div class="skill-row">
+        <div class="skill-header"><span>English → Hebrew</span><span>95%</span></div>
+        <div class="skill-bar"><div class="skill-fill" style="width:95%"></div></div>
+      </div>
+      <div class="skill-row">
+        <div class="skill-header"><span>Legal Terminology</span><span>93%</span></div>
+        <div class="skill-bar"><div class="skill-fill" style="width:93%"></div></div>
+      </div>
+      <div class="skill-row">
+        <div class="skill-header"><span>Medical &amp; Scientific</span><span>88%</span></div>
+        <div class="skill-bar"><div class="skill-fill" style="width:88%"></div></div>
+      </div>
+      <div class="skill-row">
+        <div class="skill-header"><span>Business &amp; Finance</span><span>92%</span></div>
+        <div class="skill-bar"><div class="skill-fill" style="width:92%"></div></div>
+      </div>
+      <div class="skill-row">
+        <div class="skill-header"><span>Literary &amp; Creative</span><span>90%</span></div>
+        <div class="skill-bar"><div class="skill-fill" style="width:90%"></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- TESTIMONIALS -->
+<section id="testimonials">
+  <div class="section-label">Client Words</div>
+  <h2 class="section-title">What Clients Say</h2>
+  <p class="section-sub">Trusted by businesses, legal professionals, and individuals across Israel, the US, and beyond.</p>
+  <div class="testi-grid">
+
+    <div class="testi-card">
+      <div class="testi-quote">"</div>
+      <p class="testi-text">Benjy's legal translations are flawless. He understands the weight of contractual language and never loses the original intent. Our international deals close smoother because of his work.</p>
+      <div class="testi-author">Avi R.</div>
+      <div class="testi-role">Managing Partner, Tel Aviv Law Firm</div>
+    </div>
+
+    <div class="testi-card">
+      <div class="testi-quote">"</div>
+      <p class="testi-text">We've worked with several translators over the years. Benjy is in a different league — fast, accurate, and genuinely understands financial reporting nuance in both languages.</p>
+      <div class="testi-author">Sarah K.</div>
+      <div class="testi-role">CFO, Israeli-American Tech Company</div>
+    </div>
+
+    <div class="testi-card">
+      <div class="testi-quote">"</div>
+      <p class="testi-text">My novel required someone who could hear the rhythm of Hebrew prose and carry it into English without losing the soul. Benjy did exactly that. I couldn't be happier.</p>
+      <div class="testi-author">Noa L.</div>
+      <div class="testi-role">Published Author</div>
+    </div>
+
+  </div>
+</section>
+
+<!-- CONTACT -->
+<section id="contact">
+  <div class="section-label">Let's Work Together</div>
+  <h2 class="section-title">Ready to Start?</h2>
+  <p class="section-sub">Fill in the form below and I'll get back to you with a quote and timeline — usually within 24 hours.</p>
+
+  <div class="contact-form-wrap">
+    <form class="contact-form" onsubmit="sendEmail(event)">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Your Name</label>
+          <input type="text" id="cf-name" placeholder="John Smith" required />
+        </div>
+        <div class="form-group">
+          <label>Your Email</label>
+          <input type="email" id="cf-email" placeholder="you@example.com" required />
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Subject</label>
+        <select id="cf-subject">
+          <option>Translation Enquiry</option>
+          <option>Request a Quote</option>
+          <option>Legal Translation</option>
+          <option>Medical Translation</option>
+          <option>Business / Financial Translation</option>
+          <option>Literary Translation</option>
+          <option>Technical / Software Translation</option>
+          <option>Academic Translation</option>
+          <option>Other</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Message</label>
+        <textarea id="cf-message" rows="5" placeholder="Tell me about your project — language pair, document type, word count, deadline…" required></textarea>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn-form-submit">✉️ Send Message</button>
+        <div class="email-copy-wrap">
+          <span class="email-addr">benjyalper@hotmail.com</span>
+          <button type="button" class="btn-copy" onclick="copyEmail()">Copy</button>
+          <span class="copy-confirm" id="copy-confirm">Copied!</span>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <div class="contact-details">
+    <div class="contact-item">🌍 Israel / Remote Worldwide</div>
+    <div class="contact-item">⏱️ Typical response: &lt;24 hours</div>
+  </div>
+</section>
+
+<script>
+function sendEmail(e) {
+  e.preventDefault();
+  const name    = document.getElementById('cf-name').value.trim();
+  const email   = document.getElementById('cf-email').value.trim();
+  const subject = document.getElementById('cf-subject').value;
+  const message = document.getElementById('cf-message').value.trim();
+  const body = `Name: ${name}\nEmail: ${email}\n\n${message}`;
+  const mailto = `mailto:benjyalper@hotmail.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  window.location.href = mailto;
+}
+function copyEmail() {
+  navigator.clipboard.writeText('benjyalper@hotmail.com').then(() => {
+    const c = document.getElementById('copy-confirm');
+    c.style.opacity = '1';
+    setTimeout(() => c.style.opacity = '0', 2000);
+  });
+}
+</script>
+
+<!-- FOOTER -->
+<footer>
+  <p>© 2026 <span>Benjy Alper</span> · Professional Hebrew–English Translator · All rights reserved</p>
+</footer>
+
+</body>
+</html>

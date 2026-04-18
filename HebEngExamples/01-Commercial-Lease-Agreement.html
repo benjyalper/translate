@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>Commercial Lease Agreement | Benjy Alper</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet"/>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Inter',sans-serif;background:#f8f8fc;color:#0a0a0f;line-height:1.7}
+    .topbar{background:#0a0a0f;padding:1rem 4vw;display:flex;justify-content:space-between;align-items:center}
+    .topbar-logo{color:#a5b4fc;font-family:'Playfair Display',serif;font-size:1.1rem;font-weight:700;text-decoration:none}
+    .topbar-back{color:#6b7280;font-size:0.82rem;text-decoration:none;display:flex;align-items:center;gap:0.4rem;transition:color .2s}
+    .topbar-back:hover{color:#a5b4fc}
+    .doc-header{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;padding:3rem 4vw 2.5rem}
+    .doc-category{font-size:0.72rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#c7d2fe;margin-bottom:.6rem}
+    .doc-title{font-family:'Playfair Display',serif;font-size:clamp(1.6rem,3vw,2.4rem);font-weight:700;margin-bottom:.8rem}
+    .doc-meta{display:flex;gap:1.5rem;flex-wrap:wrap}
+    .doc-meta span{font-size:.82rem;color:rgba(255,255,255,.75);display:flex;align-items:center;gap:.35rem}
+    .lang-toggle{display:flex;align-items:center;justify-content:center;gap:.5rem;padding:1.2rem 4vw;background:#fff;border-bottom:1px solid #e5e7eb;position:sticky;top:0;z-index:10;flex-wrap:wrap}
+    .lang-toggle span{font-size:.8rem;color:#6b7280;font-weight:600}
+    .toggle-btn{padding:.4rem 1.2rem;border-radius:50px;font-size:.82rem;font-weight:600;cursor:pointer;border:2px solid #4f46e5;transition:all .2s}
+    .toggle-btn.active{background:#4f46e5;color:#fff}
+    .toggle-btn:not(.active){background:transparent;color:#4f46e5}
+    .doc-body{max-width:900px;margin:0 auto;padding:3rem 4vw 5rem}
+    .bilingual-section{margin-bottom:3rem}
+    .section-title{font-family:'Playfair Display',serif;font-size:1.3rem;font-weight:700;color:#4f46e5;margin-bottom:1.5rem;padding-bottom:.6rem;border-bottom:2px solid #ede9fe}
+    .columns{display:grid;grid-template-columns:1fr 1fr;gap:2rem}
+    .col-en,.col-he{padding:1.5rem;border-radius:12px;border:1px solid #e5e7eb}
+    .col-en{background:#ffffff}
+    .col-he{background:#faf9ff;direction:rtl;text-align:right}
+    .col-label{font-size:.7rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;margin-bottom:.8rem;padding-bottom:.4rem;border-bottom:1px solid #e5e7eb}
+    .col-en .col-label{color:#4f46e5}
+    .col-he .col-label{color:#7c3aed}
+    .col-text{font-size:.92rem;line-height:1.8;color:#1c1c2e}
+    .col-he .col-text{font-family:'Arial',sans-serif;font-size:.95rem}
+    .meta-table{width:100%;border-collapse:collapse;margin-bottom:2rem;border-radius:10px;overflow:hidden;border:1px solid #e5e7eb}
+    .meta-table td{padding:.65rem 1rem;font-size:.85rem;border-bottom:1px solid #e5e7eb}
+    .meta-table td:first-child{font-weight:700;color:#4f46e5;background:#f5f3ff;width:200px}
+    .meta-table td:last-child{color:#1c1c2e;background:#fff}
+    .translator-note{background:#ede9fe;border-left:4px solid #4f46e5;border-radius:0 10px 10px 0;padding:1.2rem 1.5rem;margin-top:2.5rem;font-size:.85rem;color:#4c1d95;line-height:1.7;font-style:italic}
+    .footer-sig{text-align:center;margin-top:3rem;font-size:.82rem;color:#6b7280}
+    .footer-sig a{color:#4f46e5;text-decoration:none}
+    @media(max-width:700px){.columns{grid-template-columns:1fr}.col-he{direction:rtl}}
+    .hidden{display:none}
+  </style>
+</head>
+<body>
+<div class="topbar">
+  <a href="../index.html" class="topbar-logo">Benjy Alper</a>
+  <a href="../index.html#samples" class="topbar-back">← Back to Portfolio</a>
+</div>
+<div class="doc-header">
+  <div class="doc-category">Legal · Contract</div>
+  <div class="doc-title">Commercial Lease Agreement</div>
+  <div class="doc-meta">
+    <span>🌐 Hebrew → English</span>
+    <span>✍️ Translated by Benjy Alper</span>
+    <span>📅 2026</span>
+  </div>
+</div>
+<div class="lang-toggle">
+  <span>View:</span>
+  <button class="toggle-btn active" onclick="setView('both')" id="btn-both">Both Languages</button>
+  <button class="toggle-btn" onclick="setView('en')" id="btn-en">English Only</button>
+  <button class="toggle-btn" onclick="setView('he')" id="btn-he">Hebrew Only</button>
+</div>
+<div class="doc-body">
+
+  <table class="meta-table">
+    <tr><td>Document Type</td><td>Commercial Property Lease</td></tr>
+    <tr><td>Translation</td><td>Hebrew → English</td></tr>
+    <tr><td>Translated by</td><td>Benjy Alper, Professional Translator</td></tr>
+    <tr><td>Date</td><td>April 2026</td></tr>
+    <tr><td>Note</td><td>Client details have been anonymised for this sample.</td></tr>
+  </table>
+  
+  <div class="bilingual-section">
+    <div class="section-title">Parties to the Agreement</div>
+    <div class="columns">
+      <div class="col-en"><div class="col-label">English</div><p class="col-text" style="margin-bottom:.8rem">This Commercial Lease Agreement ("Agreement") is entered into as of the 1st day of April, 2026, by and between ABC Properties Ltd., a company duly registered under the laws of the State of Israel ("Lessor"), and XYZ Technologies Ltd. ("Lessee").</p></div>
+      <div class="col-he"><div class="col-label">עברית</div><p class="col-text" style="margin-bottom:.8rem">הסכם שכירות מסחרית זה ("ההסכם") נכרת ביום ה-1 באפריל 2026, בין חברת ABC נכסים בע"מ, חברה הרשומה כדין על פי דיני מדינת ישראל ("המשכיר"), לבין חברת XYZ טכנולוגיות בע"מ ("השוכר").</p></div>
+    </div>
+  </div>
+  
+  <div class="bilingual-section">
+    <div class="section-title">Article 1 — Premises</div>
+    <div class="columns">
+      <div class="col-en"><div class="col-label">English</div><p class="col-text" style="margin-bottom:.8rem">The Lessor hereby leases to the Lessee the commercial premises located at Suite 4B, Tower One, 88 Begin Road, Tel Aviv, comprising approximately 350 square metres of net lettable area.</p><p class="col-text" style="margin-bottom:.8rem">The Lessee undertakes to use the Premises solely for the purpose stated herein and shall not sublet, assign, or otherwise transfer any rights under this Agreement without the prior written consent of the Lessor.</p></div>
+      <div class="col-he"><div class="col-label">עברית</div><p class="col-text" style="margin-bottom:.8rem">המשכיר משכיר בזאת לשוכר את הנכס המסחרי הנמצא בחדר 4ב, מגדל ראשון, רח' בגין 88, תל אביב, המשתרע על פני כ-350 מטרים רבועים של שטח להשכרה.</p><p class="col-text" style="margin-bottom:.8rem">השוכר מתחייב להשתמש בנכס אך ורק למטרה המצוינת בהסכם זה, ולא יוכל להשכיר בשכירות משנה, להעביר או להמחות כל זכות הנובעת מהסכם זה ללא קבלת הסכמה מראש ובכתב מהמשכיר.</p></div>
+    </div>
+  </div>
+  
+  <div class="bilingual-section">
+    <div class="section-title">Article 2 — Term</div>
+    <div class="columns">
+      <div class="col-en"><div class="col-label">English</div><p class="col-text" style="margin-bottom:.8rem">The initial term shall commence on 1 April 2026 and expire on 31 March 2029, unless sooner terminated. The Lessee shall have the option to renew for one additional period of two years, subject to ninety days' written notice.</p></div>
+      <div class="col-he"><div class="col-label">עברית</div><p class="col-text" style="margin-bottom:.8rem">תקופת השכירות הראשונית תחל ביום 1 באפריל 2026 ותסתיים ביום 31 במרץ 2029, אלא אם כן תסתיים מוקדם יותר. לשוכר תהיה אופציה להאריך את ההסכם לתקופה נוספת אחת של שנתיים, בכפוף למתן הודעה בכתב תשעים יום מראש.</p></div>
+    </div>
+  </div>
+  
+  <div class="bilingual-section">
+    <div class="section-title">Article 3 — Rent</div>
+    <div class="columns">
+      <div class="col-en"><div class="col-label">English</div><p class="col-text" style="margin-bottom:.8rem">The Lessee shall pay a monthly rental of NIS 28,000 plus VAT, payable on the first business day of each month. In the event of late payment, interest shall accrue at the statutory rate.</p></div>
+      <div class="col-he"><div class="col-label">עברית</div><p class="col-text" style="margin-bottom:.8rem">השוכר ישלם דמי שכירות חודשיים בסך 28,000 ש"ח בתוספת מע"מ, שישולמו ביום העסקים הראשון של כל חודש. במקרה של איחור בתשלום, יצבור הסכום הפיגורים ריבית בשיעור הקבוע בחוק.</p></div>
+    </div>
+  </div>
+  
+  <div class="bilingual-section">
+    <div class="section-title">Article 4 — Governing Law</div>
+    <div class="columns">
+      <div class="col-en"><div class="col-label">English</div><p class="col-text" style="margin-bottom:.8rem">This Agreement shall be governed by the laws of the State of Israel. Any dispute shall be submitted to the exclusive jurisdiction of the competent courts of Tel Aviv.</p></div>
+      <div class="col-he"><div class="col-label">עברית</div><p class="col-text" style="margin-bottom:.8rem">הסכם זה יהיה כפוף לדיני מדינת ישראל. כל מחלוקת תובא לפני בית המשפט המוסמך בתל אביב, שיהיה בעל סמכות שיפוט בלעדית.</p></div>
+    </div>
+  </div>
+  <div class="translator-note">
+    <strong>Translator's Note:</strong> This document has been translated by Benjy Alper, professional Hebrew–English translator. Terminology has been carefully selected to reflect domain-specific conventions in both languages. Cultural and linguistic nuances have been preserved wherever possible.
+  </div>
+  <div class="footer-sig">
+    <p>© 2026 <a href="../index.html">Benjy Alper</a> · Professional Hebrew–English Translator · <a href="mailto:benjyalper@hotmail.com">benjyalper@hotmail.com</a></p>
+  </div>
+</div>
+<script>
+function setView(mode) {
+  document.querySelectorAll('.col-en').forEach(el => el.classList.toggle('hidden', mode === 'he'));
+  document.querySelectorAll('.col-he').forEach(el => el.classList.toggle('hidden', mode === 'en'));
+  document.querySelectorAll('.columns').forEach(el => {
+    el.style.gridTemplateColumns = mode === 'both' ? '1fr 1fr' : '1fr';
+  });
+  ['both','en','he'].forEach(m => {
+    document.getElementById('btn-'+m).classList.toggle('active', m === mode);
+  });
+}
+</script>
+</body>
+</html>
