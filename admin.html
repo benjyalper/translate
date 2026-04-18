@@ -65,6 +65,13 @@
     }
     .btn-scrape:hover{transform:translateY(-1px)}
     .btn-scrape:disabled{opacity:.5;cursor:not-allowed;transform:none}
+    .btn-back-site{
+      padding:.5rem 1.2rem;border-radius:50px;
+      background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.2);
+      color:#cbd5e1;font-size:.82rem;font-weight:600;text-decoration:none;
+      transition:background .2s,color .2s;
+    }
+    .btn-back-site:hover{background:rgba(255,255,255,0.15);color:#fff}
     .btn-logout{
       padding:.5rem 1rem;border-radius:50px;background:transparent;
       border:1px solid #374151;color:#6b7280;font-size:.8rem;font-weight:600;cursor:pointer;
@@ -204,7 +211,8 @@
 
   <div class="topbar">
     <div class="topbar-left">
-      <a href="index.html" class="topbar-logo">← Benjy Alper</a>
+      <a href="index.html" class="topbar-logo">Benjy Alper</a>
+      <a href="index.html" class="btn-back-site">← Back to Website</a>
       <span class="topbar-badge">Admin · Jobs</span>
     </div>
     <div class="topbar-right">
