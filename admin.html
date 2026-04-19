@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
   <title>Admin — Translation Jobs | Benjy Alper</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
     :root{
@@ -313,6 +314,11 @@
     }
 
     /* Trados specific */
+    .apikey-bar{display:flex;align-items:center;gap:.75rem;padding:.65rem 1rem;background:rgba(79,70,229,.08);border:1px solid rgba(79,70,229,.2);border-radius:10px;margin-bottom:1.2rem;font-size:.82rem;flex-wrap:wrap}
+    .apikey-bar .ak-label{color:#a5b4fc;font-weight:600;white-space:nowrap}
+    .apikey-bar .ak-status{flex:1;color:#94a3b8;font-family:monospace;font-size:.78rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .apikey-bar .ak-btn{background:rgba(79,70,229,.3);border:1px solid rgba(79,70,229,.5);color:#c7d2fe;border-radius:6px;padding:.3rem .8rem;cursor:pointer;font-size:.78rem;white-space:nowrap;transition:.15s}
+    .apikey-bar .ak-btn:hover{background:rgba(79,70,229,.5)}
     .trados-stats{
       background:#0d0d14;border:1px solid #1e1e2e;border-radius:8px;
       padding:.9rem 1.1rem;font-size:.85rem;
@@ -425,6 +431,13 @@
 
   <!-- ══════════════════════ TOOLS PANEL ══════════════════════ -->
   <div id="tools-panel">
+    <!-- API key bar -->
+    <div class="apikey-bar">
+      <span class="ak-label">🔑 OpenAI API Key</span>
+      <span class="ak-status" id="ak-status">Not set — tools won't work without it</span>
+      <button class="ak-btn" onclick="promptApiKey()">Set Key</button>
+      <button class="ak-btn" onclick="clearApiKey()" id="ak-clear" style="display:none">Clear</button>
+    </div>
     <div class="tools-grid">
 
       <!-- ── 🎙 TRANSCRIBER ─────────────────────────────────── -->
@@ -714,11 +727,15 @@ function esc(s) {
 }
 
 // ── SCRAPER TRIGGER ───────────────────────────────────────
-// Calls the tools server (/api/scrape) which runs scraper.js
-// AND asks GPT-4o to discover additional AI-sourced jobs.
+// Tools server base URL (used for scraper + tools panel)
+const TOOLS_API = 'http://localhost:3007';
+
+// Calls /api/scrape → runs scraper.js + GPT-4o AI discovery.
+// Server returns the full jobs array so we update the grid directly
+// (no static-file fetch needed — avoids nginx caching issues).
 async function runScraper() {
-  const btn     = document.getElementById('scrape-btn');
-  const toast   = document.getElementById('scrape-toast');
+  const btn      = document.getElementById('scrape-btn');
+  const toast    = document.getElementById('scrape-toast');
   const toastMsg = document.getElementById('toast-msg');
 
   btn.disabled = true;
@@ -729,23 +746,28 @@ async function runScraper() {
   try {
     const res  = await fetch(`${TOOLS_API}/api/scrape`, { method: 'POST' });
     const data = await res.json();
-    if (data.ok) {
-      toastMsg.textContent = `✅ Found ${data.total} jobs (${data.ai} AI + ${data.scraper} scraped) — reloading…`;
-      setTimeout(() => {
-        toast.classList.remove('show');
-        loadJobs(); // refresh the grid without full page reload
-      }, 2500);
-    } else {
-      throw new Error(data.error || 'Scraper returned an error');
+    if (!data.ok) throw new Error(data.error || 'Scraper error');
+
+    // Use jobs returned by the server directly — no extra fetch needed
+    if (data.jobs && data.jobs.length) {
+      allJobs = data.jobs;
+      document.getElementById('stat-total').textContent = allJobs.length;
+      const sources = [...new Set(allJobs.map(j => j.source))];
+      document.getElementById('stat-sources').textContent = sources.length;
+      const tod = today();
+      document.getElementById('stat-new').textContent = allJobs.filter(j => j.postedDate === tod).length;
+      document.getElementById('last-updated').textContent = 'Last scraped: ' + new Date().toLocaleString();
+      renderJobs();
     }
+
+    toastMsg.textContent = `✅ ${data.total} jobs (${data.ai} AI + ${data.scraper} scraped)`;
+    setTimeout(() => toast.classList.remove('show'), 3500);
   } catch (e) {
-    // Tools server offline — fall back to manual instructions
-    if (e.message.includes('fetch') || e.message.includes('Failed')) {
-      toastMsg.textContent = '⚠ Tools server offline — start it: cd transcriber && node server.js';
-    } else {
-      toastMsg.textContent = '⚠ ' + e.message;
-    }
-    setTimeout(() => toast.classList.remove('show'), 6000);
+    const offline = e.message.includes('fetch') || e.message.includes('Failed') || e.message.includes('NetworkError');
+    toastMsg.textContent = offline
+      ? '⚠ Tools server offline — run: cd transcriber && node server.js'
+      : '⚠ ' + e.message;
+    setTimeout(() => toast.classList.remove('show'), 7000);
   } finally {
     btn.disabled = false;
     btn.textContent = '⚡ Refresh Jobs';
@@ -757,37 +779,71 @@ if (sessionStorage.getItem('admin_auth') === '1') {
   loadJobs();
 }
 
+
 // ══════════════════════════════════════════════════════════════
-//  TOOLS PANEL
+//  TOOLS PANEL  — runs entirely in the browser, no server needed
 // ══════════════════════════════════════════════════════════════
-const TOOLS_API = 'http://localhost:3007';
+
+// ── API Key management (localStorage) ────────────────────────
+function getApiKey() { return localStorage.getItem('oai_key') || ''; }
+
+function refreshKeyUI() {
+  const k = getApiKey();
+  const status = document.getElementById('ak-status');
+  const clear  = document.getElementById('ak-clear');
+  if (k) {
+    status.textContent = 'sk-…' + k.slice(-6) + '  ✅ set';
+    status.style.color = '#6ee7b7';
+    clear.style.display = 'inline-block';
+  } else {
+    status.textContent = 'Not set — tools won\'t work without it';
+    status.style.color = '#94a3b8';
+    clear.style.display = 'none';
+  }
+}
+
+function promptApiKey() {
+  const k = prompt('Paste your OpenAI API key (sk-proj-…):\n\nStored only in your browser\'s localStorage.', getApiKey());
+  if (k === null) return;
+  if (k.trim()) { localStorage.setItem('oai_key', k.trim()); showAdminToast('✅ API key saved!', 3000); }
+  refreshKeyUI();
+}
+
+function clearApiKey() {
+  if (!confirm('Remove the saved API key?')) return;
+  localStorage.removeItem('oai_key');
+  refreshKeyUI();
+}
+
+refreshKeyUI();
 
 // ── Main tab switch ───────────────────────────────────────────
 function switchMainTab(tab) {
   const isJobs = tab === 'jobs';
-  document.querySelector('.main').style.display     = isJobs ? '' : 'none';
+  document.querySelector('.main').style.display        = isJobs ? '' : 'none';
   document.getElementById('tools-panel').style.display = isJobs ? 'none' : 'block';
   document.getElementById('tab-jobs').classList.toggle('active', isJobs);
   document.getElementById('tab-tools').classList.toggle('active', !isJobs);
-  document.getElementById('topbar-badge').textContent = isJobs ? 'Admin · Jobs' : 'Admin · Tools';
-  if (!isJobs) checkToolsServer();
+  document.getElementById('topbar-badge').textContent  = isJobs ? 'Admin · Jobs' : 'Admin · Tools';
 }
 
-async function checkToolsServer() {
-  try {
-    await fetch(TOOLS_API + '/api/status');
-  } catch(e) {
-    showAdminToast('⚠️ Tools server offline. Run: cd translate/transcriber && node server.js', 8000);
-  }
+// ── Shared utility ────────────────────────────────────────────
+function showAdminToast(msg, duration=5000) {
+  const t   = document.getElementById('scrape-toast');
+  const lbl = document.getElementById('toast-msg');
+  const sp  = t.querySelector('.spinner');
+  if (sp) sp.style.display = 'none';
+  lbl.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => { t.classList.remove('show'); if (sp) sp.style.display = ''; }, duration);
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  🎙 TRANSCRIBER
+//  🎙 TRANSCRIBER  — calls Whisper API directly from browser
 // ═══════════════════════════════════════════════════════════════
 let tcLang = 'auto', tcRecording = false, tcMediaRecorder = null;
 let tcChunks = [], tcBlob = null, tcFile = null;
-let tcTimerInterval = null, tcTimerSec = 0;
-let tcActiveTab = 'record';
+let tcTimerInterval = null, tcTimerSec = 0, tcActiveTab = 'record';
 
 function tcSwitchTab(tab, btn) {
   tcActiveTab = tab;
@@ -807,14 +863,10 @@ function tcSetLang(lang, el) {
 function tcOnFile(input) {
   tcFile = input.files[0];
   const lbl = document.getElementById('tc-file-label');
-  if (tcFile) {
-    lbl.style.display = 'block';
-    lbl.textContent   = `📎 ${tcFile.name} (${(tcFile.size/1024/1024).toFixed(2)} MB)`;
-  }
+  if (tcFile) { lbl.style.display='block'; lbl.textContent=`📎 ${tcFile.name} (${(tcFile.size/1024/1024).toFixed(2)} MB)`; }
   tcUpdateBtn();
 }
 
-// Drag & drop for transcriber
 (function(){
   const dz = document.getElementById('tc-drop');
   if (!dz) return;
@@ -823,8 +875,8 @@ function tcOnFile(input) {
   dz.addEventListener('drop', e => {
     e.preventDefault(); dz.classList.remove('drag-over');
     const f = e.dataTransfer.files[0];
-    if (f) { tcFile = f; document.getElementById('tc-file-label').style.display='block';
-              document.getElementById('tc-file-label').textContent=`📎 ${f.name}`; tcUpdateBtn(); }
+    if (f) { tcFile=f; document.getElementById('tc-file-label').style.display='block';
+             document.getElementById('tc-file-label').textContent=`📎 ${f.name}`; tcUpdateBtn(); }
   });
 })();
 
@@ -863,61 +915,66 @@ function tcUpdateTimer() {
 }
 
 function tcUpdateBtn() {
-  const hasAudio = tcActiveTab === 'record' ? !!tcBlob : !!tcFile;
-  document.getElementById('tc-btn').disabled = !hasAudio;
+  document.getElementById('tc-btn').disabled = !(tcActiveTab==='record' ? tcBlob : tcFile);
 }
 
 async function tcTranscribe() {
+  const apiKey = getApiKey();
+  if (!apiKey) { promptApiKey(); return; }
   const src = tcActiveTab === 'record' ? tcBlob : tcFile;
   if (!src) return;
-  const btn = document.getElementById('tc-btn');
+
+  const btn  = document.getElementById('tc-btn');
   const prog = document.getElementById('tc-prog');
   const bar  = document.getElementById('tc-prog-bar');
   const txt  = document.getElementById('tc-prog-text');
-  btn.disabled = true;
-  prog.classList.add('show');
+  btn.disabled = true; prog.classList.add('show');
   document.getElementById('tc-results').style.display = 'none';
-
   let pct = 0;
   const fake = setInterval(() => { pct = Math.min(pct + (pct<60?3:pct<85?1:.3), 90); bar.style.width=pct+'%'; }, 400);
 
   try {
-    const ext = tcActiveTab === 'record'
+    const ext  = tcActiveTab === 'record'
       ? (src.type.includes('ogg') ? '.ogg' : src.type.includes('mp4') ? '.m4a' : '.webm')
-      : '.' + ((tcFile.name.split('.').pop()) || 'webm');
+      : '.' + (tcFile.name.split('.').pop() || 'webm');
     const name = tcActiveTab === 'record' ? `recording${ext}` : tcFile.name;
 
-    txt.textContent = 'Transcribing with Whisper AI…';
+    txt.textContent = 'Sending to Whisper AI…';
     const fd = new FormData();
-    fd.append('audio', src, name);
-    fd.append('language', tcLang);
+    fd.append('file', src, name);
+    fd.append('model', 'whisper-1');
+    fd.append('response_format', 'verbose_json');
+    fd.append('timestamp_granularities[]', 'segment');
+    if (tcLang !== 'auto') fd.append('language', tcLang);
 
-    const res  = await fetch(TOOLS_API + '/api/transcribe', { method:'POST', body: fd });
+    const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + apiKey },
+      body: fd,
+    });
     const data = await res.json();
     clearInterval(fake);
-    if (!res.ok || !data.ok) throw new Error(data.error || 'Transcription failed');
+    if (!res.ok) throw new Error(data.error?.message || 'Whisper API error ' + res.status);
 
-    bar.style.width = '100%';
-    txt.textContent = '✅ Done!';
+    bar.style.width = '100%'; txt.textContent = '✅ Done!';
     setTimeout(() => prog.classList.remove('show'), 1500);
     tcShowResults(data);
   } catch(err) {
-    clearInterval(fake);
-    prog.classList.remove('show');
+    clearInterval(fake); prog.classList.remove('show');
     showAdminToast('❌ ' + err.message);
-  } finally {
-    btn.disabled = false;
-  }
+  } finally { btn.disabled = false; }
 }
 
 function tcShowResults(data) {
-  const { segments, language, duration, fullText, docFile } = data;
-  const isHe = language === 'he' || language === 'hebrew';
+  const segments = data.segments || [];
+  const language = data.language || '';
+  const duration = data.duration || (segments.length ? segments[segments.length-1].end : 0);
+  const isHe = /^he/.test(language);
   const langMap = { he:'Hebrew 🇮🇱', en:'English 🇺🇸' };
 
   document.getElementById('tc-badges').innerHTML = `
-    <span class="tres-badge tb-lang">${langMap[language] || language}</span>
-    <span class="tres-badge tb-dur">⏱ ${tcFmt(duration||0)}</span>
+    <span class="tres-badge tb-lang">${langMap[language] || language || 'Auto'}</span>
+    <span class="tres-badge tb-dur">⏱ ${tcFmt(duration)}</span>
     <span class="tres-badge tb-seg">📑 ${segments.length} segments</span>`;
 
   document.getElementById('tc-tbody').innerHTML = segments.map(s => `
@@ -927,22 +984,33 @@ function tcShowResults(data) {
       <td class="${isHe?'trtl':''}">${esc(s.text.trim())}</td>
     </tr>`).join('');
 
+  const fullText = data.text || segments.map(s=>s.text.trim()).join(' ');
   const ft = document.getElementById('tc-fulltext');
-  ft.textContent = fullText || segments.map(s=>s.text.trim()).join(' ');
-  ft.style.direction  = isHe ? 'rtl' : 'ltr';
-  ft.style.textAlign  = isHe ? 'right' : 'left';
+  ft.textContent = fullText;
+  ft.style.direction = isHe ? 'rtl' : 'ltr';
+  ft.style.textAlign = isHe ? 'right' : 'left';
 
-  document.getElementById('tc-dl').href = TOOLS_API + '/api/download/' + encodeURIComponent(docFile);
+  // Build Word-compatible HTML file for download
+  const rows = segments.map(s =>
+    `<tr><td class="ts">${tcFmt(s.start)}</td><td class="ts">${tcFmt(s.end)}</td><td${isHe?' dir="rtl" style="text-align:right"':''}>${s.text.trim().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</td></tr>`
+  ).join('');
+  const dateStr = new Date().toLocaleString();
+  const htmlDoc = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>Transcription</title><style>body{font-family:Arial,sans-serif;font-size:11pt}h2{color:#1e3a8a}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:6px 10px;font-size:10pt}.ts{text-align:center;white-space:nowrap;color:#374151}.meta{color:#6b7280;font-size:9.5pt;margin-bottom:12px}</style></head><body><h2>&#127897; Transcription</h2><p class="meta">Language: ${language||'auto'} &nbsp;|&nbsp; Duration: ${tcFmt(duration)} &nbsp;|&nbsp; Segments: ${segments.length} &nbsp;|&nbsp; Date: ${dateStr}</p><table><thead><tr><th>Start</th><th>End</th><th>Transcript</th></tr></thead><tbody>${rows}</tbody></table><hr><p style="color:#6b7280;font-size:9pt;text-align:center">&#8212; End of Transcription &#8212;</p></body></html>`;
+  const blob = new Blob(['\ufeff' + htmlDoc], { type: 'application/msword' });
+  const url  = URL.createObjectURL(blob);
+  const dl   = document.getElementById('tc-dl');
+  dl.href = url; dl.download = 'Transcription.doc';
   document.getElementById('tc-results').style.display = 'block';
 }
 
 function tcFmt(sec) {
+  sec = sec || 0;
   const h=Math.floor(sec/3600), m=Math.floor((sec%3600)/60), s=Math.floor(sec%60);
   return [h,m,s].map(v=>String(v).padStart(2,'0')).join(':');
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  🔄 TRADOS
+//  🔄 TRADOS — in-browser via JSZip + GPT-4o. No server needed.
 // ═══════════════════════════════════════════════════════════════
 let trFile = null, trLang = 'he-IL';
 
@@ -962,7 +1030,6 @@ function trOnFile(input) {
   }
 }
 
-// Drag & drop for Trados
 (function(){
   const dz = document.getElementById('tr-drop');
   if (!dz) return;
@@ -973,75 +1040,178 @@ function trOnFile(input) {
     const f = e.dataTransfer.files[0];
     if (f) {
       trFile = f;
-      document.getElementById('tr-file-label').style.display='block';
-      document.getElementById('tr-file-label').textContent=`📦 ${f.name} (${(f.size/1024/1024).toFixed(2)} MB)`;
+      document.getElementById('tr-file-label').style.display = 'block';
+      document.getElementById('tr-file-label').textContent   = `📦 ${f.name} (${(f.size/1024/1024).toFixed(2)} MB)`;
       document.getElementById('tr-btn').disabled = false;
     }
   });
 })();
 
+// TRADOS helpers (ported from server.js)
+function trXmlToPlaceholders(xml) { return xml.replace(/<x\s+id="(\d+)"\s*\/>/g, (_, id) => `{{TAG_${id}}}`); }
+function trPlaceholdersToXml(text) { return text.replace(/\{\{TAG_(\d+)\}\}/g, (_, id) => `<x id="${id}"/>`); }
+function trIsTranslatable(text) { return text.replace(/\{\{TAG_\d+\}\}/g,'').trim().length > 0; }
+
+function trExtractSegments(content) {
+  const segs = [];
+  const unitRe = /<trans-unit\s[^>]*id="([^"]+)"[^>]*>([\s\S]*?)<\/trans-unit>/g;
+  let um;
+  while ((um = unitRe.exec(content)) !== null) {
+    const unitId = um[1], unitBody = um[2];
+    const srcRe = /<mrk\s+mtype="seg"\s+mid="(\d+)">([\s\S]*?)<\/mrk>/g;
+    let sm;
+    while ((sm = srcRe.exec(unitBody)) !== null) {
+      const mid = sm[1], rawSrc = sm[2];
+      const sourceText = trXmlToPlaceholders(rawSrc);
+      let targetText = '';
+      const tgtBlock = unitBody.match(/<target>([\s\S]*?)<\/target>/);
+      if (tgtBlock) {
+        const tgtMrk = tgtBlock[1].match(new RegExp(`<mrk\\s+mtype="seg"\\s+mid="${mid}">(([\\s\\S]*?))<\\/mrk>`));
+        if (tgtMrk) targetText = tgtMrk[2].trim();
+      }
+      segs.push({ unitId, mid, rawSrc, sourceText, targetText });
+    }
+  }
+  return segs;
+}
+
+function trInsertTranslation(content, seg, hebrewText) {
+  const xmlText = trPlaceholdersToXml(hebrewText);
+  const filled  = `<mrk mtype="seg" mid="${seg.mid}">${xmlText}</mrk>`;
+  let out = content.replace(`<mrk mtype="seg" mid="${seg.mid}"/>`, filled);
+  if (out === content) {
+    out = content.replace(new RegExp(`<mrk\\s+mtype="seg"\\s+mid="${seg.mid}"\\s*>\\s*<\\/mrk>`), filled);
+  }
+  return out.replace(
+    new RegExp(`(<sdl:seg\\s+id="${seg.mid}")(\\s*\\/?>)`),
+    (m, open, close) => m.includes('conf=') ? m : `${open} conf="Translated"${close}`
+  );
+}
+
+async function trTranslateBatch(texts, apiKey) {
+  const numbered = texts.map((t, i) => `${i+1}. ${t}`).join('\n');
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gpt-4o', temperature: 0.2,
+      messages: [
+        { role: 'system', content: 'You are a professional translator. Translate each numbered item into Hebrew (he-IL).\nRules:\n- Preserve ALL placeholders exactly: {{TAG_0}}, {{TAG_1}}, etc.\n- Output ONLY the numbered translations, one per line, same order\n- Use formal Hebrew suitable for professional documents\n- No explanations or notes' },
+        { role: 'user',   content: numbered }
+      ]
+    })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error?.message || 'GPT-4o error ' + res.status);
+  const lines = data.choices[0].message.content.trim().split('\n').filter(l => l.trim());
+  const out = [];
+  for (const line of lines) { const m = line.match(/^\d+\.\s*([\s\S]+)$/); if (m) out.push(m[1].trim()); }
+  while (out.length < texts.length) out.push('');
+  return out;
+}
+
+async function trProcessXliff(content, apiKey, onProgress) {
+  const segs  = trExtractSegments(content);
+  const empty = segs.filter(s => !s.targetText && trIsTranslatable(s.sourceText));
+  if (empty.length === 0) return { translated: 0, total: segs.length, content };
+  const BATCH = 20;
+  let translated = 0;
+  for (let i = 0; i < empty.length; i += BATCH) {
+    const batch = empty.slice(i, i + BATCH);
+    if (onProgress) onProgress(i, empty.length);
+    const translations = await trTranslateBatch(batch.map(s => s.sourceText), apiKey);
+    for (let j = 0; j < batch.length; j++) {
+      if (translations[j]) { content = trInsertTranslation(content, batch[j], translations[j]); translated++; }
+    }
+    if (i + BATCH < empty.length) await new Promise(r => setTimeout(r, 500));
+  }
+  return { translated, total: segs.length, content };
+}
+
 async function trTranslate() {
+  const apiKey = getApiKey();
+  if (!apiKey) { promptApiKey(); return; }
   if (!trFile) return;
+
   const btn  = document.getElementById('tr-btn');
   const prog = document.getElementById('tr-prog');
   const bar  = document.getElementById('tr-prog-bar');
   const txt  = document.getElementById('tr-prog-text');
   const err  = document.getElementById('tr-error');
-
-  btn.disabled = true;
-  prog.classList.add('show');
-  err.style.display = 'none';
+  btn.disabled = true; prog.classList.add('show'); err.style.display = 'none';
   document.getElementById('tr-results').style.display = 'none';
-
-  let pct = 0;
-  const fake = setInterval(() => { pct = Math.min(pct + (pct<40?2:pct<75?0.8:.2), 90); bar.style.width=pct+'%'; }, 800);
-  txt.textContent = 'Uploading package…';
+  bar.style.width = '5%'; txt.textContent = 'Reading package…';
 
   try {
-    const fd = new FormData();
-    fd.append('sdlppx', trFile, trFile.name);
-    fd.append('lang', trLang);
+    const arrayBuf = await trFile.arrayBuffer();
+    const zip = await JSZip.loadAsync(arrayBuf);
+    bar.style.width = '15%';
 
-    txt.textContent = 'Translating segments with GPT-4o… (may take a few minutes)';
-    const res  = await fetch(TOOLS_API + '/api/trados', { method:'POST', body: fd });
-    const data = await res.json();
-    clearInterval(fake);
+    // Find SDLXLIFF files in target lang folder
+    const langPrefix = trLang.split('-')[0];
+    const xliffEntries = [];
+    zip.forEach((relPath, entry) => {
+      if (!entry.dir && relPath.endsWith('.sdlxliff')) {
+        const topDir = relPath.split('/')[0];
+        if (topDir === trLang || topDir === langPrefix || topDir.toLowerCase().startsWith(langPrefix)) {
+          xliffEntries.push({ path: relPath, entry });
+        }
+      }
+    });
 
-    if (!res.ok || !data.ok) throw new Error(data.error || 'Translation failed');
+    if (xliffEntries.length === 0) {
+      const dirs = new Set();
+      zip.forEach((p) => dirs.add(p.split('/')[0]));
+      throw new Error(`No .sdlxliff files found for "${trLang}". Available: ${[...dirs].join(', ')}`);
+    }
 
-    bar.style.width = '100%';
-    txt.textContent = '✅ Done!';
+    txt.textContent = `Found ${xliffEntries.length} SDLXLIFF file(s). Translating with GPT-4o…`;
+    bar.style.width = '20%';
+
+    // Copy all original files into output zip
+    const outZip = new JSZip();
+    const copyPromises = [];
+    zip.forEach((relPath, entry) => {
+      if (!entry.dir) copyPromises.push(entry.async('arraybuffer').then(ab => outZip.file(relPath, ab)));
+    });
+    await Promise.all(copyPromises);
+
+    let totalTranslated = 0, totalSegments = 0;
+    for (let fi = 0; fi < xliffEntries.length; fi++) {
+      const { path: relPath, entry } = xliffEntries[fi];
+      const rawContent = await entry.async('string');
+      const { translated, total, content: newContent } = await trProcessXliff(rawContent, apiKey, (done, all) => {
+        const base = 20 + (fi / xliffEntries.length) * 70;
+        const inc  = (done / all) * (70 / xliffEntries.length);
+        bar.style.width = (base + inc) + '%';
+        txt.textContent = `File ${fi+1}/${xliffEntries.length}: segments ${done}–${Math.min(done+20,all)} of ${all}…`;
+      });
+      totalTranslated += translated; totalSegments += total;
+      outZip.file(relPath, newContent);
+    }
+
+    bar.style.width = '95%'; txt.textContent = 'Building return package…';
+    const outBlob = await outZip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+    const outUrl  = URL.createObjectURL(outBlob);
+    bar.style.width = '100%'; txt.textContent = '✅ Done!';
     setTimeout(() => prog.classList.remove('show'), 1500);
 
     document.getElementById('tr-badges').innerHTML = `
-      <span class="tres-badge tb-ok">✅ ${data.translated} translated</span>
-      <span class="tres-badge tb-seg">📑 ${data.total} total</span>
-      <span class="tres-badge tb-lang">📄 ${data.files} file(s)</span>`;
-
+      <span class="tres-badge tb-ok">✅ ${totalTranslated} translated</span>
+      <span class="tres-badge tb-seg">📑 ${totalSegments} total</span>
+      <span class="tres-badge tb-lang">📄 ${xliffEntries.length} file(s)</span>`;
     document.getElementById('tr-stats').innerHTML =
-      `Translated <span>${data.translated}</span> of <span>${data.total}</span> segments across <span>${data.files}</span> SDLXLIFF file(s) → ready to import into Trados Studio.`;
+      `Translated <span>${totalTranslated}</span> of <span>${totalSegments}</span> segments across <span>${xliffEntries.length}</span> SDLXLIFF file(s) → ready to import into Trados Studio.`;
 
-    document.getElementById('tr-dl').href = TOOLS_API + '/api/download/' + encodeURIComponent(data.docFile);
+    const dl = document.getElementById('tr-dl');
+    dl.href = outUrl;
+    dl.download = trFile.name.replace(/\.sdlppx$/i,'') + '_TRANSLATED.sdlrpx';
     document.getElementById('tr-results').style.display = 'block';
 
   } catch(e) {
-    clearInterval(fake);
     prog.classList.remove('show');
-    err.style.display = 'block';
-    err.textContent   = '❌ ' + e.message;
-  } finally {
-    btn.disabled = false;
-  }
-}
-
-function showAdminToast(msg, duration=5000) {
-  const t   = document.getElementById('scrape-toast');
-  const lbl = document.getElementById('toast-msg');
-  const sp  = t.querySelector('.spinner');
-  if (sp) sp.style.display = 'none';
-  lbl.textContent = msg;
-  t.classList.add('show');
-  setTimeout(() => { t.classList.remove('show'); if(sp) sp.style.display=''; }, duration);
+    err.style.display = 'block'; err.textContent = '❌ ' + e.message;
+  } finally { btn.disabled = false; }
 }
 </script>
 </body>

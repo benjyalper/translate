@@ -518,6 +518,7 @@ app.post('/api/scrape', async (req, res) => {
     total: merged.length,
     scraper: scraperJobs.length,
     ai: aiJobs.length,
+    jobs: merged,   // full array so admin can update grid without a static-file fetch
     log,
   });
 });
