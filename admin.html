@@ -714,20 +714,41 @@ function esc(s) {
 }
 
 // ── SCRAPER TRIGGER ───────────────────────────────────────
-// Because this is a static site, "Refresh Jobs" opens a helper page
-// instructing how to run the scraper. In a server environment this
-// could hit an API endpoint.
-function runScraper() {
-  const btn = document.getElementById('scrape-btn');
-  const toast = document.getElementById('scrape-toast');
+// Calls the tools server (/api/scrape) which runs scraper.js
+// AND asks GPT-4o to discover additional AI-sourced jobs.
+async function runScraper() {
+  const btn     = document.getElementById('scrape-btn');
+  const toast   = document.getElementById('scrape-toast');
   const toastMsg = document.getElementById('toast-msg');
 
-  // Show instructions
-  const msg = `To refresh jobs, run this command in your terminal:\n\ncd "${window.location.pathname.replace('/admin.html','').replace(/\//g,'\\').slice(1)}\\JobScraper"\nnode scraper.js\n\nThen reload this page.`;
-  if (confirm('Run the scraper now?\n\n' + msg + '\n\nClick OK to open the instructions, or Cancel to dismiss.')) {
-    toastMsg.textContent = 'Refreshing after scraper runs — reload the page when done.';
-    toast.classList.add('show');
-    setTimeout(() => toast.classList.remove('show'), 5000);
+  btn.disabled = true;
+  btn.textContent = '⏳ Scraping…';
+  toastMsg.textContent = '🤖 Running scraper + AI job discovery…';
+  toast.classList.add('show');
+
+  try {
+    const res  = await fetch(`${TOOLS_API}/api/scrape`, { method: 'POST' });
+    const data = await res.json();
+    if (data.ok) {
+      toastMsg.textContent = `✅ Found ${data.total} jobs (${data.ai} AI + ${data.scraper} scraped) — reloading…`;
+      setTimeout(() => {
+        toast.classList.remove('show');
+        loadJobs(); // refresh the grid without full page reload
+      }, 2500);
+    } else {
+      throw new Error(data.error || 'Scraper returned an error');
+    }
+  } catch (e) {
+    // Tools server offline — fall back to manual instructions
+    if (e.message.includes('fetch') || e.message.includes('Failed')) {
+      toastMsg.textContent = '⚠ Tools server offline — start it: cd transcriber && node server.js';
+    } else {
+      toastMsg.textContent = '⚠ ' + e.message;
+    }
+    setTimeout(() => toast.classList.remove('show'), 6000);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '⚡ Refresh Jobs';
   }
 }
 

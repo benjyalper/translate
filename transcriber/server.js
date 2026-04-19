@@ -7,6 +7,7 @@ const AdmZip   = require('adm-zip');
 const os       = require('os');
 const fs       = require('fs');
 const path     = require('path');
+const { spawn } = require('child_process');
 const {
   Document, Packer, Paragraph, Table, TableRow, TableCell,
   TextRun, HeadingLevel, WidthType, AlignmentType, ShadingType, BorderStyle
@@ -394,6 +395,131 @@ app.get('/api/download/:filename', (req, res) => {
     ? 'Transcription.docx'
     : safe.replace(/^.*_TRANSLATED_\d+/, 'Translated').replace('.sdlrpx', '_return.sdlrpx');
   res.download(filePath, friendlyName);
+});
+
+// ── POST /api/scrape ──────────────────────────────────────────
+// Runs the JobScraper AND calls GPT-4o to discover extra AI-sourced jobs.
+// Merges both into jobs-data.json and returns stats.
+
+const JOBS_FILE    = path.join(__dirname, '..', 'JobScraper', 'jobs-data.json');
+const SCRAPER_FILE = path.join(__dirname, '..', 'JobScraper', 'scraper.js');
+
+// Run node scraper.js and resolve when done
+function runScraperProcess() {
+  return new Promise((resolve, reject) => {
+    const proc = spawn('node', [SCRAPER_FILE], {
+      cwd: path.dirname(SCRAPER_FILE),
+      env: process.env,
+    });
+    let out = '';
+    proc.stdout.on('data', d => { out += d.toString(); });
+    proc.stderr.on('data', d => { out += d.toString(); });
+    proc.on('close', code => {
+      if (code === 0) resolve(out);
+      else reject(new Error('Scraper exited with code ' + code + '\n' + out));
+    });
+    proc.on('error', reject);
+  });
+}
+
+// Ask GPT-4o to discover Hebrew translation jobs it knows about
+async function getAIJobs() {
+  const today = new Date().toISOString().slice(0, 10);
+  const prompt = `You are a professional job aggregator specialising in Hebrew-English translation work.
+
+List 20 real, active Hebrew-English translation / localisation / transcription jobs from well-known hiring platforms (ProZ, Upwork, LinkedIn, TranslatorsCafe, Gengo, Unbabel, Smartcat, etc.).
+
+Return ONLY a valid JSON array — no markdown, no explanation. Each element must match exactly:
+{
+  "id": "ai-<company-slug>-<role-slug>",
+  "title": "Job title",
+  "company": "Company or client name",
+  "location": "Remote or city",
+  "type": "Remote / Freelance / Full-time / Part-time",
+  "description": "One-sentence description (max 200 chars)",
+  "url": "https://real-url-to-job-or-platform",
+  "source": "AI Discovery",
+  "postedDate": "${today}",
+  "tags": ["hebrew","translation"],
+  "salary": "rate if known, else empty string"
+}
+
+Focus on variety: document translation, legal/medical, subtitling, interpreting, transcription. Real companies only.`;
+
+  const res = await axios.post('https://api.openai.com/v1/chat/completions', {
+    model: 'gpt-4o',
+    temperature: 0.4,
+    messages: [{ role: 'user', content: prompt }],
+  }, {
+    headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+    timeout: 60000,
+  });
+
+  const text = res.data.choices[0].message.content.trim()
+    .replace(/^```json\s*/i, '').replace(/```\s*$/, '');
+  const jobs = JSON.parse(text);
+  return Array.isArray(jobs) ? jobs : [];
+}
+
+app.post('/api/scrape', async (req, res) => {
+  console.log('🔍 /api/scrape — running scraper + AI discovery…');
+  const log = [];
+
+  // 1. Run the regular scraper
+  let scraperJobs = [];
+  try {
+    const out = await runScraperProcess();
+    log.push('✓ scraper.js finished');
+    console.log(out);
+    // scraper already wrote to jobs-data.json
+    if (fs.existsSync(JOBS_FILE)) {
+      const d = JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8'));
+      scraperJobs = d.jobs || [];
+    }
+  } catch (e) {
+    log.push('⚠ scraper.js error: ' + e.message);
+    console.warn(e.message);
+    if (fs.existsSync(JOBS_FILE)) {
+      const d = JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8'));
+      scraperJobs = d.jobs || [];
+    }
+  }
+
+  // 2. AI-discovered jobs via GPT-4o
+  let aiJobs = [];
+  try {
+    aiJobs = await getAIJobs();
+    log.push(`✓ GPT-4o returned ${aiJobs.length} AI-discovered jobs`);
+    console.log(`  AI jobs: ${aiJobs.length}`);
+  } catch (e) {
+    log.push('⚠ AI discovery error: ' + e.message);
+    console.warn('AI jobs error:', e.message);
+  }
+
+  // 3. Merge — AI jobs first, then scraper jobs; deduplicate by id
+  const seen = new Set();
+  const merged = [...aiJobs, ...scraperJobs].filter(j => {
+    if (!j || !j.id) return false;
+    if (seen.has(j.id)) return false;
+    seen.add(j.id);
+    return true;
+  }).sort((a, b) => new Date(b.postedDate) - new Date(a.postedDate));
+
+  const output = {
+    lastUpdated: new Date().toISOString(),
+    count: merged.length,
+    jobs: merged,
+  };
+  fs.writeFileSync(JOBS_FILE, JSON.stringify(output, null, 2));
+  log.push(`✓ Saved ${merged.length} total jobs to jobs-data.json`);
+
+  res.json({
+    ok: true,
+    total: merged.length,
+    scraper: scraperJobs.length,
+    ai: aiJobs.length,
+    log,
+  });
 });
 
 // ── GET /api/status ───────────────────────────────────────────
