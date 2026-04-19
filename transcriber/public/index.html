@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>🎙 Audio Transcriber — Hebrew / English</title>
+<style>
+  :root{
+    --bg:#0a0a0f;--surface:#13131a;--surface2:#1c1c28;--border:#2a2a3a;
+    --accent:#4f46e5;--accent2:#7c3aed;--gold:#f59e0b;
+    --ink:#f1f5f9;--muted:#94a3b8;--success:#10b981;--error:#ef4444;
+    --radius:14px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+
+  /* ── HEADER ── */
+  header{
+    background:linear-gradient(135deg,#1e1b4b 0%,#0f0f1a 100%);
+    border-bottom:1px solid var(--border);
+    padding:1.2rem 2rem;display:flex;align-items:center;gap:1rem;
+  }
+  .logo{font-size:1.6rem}
+  header h1{font-size:1.25rem;font-weight:700;letter-spacing:-.02em}
+  header p{font-size:.8rem;color:var(--muted);margin-top:.1rem}
+  .back-link{
+    margin-left:auto;padding:.5rem 1.2rem;border-radius:50px;
+    background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.15);
+    color:var(--ink);font-size:.82rem;text-decoration:none;
+    transition:background .2s;
+  }
+  .back-link:hover{background:rgba(255,255,255,.12)}
+
+  /* ── MAIN LAYOUT ── */
+  main{max-width:900px;margin:0 auto;padding:2.5rem 1.5rem}
+
+  /* ── CARD ── */
+  .card{
+    background:var(--surface);border:1px solid var(--border);
+    border-radius:var(--radius);padding:2rem;margin-bottom:1.5rem;
+  }
+  .card-title{
+    font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;
+    color:var(--accent);margin-bottom:1.2rem;
+  }
+
+  /* ── TABS (Record / Upload) ── */
+  .tabs{display:flex;gap:.5rem;margin-bottom:1.5rem}
+  .tab{
+    flex:1;padding:.7rem;border-radius:10px;border:1px solid var(--border);
+    background:transparent;color:var(--muted);font-size:.9rem;font-weight:600;
+    cursor:pointer;transition:all .2s;text-align:center;
+  }
+  .tab.active{
+    background:linear-gradient(135deg,var(--accent),var(--accent2));
+    color:#fff;border-color:transparent;
+  }
+  .tab-panel{display:none}
+  .tab-panel.active{display:block}
+
+  /* ── RECORD UI ── */
+  .record-center{text-align:center;padding:1rem 0}
+  .record-btn{
+    width:90px;height:90px;border-radius:50%;border:none;cursor:pointer;
+    background:linear-gradient(135deg,var(--accent),var(--accent2));
+    font-size:2rem;display:inline-flex;align-items:center;justify-content:center;
+    box-shadow:0 0 0 0 rgba(79,70,229,.4);transition:transform .15s;
+  }
+  .record-btn:hover{transform:scale(1.05)}
+  .record-btn.recording{
+    background:linear-gradient(135deg,#dc2626,#b91c1c);
+    animation:pulse 1.5s infinite;
+  }
+  @keyframes pulse{
+    0%{box-shadow:0 0 0 0 rgba(220,38,38,.5)}
+    70%{box-shadow:0 0 0 18px rgba(220,38,38,0)}
+    100%{box-shadow:0 0 0 0 rgba(220,38,38,0)}
+  }
+  .timer{font-size:1.5rem;font-weight:700;font-variant-numeric:tabular-nums;
+         color:var(--ink);margin:.8rem 0 .3rem;font-family:monospace}
+  .record-hint{font-size:.8rem;color:var(--muted)}
+
+  /* Waveform bars */
+  .waveform{display:flex;align-items:center;justify-content:center;gap:3px;
+            height:36px;margin:.6rem 0}
+  .wave-bar{width:4px;border-radius:2px;background:var(--accent);
+            animation:none;min-height:4px}
+  .recording .wave-bar{animation:wave 1s ease-in-out infinite}
+  .wave-bar:nth-child(1){animation-delay:.0s}
+  .wave-bar:nth-child(2){animation-delay:.1s}
+  .wave-bar:nth-child(3){animation-delay:.2s}
+  .wave-bar:nth-child(4){animation-delay:.3s}
+  .wave-bar:nth-child(5){animation-delay:.4s}
+  .wave-bar:nth-child(6){animation-delay:.3s}
+  .wave-bar:nth-child(7){animation-delay:.2s}
+  .wave-bar:nth-child(8){animation-delay:.1s}
+  .wave-bar:nth-child(9){animation-delay:.0s}
+  @keyframes wave{
+    0%,100%{height:4px}
+    50%{height:28px}
+  }
+
+  /* ── UPLOAD ZONE ── */
+  .drop-zone{
+    border:2px dashed var(--border);border-radius:12px;
+    padding:2.5rem;text-align:center;cursor:pointer;
+    transition:all .2s;position:relative;
+  }
+  .drop-zone:hover,.drop-zone.drag-over{
+    border-color:var(--accent);background:rgba(79,70,229,.06)
+  }
+  .drop-zone input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+  .drop-icon{font-size:2.5rem;margin-bottom:.7rem}
+  .drop-title{font-weight:600;margin-bottom:.3rem}
+  .drop-sub{font-size:.8rem;color:var(--muted)}
+  .file-selected{
+    margin-top:1rem;padding:.6rem 1rem;background:rgba(79,70,229,.15);
+    border-radius:8px;font-size:.85rem;color:var(--accent);display:none;
+  }
+
+  /* ── LANGUAGE SELECTOR ── */
+  .lang-row{display:flex;gap:.7rem;align-items:center;margin-bottom:1.5rem;flex-wrap:wrap}
+  .lang-label{font-size:.82rem;color:var(--muted);white-space:nowrap}
+  .lang-btn{
+    padding:.45rem 1rem;border-radius:50px;border:1px solid var(--border);
+    background:transparent;color:var(--muted);font-size:.82rem;cursor:pointer;
+    transition:all .2s;
+  }
+  .lang-btn.active{
+    background:var(--accent);color:#fff;border-color:transparent
+  }
+
+  /* ── TRANSCRIBE BTN ── */
+  .btn-transcribe{
+    width:100%;padding:1rem;border-radius:50px;border:none;cursor:pointer;
+    background:linear-gradient(135deg,var(--accent),var(--accent2));
+    color:#fff;font-size:1rem;font-weight:700;
+    transition:opacity .2s,transform .15s;
+  }
+  .btn-transcribe:hover:not(:disabled){transform:translateY(-1px)}
+  .btn-transcribe:disabled{opacity:.5;cursor:not-allowed;transform:none}
+
+  /* ── PROGRESS ── */
+  .progress-wrap{display:none;text-align:center;padding:.5rem 0}
+  .progress-wrap.show{display:block}
+  .progress-bar-outer{height:6px;background:var(--border);border-radius:3px;
+                       overflow:hidden;margin:.8rem 0}
+  .progress-bar-inner{height:100%;border-radius:3px;width:0;
+    background:linear-gradient(90deg,var(--accent),var(--accent2));
+    transition:width .4s ease}
+  .progress-text{font-size:.85rem;color:var(--muted)}
+
+  /* ── RESULTS ── */
+  #results{display:none}
+  .result-header{
+    display:flex;align-items:center;justify-content:space-between;
+    flex-wrap:wrap;gap:1rem;margin-bottom:1.2rem;
+  }
+  .result-meta{display:flex;gap:1rem;flex-wrap:wrap}
+  .badge{
+    padding:.3rem .8rem;border-radius:50px;font-size:.75rem;font-weight:700;
+    text-transform:uppercase;letter-spacing:.05em;
+  }
+  .badge-lang{background:rgba(79,70,229,.2);color:#a5b4fc}
+  .badge-dur{background:rgba(16,185,129,.2);color:#6ee7b7}
+  .badge-seg{background:rgba(245,158,11,.2);color:#fcd34d}
+
+  .btn-download{
+    padding:.6rem 1.5rem;border-radius:50px;
+    background:linear-gradient(135deg,var(--gold),#d97706);
+    color:#000;font-weight:700;font-size:.85rem;border:none;cursor:pointer;
+    transition:transform .15s,opacity .2s;text-decoration:none;
+    display:inline-flex;align-items:center;gap:.4rem;
+  }
+  .btn-download:hover{transform:translateY(-1px)}
+
+  /* ── TRANSCRIPT TABLE ── */
+  .transcript-scroll{max-height:480px;overflow-y:auto;border-radius:10px;
+                     border:1px solid var(--border)}
+  table{width:100%;border-collapse:collapse}
+  thead th{
+    background:var(--surface2);padding:.7rem 1rem;
+    font-size:.75rem;font-weight:700;text-transform:uppercase;
+    letter-spacing:.07em;color:var(--muted);text-align:left;
+    position:sticky;top:0;z-index:1;
+  }
+  thead th:nth-child(1),thead th:nth-child(2){width:90px;text-align:center}
+  tbody tr{border-bottom:1px solid var(--border)}
+  tbody tr:last-child{border-bottom:none}
+  tbody tr:hover{background:rgba(255,255,255,.03)}
+  td{padding:.65rem 1rem;font-size:.88rem;vertical-align:top}
+  .ts{font-family:monospace;color:var(--accent);font-size:.82rem;text-align:center}
+  .rtl{direction:rtl;text-align:right;font-size:.95rem}
+
+  /* Full text box */
+  .full-text{
+    margin-top:1rem;padding:1rem 1.2rem;background:var(--surface2);
+    border-radius:10px;font-size:.9rem;line-height:1.7;
+    border:1px solid var(--border);max-height:220px;overflow-y:auto;
+    white-space:pre-wrap;
+  }
+
+  /* ── ERROR TOAST ── */
+  .toast{
+    position:fixed;bottom:2rem;right:2rem;
+    background:#1a0000;border:1px solid #7f1d1d;
+    color:#fca5a5;padding:1rem 1.5rem;border-radius:12px;
+    font-size:.88rem;z-index:999;display:none;max-width:380px;
+    box-shadow:0 8px 32px rgba(0,0,0,.4);
+  }
+  .toast.show{display:block}
+  .toast-close{float:right;cursor:pointer;margin-left:1rem;color:inherit;opacity:.7}
+
+  /* ── RESPONSIVE ── */
+  @media(max-width:600px){
+    main{padding:1.5rem 1rem}
+    header{padding:1rem}
+    .record-btn{width:74px;height:74px;font-size:1.6rem}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">🎙</div>
+  <div>
+    <h1>Audio Transcriber</h1>
+    <p>Hebrew &amp; English — powered by OpenAI Whisper</p>
+  </div>
+  <a class="back-link" href="/">← Back to Portfolio</a>
+</header>
+
+<main>
+
+  <!-- INPUT CARD -->
+  <div class="card">
+    <div class="card-title">📥 Input Audio</div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('record')">🎤 Record</button>
+      <button class="tab" onclick="switchTab('upload')">📁 Upload File</button>
+    </div>
+
+    <!-- Record panel -->
+    <div class="tab-panel active" id="panel-record">
+      <div class="record-center">
+        <button class="record-btn" id="record-btn" onclick="toggleRecord()">🎤</button>
+        <div class="waveform" id="waveform">
+          <div class="wave-bar" style="height:8px"></div>
+          <div class="wave-bar" style="height:14px"></div>
+          <div class="wave-bar" style="height:20px"></div>
+          <div class="wave-bar" style="height:26px"></div>
+          <div class="wave-bar" style="height:30px"></div>
+          <div class="wave-bar" style="height:26px"></div>
+          <div class="wave-bar" style="height:20px"></div>
+          <div class="wave-bar" style="height:14px"></div>
+          <div class="wave-bar" style="height:8px"></div>
+        </div>
+        <div class="timer" id="timer">00:00:00</div>
+        <div class="record-hint" id="record-hint">Click to start recording</div>
+      </div>
+    </div>
+
+    <!-- Upload panel -->
+    <div class="tab-panel" id="panel-upload">
+      <div class="drop-zone" id="drop-zone">
+        <input type="file" id="file-input" accept="audio/*,video/*,.mp3,.mp4,.m4a,.wav,.webm,.ogg,.flac,.mpeg"
+               onchange="onFileSelected(this)"/>
+        <div class="drop-icon">📂</div>
+        <div class="drop-title">Drop audio file here or click to browse</div>
+        <div class="drop-sub">MP3, MP4, M4A, WAV, WEBM, FLAC — max 25 MB</div>
+      </div>
+      <div class="file-selected" id="file-label">📎 No file selected</div>
+    </div>
+  </div>
+
+  <!-- SETTINGS CARD -->
+  <div class="card">
+    <div class="card-title">⚙️ Settings</div>
+    <div class="lang-row">
+      <span class="lang-label">Language:</span>
+      <button class="lang-btn active" onclick="setLang('auto',this)">🔍 Auto-detect</button>
+      <button class="lang-btn" onclick="setLang('he',this)">🇮🇱 Hebrew</button>
+      <button class="lang-btn" onclick="setLang('en',this)">🇺🇸 English</button>
+    </div>
+    <button class="btn-transcribe" id="btn-transcribe" onclick="transcribe()" disabled>
+      ✨ Transcribe
+    </button>
+    <div class="progress-wrap" id="progress">
+      <div class="progress-text" id="progress-text">Uploading…</div>
+      <div class="progress-bar-outer"><div class="progress-bar-inner" id="progress-bar"></div></div>
+    </div>
+  </div>
+
+  <!-- RESULTS CARD -->
+  <div class="card" id="results">
+    <div class="result-header">
+      <div>
+        <div class="card-title">📄 Transcription Results</div>
+        <div class="result-meta" id="result-meta"></div>
+      </div>
+      <a class="btn-download" id="btn-download" href="#" download>
+        ⬇ Download Word Doc
+      </a>
+    </div>
+
+    <!-- Segments table -->
+    <div class="transcript-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Start</th>
+            <th>End</th>
+            <th>Transcript</th>
+          </tr>
+        </thead>
+        <tbody id="transcript-body"></tbody>
+      </table>
+    </div>
+
+    <!-- Full text -->
+    <div style="margin-top:1.2rem">
+      <div class="card-title">📝 Full Text</div>
+      <div class="full-text" id="full-text"></div>
+    </div>
+  </div>
+
+</main>
+
+<!-- Error toast -->
+<div class="toast" id="toast">
+  <span class="toast-close" onclick="hideToast()">✕</span>
+  <span id="toast-msg"></span>
+</div>
+
+<script>
+  // ── State ───────────────────────────────────────────────────
+  let selectedLanguage = 'auto';
+  let mediaRecorder = null;
+  let recordedChunks = [];
+  let recordedBlob = null;
+  let uploadedFile = null;
+  let timerInterval = null;
+  let timerSeconds = 0;
+  let isRecording = false;
+
+  // ── Tab switch ───────────────────────────────────────────────
+  function switchTab(tab) {
+    document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', (i===0&&tab==='record')||(i===1&&tab==='upload')));
+    document.getElementById('panel-record').classList.toggle('active', tab==='record');
+    document.getElementById('panel-upload').classList.toggle('active', tab==='upload');
+    updateTranscribeBtn();
+  }
+
+  // ── Language ─────────────────────────────────────────────────
+  function setLang(lang, el) {
+    selectedLanguage = lang;
+    document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('active'));
+    el.classList.add('active');
+  }
+
+  // ── File upload ───────────────────────────────────────────────
+  function onFileSelected(input) {
+    uploadedFile = input.files[0];
+    const label = document.getElementById('file-label');
+    if (uploadedFile) {
+      label.style.display = 'block';
+      label.textContent = `📎 ${uploadedFile.name} (${(uploadedFile.size/1024/1024).toFixed(2)} MB)`;
+    }
+    updateTranscribeBtn();
+  }
+
+  // Drag & drop
+  const dropZone = document.getElementById('drop-zone');
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault(); dropZone.classList.remove('drag-over');
+    const f = e.dataTransfer.files[0];
+    if (f) { uploadedFile = f; document.getElementById('file-label').style.display='block';
+              document.getElementById('file-label').textContent=`📎 ${f.name} (${(f.size/1024/1024).toFixed(2)} MB)`;
+              updateTranscribeBtn(); }
+  });
+
+  // ── Record ────────────────────────────────────────────────────
+  async function toggleRecord() {
+    if (!isRecording) await startRecording();
+    else stopRecording();
+  }
+
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recordedChunks = [];
+      recordedBlob = null;
+
+      // Pick best supported MIME
+      const mimeType = ['audio/webm;codecs=opus','audio/webm','audio/ogg','audio/mp4']
+        .find(m => MediaRecorder.isTypeSupported(m)) || '';
+
+      mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
+      mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
+      mediaRecorder.onstop = () => {
+        recordedBlob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+        stream.getTracks().forEach(t => t.stop());
+        updateTranscribeBtn();
+      };
+      mediaRecorder.start(250);
+
+      isRecording = true;
+      timerSeconds = 0;
+      timerInterval = setInterval(() => { timerSeconds++; updateTimer(); }, 1000);
+
+      document.getElementById('record-btn').classList.add('recording');
+      document.getElementById('record-btn').textContent = '⏹';
+      document.getElementById('record-hint').textContent = 'Recording… click to stop';
+      document.getElementById('waveform').classList.add('recording');
+
+    } catch(e) {
+      showToast('Microphone access denied. Please allow microphone and try again.');
+    }
+  }
+
+  function stopRecording() {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+    isRecording = false;
+    clearInterval(timerInterval);
+
+    document.getElementById('record-btn').classList.remove('recording');
+    document.getElementById('record-btn').textContent = '🎤';
+    document.getElementById('record-hint').textContent = 'Recording saved — click Transcribe';
+    document.getElementById('waveform').classList.remove('recording');
+  }
+
+  function updateTimer() {
+    const h = Math.floor(timerSeconds/3600);
+    const m = Math.floor((timerSeconds%3600)/60);
+    const s = timerSeconds%60;
+    document.getElementById('timer').textContent =
+      [h,m,s].map(v=>String(v).padStart(2,'0')).join(':');
+  }
+
+  // ── Enable/disable Transcribe btn ────────────────────────────
+  function updateTranscribeBtn() {
+    const recordActive = document.getElementById('panel-record').classList.contains('active');
+    const hasAudio = recordActive ? !!recordedBlob : !!uploadedFile;
+    document.getElementById('btn-transcribe').disabled = !hasAudio;
+  }
+
+  // ── Transcribe ────────────────────────────────────────────────
+  async function transcribe() {
+    const recordActive = document.getElementById('panel-record').classList.contains('active');
+    const audioSource  = recordActive ? recordedBlob : uploadedFile;
+    if (!audioSource) return;
+
+    const btn = document.getElementById('btn-transcribe');
+    const progress = document.getElementById('progress');
+    const progressBar = document.getElementById('progress-bar');
+    const progressText = document.getElementById('progress-text');
+
+    btn.disabled = true;
+    progress.classList.add('show');
+    document.getElementById('results').style.display = 'none';
+
+    // Fake progress animation
+    let pct = 0;
+    const fakeProgress = setInterval(() => {
+      pct = Math.min(pct + (pct < 60 ? 3 : pct < 85 ? 1 : 0.3), 90);
+      progressBar.style.width = pct + '%';
+    }, 400);
+
+    progressText.textContent = 'Uploading audio…';
+    progressBar.style.width = '5%';
+
+    try {
+      const ext  = recordActive
+        ? (audioSource.type.includes('ogg') ? '.ogg' : audioSource.type.includes('mp4') ? '.m4a' : '.webm')
+        : ('.' + (uploadedFile.name.split('.').pop() || 'webm'));
+      const name = recordActive ? `recording${ext}` : uploadedFile.name;
+
+      const formData = new FormData();
+      formData.append('audio', audioSource, name);
+      formData.append('language', selectedLanguage);
+
+      progressText.textContent = 'Transcribing with Whisper AI…';
+
+      const res = await fetch('/api/transcribe', { method: 'POST', body: formData });
+      const data = await res.json();
+
+      clearInterval(fakeProgress);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || 'Transcription failed');
+      }
+
+      progressBar.style.width = '100%';
+      progressText.textContent = '✅ Done!';
+      setTimeout(() => progress.classList.remove('show'), 1500);
+
+      displayResults(data);
+
+    } catch(err) {
+      clearInterval(fakeProgress);
+      progress.classList.remove('show');
+      showToast('❌ ' + err.message);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // ── Display results ───────────────────────────────────────────
+  function displayResults(data) {
+    const { segments, language, duration, fullText, docFile } = data;
+
+    // Meta badges
+    const langNames = { he:'Hebrew 🇮🇱', en:'English 🇺🇸', auto:'Auto' };
+    const isHebrew  = language === 'he' || language === 'hebrew';
+    document.getElementById('result-meta').innerHTML = `
+      <span class="badge badge-lang">${langNames[language] || language}</span>
+      <span class="badge badge-dur">⏱ ${fmt(duration||0)}</span>
+      <span class="badge badge-seg">📑 ${segments.length} segments</span>
+    `;
+
+    // Download link
+    document.getElementById('btn-download').href = `/api/download/${encodeURIComponent(docFile)}`;
+
+    // Table rows
+    const tbody = document.getElementById('transcript-body');
+    tbody.innerHTML = segments.map(seg => `
+      <tr>
+        <td class="ts">${fmt(seg.start)}</td>
+        <td class="ts">${fmt(seg.end)}</td>
+        <td class="${isHebrew ? 'rtl' : ''}">${escHtml(seg.text.trim())}</td>
+      </tr>
+    `).join('');
+
+    // Full text
+    const ftEl = document.getElementById('full-text');
+    ftEl.textContent = fullText || segments.map(s=>s.text.trim()).join(' ');
+    ftEl.style.direction = isHebrew ? 'rtl' : 'ltr';
+    ftEl.style.textAlign  = isHebrew ? 'right' : 'left';
+
+    document.getElementById('results').style.display = 'block';
+    document.getElementById('results').scrollIntoView({ behavior:'smooth', block:'start' });
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────
+  function fmt(sec) {
+    const h=Math.floor(sec/3600), m=Math.floor((sec%3600)/60), s=Math.floor(sec%60);
+    return [h,m,s].map(v=>String(v).padStart(2,'0')).join(':');
+  }
+  function escHtml(t){
+    return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function showToast(msg) {
+    document.getElementById('toast-msg').textContent = msg;
+    document.getElementById('toast').classList.add('show');
+    setTimeout(hideToast, 6000);
+  }
+  function hideToast() { document.getElementById('toast').classList.remove('show'); }
+</script>
+</body>
+</html>
