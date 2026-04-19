@@ -195,6 +195,129 @@
       .job-right{align-items:flex-start;flex-direction:row;flex-wrap:wrap}
       .apply-btn{padding:.55rem 1.2rem}
     }
+
+    /* ── MAIN TABS ────────────────────────────────────────── */
+    .main-tabs{display:flex;gap:.4rem;margin:0 .6rem}
+    .main-tab{
+      padding:.4rem 1.1rem;border-radius:50px;
+      border:1px solid rgba(255,255,255,.15);
+      background:transparent;color:rgba(255,255,255,.55);
+      font-size:.8rem;font-weight:700;cursor:pointer;transition:all .2s;
+    }
+    .main-tab.active{background:rgba(255,255,255,.13);color:#fff;border-color:rgba(255,255,255,.3)}
+    .main-tab:hover:not(.active){background:rgba(255,255,255,.07);color:rgba(255,255,255,.8)}
+
+    /* ── TOOLS PANEL ─────────────────────────────────────── */
+    #tools-panel{display:none;padding:1.5rem 2rem 3rem;max-width:1360px;margin:0 auto}
+    .tools-grid{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem}
+    @media(max-width:960px){.tools-grid{grid-template-columns:1fr}}
+
+    .tool-card{
+      background:#13131a;border:1px solid #2a2a3a;border-radius:14px;
+      padding:1.6rem;display:flex;flex-direction:column;gap:.9rem;
+    }
+    .tool-header{display:flex;align-items:center;gap:.7rem;margin-bottom:.2rem}
+    .tool-icon{font-size:1.6rem}
+    .tool-title{font-size:1rem;font-weight:700;color:#f1f5f9}
+    .tool-sub{font-size:.78rem;color:#64748b;margin-top:.1rem}
+    .tool-divider{height:1px;background:#1e1e2e;margin:.1rem 0}
+
+    /* tabs inside tool card */
+    .ttabs{display:flex;gap:.4rem;margin-bottom:.3rem}
+    .ttab{
+      flex:1;padding:.5rem;border-radius:8px;border:1px solid #2a2a3a;
+      background:transparent;color:#64748b;font-size:.8rem;font-weight:600;
+      cursor:pointer;transition:all .2s;text-align:center;
+    }
+    .ttab.active{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border-color:transparent}
+    .tpanel{display:none}.tpanel.active{display:block}
+
+    /* record UI */
+    .rec-center{text-align:center;padding:.5rem 0}
+    .rec-btn{
+      width:72px;height:72px;border-radius:50%;border:none;cursor:pointer;
+      background:linear-gradient(135deg,#4f46e5,#7c3aed);font-size:1.6rem;
+      display:inline-flex;align-items:center;justify-content:center;
+      box-shadow:0 0 0 0 rgba(79,70,229,.4);transition:transform .15s;
+    }
+    .rec-btn:hover{transform:scale(1.06)}
+    .rec-btn.recording{background:linear-gradient(135deg,#dc2626,#b91c1c);animation:tpulse 1.5s infinite}
+    @keyframes tpulse{0%{box-shadow:0 0 0 0 rgba(220,38,38,.5)}70%{box-shadow:0 0 0 14px rgba(220,38,38,0)}100%{box-shadow:0 0 0 0 rgba(220,38,38,0)}}
+    .rec-timer{font-family:monospace;font-size:1.3rem;font-weight:700;margin:.5rem 0 .2rem;color:#f1f5f9}
+    .rec-hint{font-size:.75rem;color:#64748b}
+
+    /* drop zone */
+    .tdrop{
+      border:2px dashed #2a2a3a;border-radius:10px;
+      padding:1.8rem;text-align:center;cursor:pointer;transition:all .2s;position:relative;
+    }
+    .tdrop:hover,.tdrop.drag-over{border-color:#4f46e5;background:rgba(79,70,229,.06)}
+    .tdrop input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+    .tdrop-icon{font-size:1.8rem;margin-bottom:.4rem}
+    .tdrop-text{font-size:.85rem;color:#64748b}
+    .tdrop-sel{margin-top:.7rem;padding:.45rem .9rem;background:rgba(79,70,229,.15);
+               border-radius:6px;font-size:.8rem;color:#a5b4fc;display:none}
+
+    /* language buttons */
+    .tlang-row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+    .tlang-lbl{font-size:.78rem;color:#64748b;white-space:nowrap}
+    .tlang-btn{
+      padding:.38rem .85rem;border-radius:50px;border:1px solid #2a2a3a;
+      background:transparent;color:#64748b;font-size:.78rem;cursor:pointer;transition:all .2s;
+    }
+    .tlang-btn.active{background:#4f46e5;color:#fff;border-color:transparent}
+
+    /* transcribe / translate buttons */
+    .tbtn{
+      width:100%;padding:.85rem;border-radius:50px;border:none;cursor:pointer;
+      background:linear-gradient(135deg,#4f46e5,#7c3aed);
+      color:#fff;font-size:.9rem;font-weight:700;transition:opacity .2s,transform .15s;
+    }
+    .tbtn:hover:not(:disabled){transform:translateY(-1px)}
+    .tbtn:disabled{opacity:.45;cursor:not-allowed;transform:none}
+    .tbtn.gold{background:linear-gradient(135deg,#f59e0b,#d97706)}
+
+    /* progress */
+    .tprog{display:none;text-align:center;margin:.3rem 0}
+    .tprog.show{display:block}
+    .tprog-bar-outer{height:5px;background:#1e1e2e;border-radius:3px;overflow:hidden;margin:.6rem 0}
+    .tprog-bar-inner{height:100%;border-radius:3px;width:0;
+      background:linear-gradient(90deg,#4f46e5,#7c3aed);transition:width .4s ease}
+    .tprog-text{font-size:.8rem;color:#64748b}
+
+    /* results */
+    .tres-badges{display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:.8rem}
+    .tres-badge{padding:.25rem .7rem;border-radius:50px;font-size:.72rem;font-weight:700;text-transform:uppercase}
+    .tb-lang{background:rgba(79,70,229,.2);color:#a5b4fc}
+    .tb-dur{background:rgba(16,185,129,.2);color:#6ee7b7}
+    .tb-seg{background:rgba(245,158,11,.2);color:#fcd34d}
+    .tb-ok{background:rgba(16,185,129,.2);color:#6ee7b7}
+
+    .tres-scroll{max-height:320px;overflow-y:auto;border-radius:8px;border:1px solid #2a2a3a;margin-bottom:.8rem}
+    .tres-scroll table{width:100%;border-collapse:collapse}
+    .tres-scroll thead th{
+      background:#1c1c28;padding:.55rem .8rem;
+      font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#64748b;
+      text-align:left;position:sticky;top:0;
+    }
+    .tres-scroll thead th:nth-child(1),.tres-scroll thead th:nth-child(2){width:80px;text-align:center}
+    .tres-scroll tbody tr{border-bottom:1px solid #1e1e2e}
+    .tres-scroll tbody tr:hover{background:rgba(255,255,255,.025)}
+    .tres-scroll td{padding:.5rem .8rem;font-size:.83rem;vertical-align:top}
+    .tts{font-family:monospace;color:#818cf8;font-size:.78rem;text-align:center}
+    .trtl{direction:rtl;text-align:right}
+
+    .tres-fulltext{
+      padding:.8rem 1rem;background:#0d0d14;border-radius:8px;font-size:.85rem;
+      line-height:1.7;border:1px solid #1e1e2e;max-height:160px;overflow-y:auto;white-space:pre-wrap;
+    }
+
+    /* Trados specific */
+    .trados-stats{
+      background:#0d0d14;border:1px solid #1e1e2e;border-radius:8px;
+      padding:.9rem 1.1rem;font-size:.85rem;
+    }
+    .trados-stats span{font-weight:700;color:#6ee7b7}
   </style>
 </head>
 <body>
@@ -218,7 +341,11 @@
     <div class="topbar-left">
       <a href="index.html" class="topbar-logo">Benjy Alper</a>
       <a href="index.html" class="btn-back-site">← Back to Website</a>
-      <span class="topbar-badge">Admin · Jobs</span>
+      <span class="topbar-badge" id="topbar-badge">Admin · Jobs</span>
+      <div class="main-tabs">
+        <button class="main-tab active" id="tab-jobs"  onclick="switchMainTab('jobs')">📋 Jobs</button>
+        <button class="main-tab"        id="tab-tools" onclick="switchMainTab('tools')">🛠 Tools</button>
+      </div>
     </div>
     <div class="topbar-right">
       <button class="btn-scrape" id="scrape-btn" onclick="runScraper()">⚡ Refresh Jobs</button>
@@ -294,8 +421,138 @@
         </a>
       </div>
     </div>
-  </div>
-</div>
+  </div><!-- /.main -->
+
+  <!-- ══════════════════════ TOOLS PANEL ══════════════════════ -->
+  <div id="tools-panel">
+    <div class="tools-grid">
+
+      <!-- ── 🎙 TRANSCRIBER ─────────────────────────────────── -->
+      <div class="tool-card">
+        <div class="tool-header">
+          <div class="tool-icon">🎙</div>
+          <div>
+            <div class="tool-title">Audio Transcriber</div>
+            <div class="tool-sub">Hebrew &amp; English · Whisper AI · exports .docx with timestamps</div>
+          </div>
+        </div>
+        <div class="tool-divider"></div>
+
+        <!-- Record / Upload tabs -->
+        <div class="ttabs">
+          <button class="ttab active" onclick="tcSwitchTab('record',this)">🎤 Record</button>
+          <button class="ttab"        onclick="tcSwitchTab('upload',this)">📁 Upload</button>
+        </div>
+
+        <!-- Record panel -->
+        <div class="tpanel active" id="tc-record">
+          <div class="rec-center">
+            <button class="rec-btn" id="tc-rec-btn" onclick="tcToggleRecord()">🎤</button>
+            <div class="rec-timer" id="tc-timer">00:00:00</div>
+            <div class="rec-hint"  id="tc-hint">Click to start recording</div>
+          </div>
+        </div>
+
+        <!-- Upload panel -->
+        <div class="tpanel" id="tc-upload">
+          <div class="tdrop" id="tc-drop">
+            <input type="file" id="tc-file" accept="audio/*,video/*,.mp3,.mp4,.m4a,.wav,.webm,.ogg,.flac" onchange="tcOnFile(this)"/>
+            <div class="tdrop-icon">📂</div>
+            <div class="tdrop-text">Drop audio file or click to browse<br><small>MP3, WAV, M4A, WEBM, FLAC — max 25 MB</small></div>
+          </div>
+          <div class="tdrop-sel" id="tc-file-label"></div>
+        </div>
+
+        <!-- Language + button -->
+        <div class="tlang-row">
+          <span class="tlang-lbl">Language:</span>
+          <button class="tlang-btn active" onclick="tcSetLang('auto',this)">🔍 Auto</button>
+          <button class="tlang-btn"        onclick="tcSetLang('he',this)">🇮🇱 Hebrew</button>
+          <button class="tlang-btn"        onclick="tcSetLang('en',this)">🇺🇸 English</button>
+        </div>
+        <button class="tbtn" id="tc-btn" onclick="tcTranscribe()" disabled>✨ Transcribe</button>
+
+        <!-- Progress -->
+        <div class="tprog" id="tc-prog">
+          <div class="tprog-text" id="tc-prog-text">Uploading…</div>
+          <div class="tprog-bar-outer"><div class="tprog-bar-inner" id="tc-prog-bar"></div></div>
+        </div>
+
+        <!-- Results -->
+        <div id="tc-results" style="display:none">
+          <div class="tres-badges" id="tc-badges"></div>
+          <div class="tres-scroll">
+            <table>
+              <thead><tr><th>Start</th><th>End</th><th>Transcript</th></tr></thead>
+              <tbody id="tc-tbody"></tbody>
+            </table>
+          </div>
+          <div class="tres-fulltext" id="tc-fulltext"></div>
+          <div style="margin-top:.7rem">
+            <a class="tbtn gold" id="tc-dl" href="#" style="display:inline-flex;align-items:center;justify-content:center;gap:.4rem;text-decoration:none;padding:.7rem 1.5rem;width:auto">
+              ⬇ Download Word Doc
+            </a>
+          </div>
+        </div>
+      </div><!-- /transcriber card -->
+
+      <!-- ── 🔄 TRADOS ────────────────────────────────────── -->
+      <div class="tool-card">
+        <div class="tool-header">
+          <div class="tool-icon">🔄</div>
+          <div>
+            <div class="tool-title">Trados SDLPPX Auto-Translator</div>
+            <div class="tool-sub">Upload .sdlppx → GPT-4o translates → download .sdlrpx return package</div>
+          </div>
+        </div>
+        <div class="tool-divider"></div>
+
+        <!-- SDLPPX upload -->
+        <div class="tdrop" id="tr-drop">
+          <input type="file" id="tr-file" accept=".sdlppx,.zip" onchange="trOnFile(this)"/>
+          <div class="tdrop-icon">📦</div>
+          <div class="tdrop-text">Drop .sdlppx file or click to browse<br><small>Trados Studio project package — up to 200 MB</small></div>
+        </div>
+        <div class="tdrop-sel" id="tr-file-label"></div>
+
+        <!-- Target lang -->
+        <div class="tlang-row">
+          <span class="tlang-lbl">Target&nbsp;lang:</span>
+          <button class="tlang-btn active" onclick="trSetLang('he-IL',this)">🇮🇱 he-IL</button>
+          <button class="tlang-btn"        onclick="trSetLang('he',this)">he</button>
+          <button class="tlang-btn"        onclick="trSetLang('iw-IL',this)">iw-IL</button>
+        </div>
+
+        <button class="tbtn gold" id="tr-btn" onclick="trTranslate()" disabled>🚀 Translate with GPT-4o</button>
+
+        <!-- Progress -->
+        <div class="tprog" id="tr-prog">
+          <div class="tprog-text" id="tr-prog-text">Uploading package…</div>
+          <div class="tprog-bar-outer"><div class="tprog-bar-inner" id="tr-prog-bar"></div></div>
+        </div>
+
+        <!-- Results -->
+        <div id="tr-results" style="display:none">
+          <div class="tres-badges" id="tr-badges"></div>
+          <div class="trados-stats" id="tr-stats"></div>
+          <div style="margin-top:.9rem">
+            <a class="tbtn" id="tr-dl" href="#" style="display:inline-flex;align-items:center;justify-content:center;gap:.4rem;text-decoration:none;padding:.7rem 1.5rem;width:auto">
+              ⬇ Download SDLRPX Return Package
+            </a>
+          </div>
+          <div style="margin-top:.7rem;font-size:.75rem;color:#64748b">
+            In Trados Studio: <strong style="color:#a5b4fc">Project → Return Package</strong> to import translations.
+          </div>
+        </div>
+
+        <!-- Error -->
+        <div id="tr-error" style="display:none;padding:.7rem 1rem;background:#1a0000;border:1px solid #7f1d1d;border-radius:8px;font-size:.82rem;color:#fca5a5"></div>
+      </div><!-- /trados card -->
+
+    </div><!-- /.tools-grid -->
+  </div><!-- /#tools-panel -->
+
+</div><!-- /#admin-app -->
 
 <!-- TOAST -->
 <div class="scrape-toast" id="scrape-toast">
@@ -477,6 +734,293 @@ function runScraper() {
 // Auto-load if unlocked on page load
 if (sessionStorage.getItem('admin_auth') === '1') {
   loadJobs();
+}
+
+// ══════════════════════════════════════════════════════════════
+//  TOOLS PANEL
+// ══════════════════════════════════════════════════════════════
+const TOOLS_API = 'http://localhost:3007';
+
+// ── Main tab switch ───────────────────────────────────────────
+function switchMainTab(tab) {
+  const isJobs = tab === 'jobs';
+  document.querySelector('.main').style.display     = isJobs ? '' : 'none';
+  document.getElementById('tools-panel').style.display = isJobs ? 'none' : 'block';
+  document.getElementById('tab-jobs').classList.toggle('active', isJobs);
+  document.getElementById('tab-tools').classList.toggle('active', !isJobs);
+  document.getElementById('topbar-badge').textContent = isJobs ? 'Admin · Jobs' : 'Admin · Tools';
+  if (!isJobs) checkToolsServer();
+}
+
+async function checkToolsServer() {
+  try {
+    await fetch(TOOLS_API + '/api/status');
+  } catch(e) {
+    showAdminToast('⚠️ Tools server offline. Run: cd translate/transcriber && node server.js', 8000);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  🎙 TRANSCRIBER
+// ═══════════════════════════════════════════════════════════════
+let tcLang = 'auto', tcRecording = false, tcMediaRecorder = null;
+let tcChunks = [], tcBlob = null, tcFile = null;
+let tcTimerInterval = null, tcTimerSec = 0;
+let tcActiveTab = 'record';
+
+function tcSwitchTab(tab, btn) {
+  tcActiveTab = tab;
+  document.querySelectorAll('#tools-panel .ttab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('tc-record').classList.toggle('active', tab === 'record');
+  document.getElementById('tc-upload').classList.toggle('active', tab === 'upload');
+  tcUpdateBtn();
+}
+
+function tcSetLang(lang, el) {
+  tcLang = lang;
+  el.closest('.tlang-row').querySelectorAll('.tlang-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+}
+
+function tcOnFile(input) {
+  tcFile = input.files[0];
+  const lbl = document.getElementById('tc-file-label');
+  if (tcFile) {
+    lbl.style.display = 'block';
+    lbl.textContent   = `📎 ${tcFile.name} (${(tcFile.size/1024/1024).toFixed(2)} MB)`;
+  }
+  tcUpdateBtn();
+}
+
+// Drag & drop for transcriber
+(function(){
+  const dz = document.getElementById('tc-drop');
+  if (!dz) return;
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+  dz.addEventListener('drop', e => {
+    e.preventDefault(); dz.classList.remove('drag-over');
+    const f = e.dataTransfer.files[0];
+    if (f) { tcFile = f; document.getElementById('tc-file-label').style.display='block';
+              document.getElementById('tc-file-label').textContent=`📎 ${f.name}`; tcUpdateBtn(); }
+  });
+})();
+
+async function tcToggleRecord() {
+  if (!tcRecording) {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      tcChunks = []; tcBlob = null;
+      const mime = ['audio/webm;codecs=opus','audio/webm','audio/ogg'].find(m => MediaRecorder.isTypeSupported(m)) || '';
+      tcMediaRecorder = new MediaRecorder(stream, mime ? { mimeType: mime } : {});
+      tcMediaRecorder.ondataavailable = e => { if (e.data.size > 0) tcChunks.push(e.data); };
+      tcMediaRecorder.onstop = () => {
+        tcBlob = new Blob(tcChunks, { type: tcMediaRecorder.mimeType || 'audio/webm' });
+        stream.getTracks().forEach(t => t.stop());
+        tcUpdateBtn();
+      };
+      tcMediaRecorder.start(250);
+      tcRecording = true; tcTimerSec = 0;
+      tcTimerInterval = setInterval(() => { tcTimerSec++; tcUpdateTimer(); }, 1000);
+      const btn = document.getElementById('tc-rec-btn');
+      btn.classList.add('recording'); btn.textContent = '⏹';
+      document.getElementById('tc-hint').textContent = 'Recording… click to stop';
+    } catch(e) { showAdminToast('Microphone access denied.'); }
+  } else {
+    if (tcMediaRecorder?.state !== 'inactive') tcMediaRecorder.stop();
+    tcRecording = false; clearInterval(tcTimerInterval);
+    const btn = document.getElementById('tc-rec-btn');
+    btn.classList.remove('recording'); btn.textContent = '🎤';
+    document.getElementById('tc-hint').textContent = 'Recording saved — click Transcribe';
+  }
+}
+
+function tcUpdateTimer() {
+  const h=Math.floor(tcTimerSec/3600), m=Math.floor((tcTimerSec%3600)/60), s=tcTimerSec%60;
+  document.getElementById('tc-timer').textContent = [h,m,s].map(v=>String(v).padStart(2,'0')).join(':');
+}
+
+function tcUpdateBtn() {
+  const hasAudio = tcActiveTab === 'record' ? !!tcBlob : !!tcFile;
+  document.getElementById('tc-btn').disabled = !hasAudio;
+}
+
+async function tcTranscribe() {
+  const src = tcActiveTab === 'record' ? tcBlob : tcFile;
+  if (!src) return;
+  const btn = document.getElementById('tc-btn');
+  const prog = document.getElementById('tc-prog');
+  const bar  = document.getElementById('tc-prog-bar');
+  const txt  = document.getElementById('tc-prog-text');
+  btn.disabled = true;
+  prog.classList.add('show');
+  document.getElementById('tc-results').style.display = 'none';
+
+  let pct = 0;
+  const fake = setInterval(() => { pct = Math.min(pct + (pct<60?3:pct<85?1:.3), 90); bar.style.width=pct+'%'; }, 400);
+
+  try {
+    const ext = tcActiveTab === 'record'
+      ? (src.type.includes('ogg') ? '.ogg' : src.type.includes('mp4') ? '.m4a' : '.webm')
+      : '.' + ((tcFile.name.split('.').pop()) || 'webm');
+    const name = tcActiveTab === 'record' ? `recording${ext}` : tcFile.name;
+
+    txt.textContent = 'Transcribing with Whisper AI…';
+    const fd = new FormData();
+    fd.append('audio', src, name);
+    fd.append('language', tcLang);
+
+    const res  = await fetch(TOOLS_API + '/api/transcribe', { method:'POST', body: fd });
+    const data = await res.json();
+    clearInterval(fake);
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Transcription failed');
+
+    bar.style.width = '100%';
+    txt.textContent = '✅ Done!';
+    setTimeout(() => prog.classList.remove('show'), 1500);
+    tcShowResults(data);
+  } catch(err) {
+    clearInterval(fake);
+    prog.classList.remove('show');
+    showAdminToast('❌ ' + err.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function tcShowResults(data) {
+  const { segments, language, duration, fullText, docFile } = data;
+  const isHe = language === 'he' || language === 'hebrew';
+  const langMap = { he:'Hebrew 🇮🇱', en:'English 🇺🇸' };
+
+  document.getElementById('tc-badges').innerHTML = `
+    <span class="tres-badge tb-lang">${langMap[language] || language}</span>
+    <span class="tres-badge tb-dur">⏱ ${tcFmt(duration||0)}</span>
+    <span class="tres-badge tb-seg">📑 ${segments.length} segments</span>`;
+
+  document.getElementById('tc-tbody').innerHTML = segments.map(s => `
+    <tr>
+      <td class="tts">${tcFmt(s.start)}</td>
+      <td class="tts">${tcFmt(s.end)}</td>
+      <td class="${isHe?'trtl':''}">${esc(s.text.trim())}</td>
+    </tr>`).join('');
+
+  const ft = document.getElementById('tc-fulltext');
+  ft.textContent = fullText || segments.map(s=>s.text.trim()).join(' ');
+  ft.style.direction  = isHe ? 'rtl' : 'ltr';
+  ft.style.textAlign  = isHe ? 'right' : 'left';
+
+  document.getElementById('tc-dl').href = TOOLS_API + '/api/download/' + encodeURIComponent(docFile);
+  document.getElementById('tc-results').style.display = 'block';
+}
+
+function tcFmt(sec) {
+  const h=Math.floor(sec/3600), m=Math.floor((sec%3600)/60), s=Math.floor(sec%60);
+  return [h,m,s].map(v=>String(v).padStart(2,'0')).join(':');
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  🔄 TRADOS
+// ═══════════════════════════════════════════════════════════════
+let trFile = null, trLang = 'he-IL';
+
+function trSetLang(lang, el) {
+  trLang = lang;
+  el.closest('.tlang-row').querySelectorAll('.tlang-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+}
+
+function trOnFile(input) {
+  trFile = input.files[0];
+  const lbl = document.getElementById('tr-file-label');
+  if (trFile) {
+    lbl.style.display = 'block';
+    lbl.textContent   = `📦 ${trFile.name} (${(trFile.size/1024/1024).toFixed(2)} MB)`;
+    document.getElementById('tr-btn').disabled = false;
+  }
+}
+
+// Drag & drop for Trados
+(function(){
+  const dz = document.getElementById('tr-drop');
+  if (!dz) return;
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+  dz.addEventListener('drop', e => {
+    e.preventDefault(); dz.classList.remove('drag-over');
+    const f = e.dataTransfer.files[0];
+    if (f) {
+      trFile = f;
+      document.getElementById('tr-file-label').style.display='block';
+      document.getElementById('tr-file-label').textContent=`📦 ${f.name} (${(f.size/1024/1024).toFixed(2)} MB)`;
+      document.getElementById('tr-btn').disabled = false;
+    }
+  });
+})();
+
+async function trTranslate() {
+  if (!trFile) return;
+  const btn  = document.getElementById('tr-btn');
+  const prog = document.getElementById('tr-prog');
+  const bar  = document.getElementById('tr-prog-bar');
+  const txt  = document.getElementById('tr-prog-text');
+  const err  = document.getElementById('tr-error');
+
+  btn.disabled = true;
+  prog.classList.add('show');
+  err.style.display = 'none';
+  document.getElementById('tr-results').style.display = 'none';
+
+  let pct = 0;
+  const fake = setInterval(() => { pct = Math.min(pct + (pct<40?2:pct<75?0.8:.2), 90); bar.style.width=pct+'%'; }, 800);
+  txt.textContent = 'Uploading package…';
+
+  try {
+    const fd = new FormData();
+    fd.append('sdlppx', trFile, trFile.name);
+    fd.append('lang', trLang);
+
+    txt.textContent = 'Translating segments with GPT-4o… (may take a few minutes)';
+    const res  = await fetch(TOOLS_API + '/api/trados', { method:'POST', body: fd });
+    const data = await res.json();
+    clearInterval(fake);
+
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Translation failed');
+
+    bar.style.width = '100%';
+    txt.textContent = '✅ Done!';
+    setTimeout(() => prog.classList.remove('show'), 1500);
+
+    document.getElementById('tr-badges').innerHTML = `
+      <span class="tres-badge tb-ok">✅ ${data.translated} translated</span>
+      <span class="tres-badge tb-seg">📑 ${data.total} total</span>
+      <span class="tres-badge tb-lang">📄 ${data.files} file(s)</span>`;
+
+    document.getElementById('tr-stats').innerHTML =
+      `Translated <span>${data.translated}</span> of <span>${data.total}</span> segments across <span>${data.files}</span> SDLXLIFF file(s) → ready to import into Trados Studio.`;
+
+    document.getElementById('tr-dl').href = TOOLS_API + '/api/download/' + encodeURIComponent(data.docFile);
+    document.getElementById('tr-results').style.display = 'block';
+
+  } catch(e) {
+    clearInterval(fake);
+    prog.classList.remove('show');
+    err.style.display = 'block';
+    err.textContent   = '❌ ' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function showAdminToast(msg, duration=5000) {
+  const t   = document.getElementById('scrape-toast');
+  const lbl = document.getElementById('toast-msg');
+  const sp  = t.querySelector('.spinner');
+  if (sp) sp.style.display = 'none';
+  lbl.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => { t.classList.remove('show'); if(sp) sp.style.display=''; }, duration);
 }
 </script>
 </body>
