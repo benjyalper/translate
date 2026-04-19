@@ -133,6 +133,11 @@
     .src-remotive{background:#fce7f3;color:#9d174d}
     .src-linkedin{background:#dbeafe;color:#1d4ed8}
     .src-other{background:#f3f4f6;color:#374151}
+    .src-google{background:#fef9c3;color:#713f12}
+    .src-glassdoor{background:#d1fae5;color:#065f46}
+    .src-upwork{background:#e0f2fe;color:#0c4a6e}
+    .src-freelancer{background:#ede9fe;color:#4c1d95}
+    .src-indeed{background:#fce7f3;color:#831843}
     .job-title{font-size:1rem;font-weight:700;color:var(--ink);margin-bottom:.2rem}
     .job-company{font-size:.85rem;color:var(--mid);margin-bottom:.5rem}
     .job-meta{display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:.7rem}
@@ -238,6 +243,11 @@
         <option value="WorkingNomads">WorkingNomads</option>
         <option value="Remotive">Remotive</option>
         <option value="LinkedIn">LinkedIn</option>
+        <option value="Google Jobs">Google Jobs</option>
+        <option value="Glassdoor">Glassdoor</option>
+        <option value="Upwork">Upwork</option>
+        <option value="Freelancer">Freelancer</option>
+        <option value="Indeed">Indeed</option>
       </select>
       <button class="sort-btn active" id="sort-date" onclick="setSort('date')">Newest First</button>
       <button class="sort-btn" id="sort-rel" onclick="setSort('rel')">Most Relevant</button>
@@ -370,6 +380,11 @@ function srcClass(source) {
     'WorkingNomads': 'src-workingnomads',
     'Remotive': 'src-remotive',
     'LinkedIn': 'src-linkedin',
+    'Google Jobs': 'src-google',
+    'Glassdoor': 'src-glassdoor',
+    'Upwork': 'src-upwork',
+    'Freelancer': 'src-freelancer',
+    'Indeed': 'src-indeed',
   };
   return map[source] || 'src-other';
 }
