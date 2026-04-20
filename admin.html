@@ -746,7 +746,14 @@ async function runScraper() {
   try {
     const res  = await fetch(`${TOOLS_API}/api/scrape`, { method: 'POST' });
     const data = await res.json();
-    if (!data.ok) throw new Error(data.error || 'Scraper error');
+    if (!data.ok) {
+      if (data.error && data.error.includes('already running')) {
+        toastMsg.textContent = '⏳ Scrape already in progress — please wait…';
+        setTimeout(() => toast.classList.remove('show'), 4000);
+        return;
+      }
+      throw new Error(data.error || 'Scraper error');
+    }
 
     // Use jobs returned by the server directly — no extra fetch needed
     if (data.jobs && data.jobs.length) {

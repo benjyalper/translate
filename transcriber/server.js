@@ -429,98 +429,98 @@ async function getAIJobs() {
 
 List 20 real, active Hebrew-English translation / localisation / transcription jobs from well-known hiring platforms (ProZ, Upwork, LinkedIn, TranslatorsCafe, Gengo, Unbabel, Smartcat, etc.).
 
-Return ONLY a valid JSON array — no markdown, no explanation. Each element must match exactly:
-{
-  "id": "ai-<company-slug>-<role-slug>",
-  "title": "Job title",
-  "company": "Company or client name",
-  "location": "Remote or city",
-  "type": "Remote / Freelance / Full-time / Part-time",
-  "description": "One-sentence description (max 200 chars)",
-  "url": "https://real-url-to-job-or-platform",
-  "source": "AI Discovery",
-  "postedDate": "${today}",
-  "tags": ["hebrew","translation"],
-  "salary": "rate if known, else empty string"
+Return ONLY a valid JSON array — no markdown, no code fences, no explanation. Each element:
+{"id":"ai-<slug>","title":"Job title","company":"Company","location":"Remote","type":"Remote","description":"One sentence max 200 chars","url":"https://platform-url","source":"AI Discovery","postedDate":"${today}","tags":["hebrew","translation"],"salary":""}
+
+Focus on Hebrew-English pairs: document translation, legal/medical, subtitling, interpreting, transcription. Real companies only.`;
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const res = await axios.post('https://api.openai.com/v1/chat/completions', {
+        model: 'gpt-4o',
+        temperature: 0.3,
+        messages: [
+          { role: 'system', content: 'You output only raw JSON arrays, never markdown or code fences.' },
+          { role: 'user',   content: prompt }
+        ],
+      }, {
+        headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+        timeout: 90000,
+      });
+
+      const raw  = res.data.choices[0].message.content.trim();
+      console.log(`  [getAIJobs attempt ${attempt}] raw[0:80]:`, JSON.stringify(raw.slice(0, 80)));
+      // Strip any accidental code fences
+      const text = raw.replace(/^```[\w]*\s*/i, '').replace(/```\s*$/, '').trim();
+      const jobs = JSON.parse(text);
+      if (Array.isArray(jobs) && jobs.length > 0) return jobs;
+      console.warn(`  [getAIJobs attempt ${attempt}] Parsed but got ${Array.isArray(jobs) ? 0 : 'non-array'}. Retrying…`);
+    } catch(e) {
+      console.warn(`  [getAIJobs attempt ${attempt}] Error: ${e.response?.data?.error?.message || e.message}`);
+      if (attempt < 2) await new Promise(r => setTimeout(r, 2000));
+    }
+  }
+  return [];
 }
 
-Focus on variety: document translation, legal/medical, subtitling, interpreting, transcription. Real companies only.`;
-
-  const res = await axios.post('https://api.openai.com/v1/chat/completions', {
-    model: 'gpt-4o',
-    temperature: 0.4,
-    messages: [{ role: 'user', content: prompt }],
-  }, {
-    headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
-    timeout: 60000,
-  });
-
-  const text = res.data.choices[0].message.content.trim()
-    .replace(/^```json\s*/i, '').replace(/```\s*$/, '');
-  const jobs = JSON.parse(text);
-  return Array.isArray(jobs) ? jobs : [];
-}
+let scrapeInProgress = false;
 
 app.post('/api/scrape', async (req, res) => {
+  if (scrapeInProgress) {
+    return res.json({ ok: false, error: 'Scrape already running — please wait and try again in a moment.' });
+  }
+  scrapeInProgress = true;
   console.log('🔍 /api/scrape — running scraper + AI discovery…');
   const log = [];
 
-  // 1. Run the regular scraper
-  let scraperJobs = [];
   try {
-    const out = await runScraperProcess();
-    log.push('✓ scraper.js finished');
-    console.log(out);
-    // scraper already wrote to jobs-data.json
-    if (fs.existsSync(JOBS_FILE)) {
-      const d = JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8'));
-      scraperJobs = d.jobs || [];
+    // 1. Run the regular scraper
+    let scraperJobs = [];
+    try {
+      const out = await runScraperProcess();
+      log.push('✓ scraper.js finished');
+      console.log(out);
+      if (fs.existsSync(JOBS_FILE)) {
+        const d = JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8'));
+        scraperJobs = d.jobs || [];
+      }
+    } catch (e) {
+      log.push('⚠ scraper.js error: ' + e.message);
+      console.warn(e.message);
+      if (fs.existsSync(JOBS_FILE)) {
+        const d = JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8'));
+        scraperJobs = d.jobs || [];
+      }
     }
-  } catch (e) {
-    log.push('⚠ scraper.js error: ' + e.message);
-    console.warn(e.message);
-    if (fs.existsSync(JOBS_FILE)) {
-      const d = JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8'));
-      scraperJobs = d.jobs || [];
+
+    // 2. AI-discovered jobs via GPT-4o
+    let aiJobs = [];
+    try {
+      aiJobs = await getAIJobs();
+      log.push(`✓ GPT-4o returned ${aiJobs.length} AI-discovered jobs`);
+      console.log(`  AI jobs: ${aiJobs.length}`);
+    } catch (e) {
+      log.push('⚠ AI discovery error: ' + e.message);
+      console.warn('AI jobs error:', e.message);
     }
+
+    // 3. Merge — AI jobs first, then scraper jobs; deduplicate by id
+    const seen = new Set();
+    const merged = [...aiJobs, ...scraperJobs].filter(j => {
+      if (!j || !j.id) return false;
+      if (seen.has(j.id)) return false;
+      seen.add(j.id);
+      return true;
+    }).sort((a, b) => new Date(b.postedDate) - new Date(a.postedDate));
+
+    const output = { lastUpdated: new Date().toISOString(), count: merged.length, jobs: merged };
+    fs.writeFileSync(JOBS_FILE, JSON.stringify(output, null, 2));
+    log.push(`✓ Saved ${merged.length} total jobs to jobs-data.json`);
+
+    res.json({ ok: true, total: merged.length, scraper: scraperJobs.length, ai: aiJobs.length, jobs: merged, log });
+  } finally {
+    scrapeInProgress = false;
   }
-
-  // 2. AI-discovered jobs via GPT-4o
-  let aiJobs = [];
-  try {
-    aiJobs = await getAIJobs();
-    log.push(`✓ GPT-4o returned ${aiJobs.length} AI-discovered jobs`);
-    console.log(`  AI jobs: ${aiJobs.length}`);
-  } catch (e) {
-    log.push('⚠ AI discovery error: ' + e.message);
-    console.warn('AI jobs error:', e.message);
-  }
-
-  // 3. Merge — AI jobs first, then scraper jobs; deduplicate by id
-  const seen = new Set();
-  const merged = [...aiJobs, ...scraperJobs].filter(j => {
-    if (!j || !j.id) return false;
-    if (seen.has(j.id)) return false;
-    seen.add(j.id);
-    return true;
-  }).sort((a, b) => new Date(b.postedDate) - new Date(a.postedDate));
-
-  const output = {
-    lastUpdated: new Date().toISOString(),
-    count: merged.length,
-    jobs: merged,
-  };
-  fs.writeFileSync(JOBS_FILE, JSON.stringify(output, null, 2));
-  log.push(`✓ Saved ${merged.length} total jobs to jobs-data.json`);
-
-  res.json({
-    ok: true,
-    total: merged.length,
-    scraper: scraperJobs.length,
-    ai: aiJobs.length,
-    jobs: merged,   // full array so admin can update grid without a static-file fetch
-    log,
-  });
 });
 
 // ── GET /api/status ───────────────────────────────────────────
