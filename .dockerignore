@@ -1,0 +1,4 @@
+transcriber/node_modules
+transcriber/uploads
+transcriber/output
+transcriber/.env

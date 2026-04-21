@@ -727,8 +727,11 @@ function esc(s) {
 }
 
 // ── SCRAPER TRIGGER ───────────────────────────────────────
-// Tools server base URL (used for scraper + tools panel)
-const TOOLS_API = 'http://localhost:3007';
+// On localhost → hit the Node server directly.
+// On Railway / iPhone → use a relative URL (nginx proxies /api/ → Node server).
+const TOOLS_API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+  ? 'http://localhost:3007'
+  : '';
 
 // Calls /api/scrape → runs scraper.js + GPT-4o AI discovery.
 // Server returns the full jobs array so we update the grid directly
