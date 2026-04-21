@@ -16,7 +16,9 @@ RUN mkdir -p /usr/share/nginx/html
 COPY . /usr/share/nginx/html/
 
 COPY nginx.conf /etc/nginx/nginx.conf
+
+# Strip Windows CRLF from start.sh before making executable
 COPY start.sh /start.sh
-RUN chmod +x /start.sh
+RUN sed -i 's/\r//' /start.sh && chmod +x /start.sh
 
 CMD ["/start.sh"]
