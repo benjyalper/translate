@@ -1,7 +1,9 @@
 FROM node:18-alpine
 
-# Install nginx
-RUN apk add --no-cache nginx
+# Install nginx and remove its default conflicting configs
+RUN apk add --no-cache nginx \
+    && rm -f /etc/nginx/http.d/default.conf \
+    && rm -f /etc/nginx/conf.d/default.conf
 
 # ── Install tools server dependencies ────────────────────────
 WORKDIR /srv/transcriber

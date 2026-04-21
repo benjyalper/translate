@@ -748,7 +748,10 @@ async function runScraper() {
 
   try {
     const res  = await fetch(`${TOOLS_API}/api/scrape`, { method: 'POST' });
-    const data = await res.json();
+    const text = await res.text();
+    let data;
+    try { data = JSON.parse(text); }
+    catch(e) { throw new Error(`Server returned non-JSON (status ${res.status}): ${text.slice(0,120)}`); }
     if (!data.ok) {
       if (data.error && data.error.includes('already running')) {
         toastMsg.textContent = '⏳ Scrape already in progress — please wait…';
