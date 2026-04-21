@@ -400,8 +400,10 @@ app.get('/api/download/:filename', (req, res) => {
 // Runs the JobScraper AND calls GPT-4o to discover extra AI-sourced jobs.
 // Merges both into jobs-data.json and returns stats.
 
-const JOBS_FILE    = path.join(__dirname, '..', 'JobScraper', 'jobs-data.json');
-const SCRAPER_FILE = path.join(__dirname, '..', 'JobScraper', 'scraper.js');
+// SITE_ROOT: in Docker = /usr/share/nginx/html, locally = parent of transcriber/
+const SITE_ROOT    = process.env.SITE_ROOT || path.join(__dirname, '..');
+const JOBS_FILE    = path.join(SITE_ROOT, 'JobScraper', 'jobs-data.json');
+const SCRAPER_FILE = path.join(SITE_ROOT, 'JobScraper', 'scraper.js');
 
 // Run node scraper.js and resolve when done
 function runScraperProcess() {
@@ -513,8 +515,14 @@ app.post('/api/scrape', async (req, res) => {
     }).sort((a, b) => new Date(b.postedDate) - new Date(a.postedDate));
 
     const output = { lastUpdated: new Date().toISOString(), count: merged.length, jobs: merged };
-    fs.writeFileSync(JOBS_FILE, JSON.stringify(output, null, 2));
-    log.push(`✓ Saved ${merged.length} total jobs to jobs-data.json`);
+    try {
+      fs.mkdirSync(path.dirname(JOBS_FILE), { recursive: true });
+      fs.writeFileSync(JOBS_FILE, JSON.stringify(output, null, 2));
+      log.push(`✓ Saved ${merged.length} total jobs to jobs-data.json`);
+    } catch(e) {
+      log.push(`⚠ Could not save jobs-data.json: ${e.message}`);
+      console.warn('jobs-data.json write failed:', e.message);
+    }
 
     res.json({ ok: true, total: merged.length, scraper: scraperJobs.length, ai: aiJobs.length, jobs: merged, log });
   } finally {
