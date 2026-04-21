@@ -14,7 +14,7 @@ const {
 } = require('docx');
 
 const app  = express();
-const PORT = process.env.PORT || 3007;
+const PORT = process.env.TOOLS_PORT || 3007; // internal port — never uses Railway's PORT
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 if (!OPENAI_API_KEY) {
