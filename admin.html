@@ -619,7 +619,7 @@ async function loadJobs() {
     const sources = [...new Set(allJobs.map(j => j.source))];
     document.getElementById('stat-sources').textContent = sources.length;
     const tod = today();
-    document.getElementById('stat-new').textContent = allJobs.filter(j => j.postedDate === tod).length;
+    document.getElementById('stat-new').textContent = allJobs.filter(j => j.scrapedDate === tod).length;
     if (data.lastUpdated) {
       const d = new Date(data.lastUpdated);
       document.getElementById('last-updated').textContent = 'Last scraped: ' + d.toLocaleString();
@@ -768,7 +768,7 @@ async function runScraper() {
       const sources = [...new Set(allJobs.map(j => j.source))];
       document.getElementById('stat-sources').textContent = sources.length;
       const tod = today();
-      document.getElementById('stat-new').textContent = allJobs.filter(j => j.postedDate === tod).length;
+      document.getElementById('stat-new').textContent = allJobs.filter(j => j.scrapedDate === tod).length;
       document.getElementById('last-updated').textContent = 'Last scraped: ' + new Date().toLocaleString();
       renderJobs();
     }

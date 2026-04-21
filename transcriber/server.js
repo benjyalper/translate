@@ -507,12 +507,14 @@ app.post('/api/scrape', async (req, res) => {
 
     // 3. Merge — AI jobs first, then scraper jobs; deduplicate by id
     const seen = new Set();
+    const scrapeDate = new Date().toISOString().slice(0, 10); // stamp the day this scrape ran
     const merged = [...aiJobs, ...scraperJobs].filter(j => {
       if (!j || !j.id) return false;
       if (seen.has(j.id)) return false;
       seen.add(j.id);
       return true;
-    }).sort((a, b) => new Date(b.postedDate) - new Date(a.postedDate));
+    }).map(j => ({ ...j, scrapedDate: scrapeDate }))
+      .sort((a, b) => new Date(b.postedDate) - new Date(a.postedDate));
 
     const output = { lastUpdated: new Date().toISOString(), count: merged.length, jobs: merged };
     try {
