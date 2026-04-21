@@ -6,6 +6,7 @@
   <title>Admin — Translation Jobs | Benjy Alper</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
     :root{
@@ -561,6 +562,69 @@
         <!-- Error -->
         <div id="tr-error" style="display:none;padding:.7rem 1rem;background:#1a0000;border:1px solid #7f1d1d;border-radius:8px;font-size:.82rem;color:#fca5a5"></div>
       </div><!-- /trados card -->
+
+      <!-- ── 📋 QA REVISOR ─────────────────────────────────── -->
+      <div class="tool-card" style="grid-column:1/-1">
+        <div class="tool-header">
+          <div class="tool-icon">📋</div>
+          <div>
+            <div class="tool-title">XBench QA Report Revisor</div>
+            <div class="tool-sub">Upload QA report (.xlsx) + SDLRPX → auto-apply corrections → download revised package</div>
+          </div>
+        </div>
+        <div class="tool-divider"></div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:.8rem">
+          <div>
+            <label style="font-size:.75rem;color:#94a3b8;display:block;margin-bottom:.4rem">① XBench QA Report</label>
+            <div class="tdrop" id="qa-xlsx-drop">
+              <input type="file" id="qa-xlsx-file" accept=".xlsx,.xls" onchange="qaOnXlsx(this)"/>
+              <div class="tdrop-icon">📊</div>
+              <div class="tdrop-text">Drop .xlsx file or click<br><small>XBench exported QA report</small></div>
+            </div>
+            <div class="tdrop-sel" id="qa-xlsx-label" style="display:none"></div>
+          </div>
+          <div>
+            <label style="font-size:.75rem;color:#94a3b8;display:block;margin-bottom:.4rem">② SDLRPX Package</label>
+            <div class="tdrop" id="qa-rpx-drop">
+              <input type="file" id="qa-rpx-file" accept=".sdlrpx,.sdlppx,.zip" onchange="qaOnRpx(this)"/>
+              <div class="tdrop-icon">📦</div>
+              <div class="tdrop-text">Drop .sdlrpx file or click<br><small>Trados review package</small></div>
+            </div>
+            <div class="tdrop-sel" id="qa-rpx-label" style="display:none"></div>
+          </div>
+        </div>
+
+        <button class="tbtn" id="qa-parse-btn" onclick="qaParseAndPreview()" disabled>🔍 Parse &amp; Preview Fixes</button>
+
+        <!-- Preview table -->
+        <div id="qa-preview" style="display:none;margin-top:.8rem">
+          <div id="qa-summary" style="font-size:.8rem;color:#94a3b8;margin-bottom:.5rem"></div>
+          <div style="max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;margin-bottom:.8rem">
+            <table style="width:100%;border-collapse:collapse;font-size:.75rem">
+              <thead>
+                <tr style="background:#1e1b4b;position:sticky;top:0">
+                  <th style="padding:.45rem .6rem;text-align:center;color:#a5b4fc;width:55px">Seg</th>
+                  <th style="padding:.45rem .6rem;text-align:left;color:#a5b4fc;width:130px">Type</th>
+                  <th style="padding:.45rem .6rem;text-align:left;color:#a5b4fc">Current target</th>
+                  <th style="padding:.45rem .6rem;text-align:left;color:#a5b4fc">→ Fix</th>
+                </tr>
+              </thead>
+              <tbody id="qa-tbody"></tbody>
+            </table>
+          </div>
+          <button class="tbtn gold" id="qa-apply-btn" onclick="qaApplyFixes()">⚡ Apply All Fixes &amp; Download</button>
+        </div>
+
+        <!-- Progress -->
+        <div class="tprog" id="qa-prog">
+          <div class="tprog-text" id="qa-prog-text">Processing…</div>
+          <div class="tprog-bar-outer"><div class="tprog-bar-inner" id="qa-prog-bar"></div></div>
+        </div>
+
+        <!-- Error -->
+        <div id="qa-error" style="display:none;padding:.7rem 1rem;background:#1a0000;border:1px solid #7f1d1d;border-radius:8px;font-size:.82rem;color:#fca5a5;margin-top:.6rem"></div>
+      </div><!-- /qa card -->
 
     </div><!-- /.tools-grid -->
   </div><!-- /#tools-panel -->
@@ -1225,6 +1289,295 @@ async function trTranslate() {
     prog.classList.remove('show');
     err.style.display = 'block'; err.textContent = '❌ ' + e.message;
   } finally { btn.disabled = false; }
+}
+
+// ── QA REVISOR ──────────────────────────────────────────
+let qaXlsxBuf = null, qaRpxFile = null, qaRpxName = '';
+let qaParsedFixes = [];
+
+function qaOnXlsx(input) {
+  const f = input.files[0]; if (!f) return;
+  const lbl = document.getElementById('qa-xlsx-label');
+  lbl.textContent = f.name; lbl.style.display = 'block';
+  const r = new FileReader();
+  r.onload = e => { qaXlsxBuf = e.target.result; qaCheckReady(); };
+  r.readAsArrayBuffer(f);
+}
+function qaOnRpx(input) {
+  const f = input.files[0]; if (!f) return;
+  qaRpxFile = f; qaRpxName = f.name;
+  const lbl = document.getElementById('qa-rpx-label');
+  lbl.textContent = f.name; lbl.style.display = 'block';
+  qaCheckReady();
+}
+function qaCheckReady() {
+  document.getElementById('qa-parse-btn').disabled = !(qaXlsxBuf && qaRpxFile);
+}
+
+function qaExtractRawIssues(rows) {
+  // Returns Map<segId, issue>; key term issues take priority
+  const keyTermMap = new Map();
+  const incoMap    = new Map();
+  let currentType = null, currentCorrectTerm = null;
+
+  for (const row of rows) {
+    const col0 = String(row[0] || '').trim();
+
+    if (col0 === 'Inconsistency in Target') { currentType = 'inco'; currentCorrectTerm = null; continue; }
+    const ktm = col0.match(/^Key Term Mismatch\s*\((.+?)\s*\/\s*(.+?)\)/);
+    if (ktm) { currentType = 'keyterm'; currentCorrectTerm = ktm[2].trim(); continue; }
+    if (!currentType) continue;
+
+    const segMatch = col0.match(/\((\d+)\)$/);
+    if (!segMatch) continue;
+
+    const segId   = parseInt(segMatch[1]);
+    const source  = String(row[2] || '').trim();
+    const target  = String(row[3] || '').trim();
+    const comment = String(row[4] || '').trim();
+
+    if (currentType === 'keyterm') {
+      // Authoritative: always add / overwrite
+      keyTermMap.set(segId, { segId, source, xliffTarget: target, correctTerm: currentCorrectTerm, type: 'keyterm' });
+    } else {
+      // Inconsistency: add only when comment is a real correction (not a glossary ref or same-as-target)
+      if (comment && comment !== target &&
+          !comment.startsWith('Dreame') && !comment.startsWith('http') &&
+          !incoMap.has(segId)) {
+        incoMap.set(segId, { segId, source, xliffTarget: target, correction: comment, type: 'inconsistency' });
+      }
+    }
+  }
+
+  // Merge — key term wins over inconsistency for the same seg
+  const all = [...keyTermMap.values()];
+  for (const fix of incoMap.values()) if (!keyTermMap.has(fix.segId)) all.push(fix);
+  return all.sort((a, b) => a.segId - b.segId);
+}
+
+// Get content of <mrk mtype="seg" mid="X"> that sits inside <target> (not seg-source)
+function qaGetMrkContent(xliff, segId) {
+  const mrkOpen = `<mrk mtype="seg" mid="${segId}">`;
+  let pos = 0;
+  while (true) {
+    const idx = xliff.indexOf(mrkOpen, pos);
+    if (idx === -1) return null;
+    const before = xliff.substring(Math.max(0, idx - 400), idx);
+    if (before.lastIndexOf('<target') > before.lastIndexOf('<seg-source')) {
+      const contentStart = idx + mrkOpen.length;
+      const closeIdx = xliff.indexOf('</mrk>', contentStart);
+      return closeIdx === -1 ? null : xliff.substring(contentStart, closeIdx);
+    }
+    pos = idx + mrkOpen.length;
+  }
+}
+
+// Replace mrk content in <target> context only
+function qaFixMrkInXliff(xliff, segId, newContent) {
+  const mrkOpen = `<mrk mtype="seg" mid="${segId}">`;
+  let result = xliff, pos = 0, changed = 0;
+  while (true) {
+    const idx = result.indexOf(mrkOpen, pos);
+    if (idx === -1) break;
+    const before = result.substring(Math.max(0, idx - 400), idx);
+    if (before.lastIndexOf('<target') > before.lastIndexOf('<seg-source')) {
+      const contentStart = idx + mrkOpen.length;
+      const closeIdx = result.indexOf('</mrk>', contentStart);
+      if (closeIdx === -1) break;
+      result = result.substring(0, contentStart) + newContent + result.substring(closeIdx);
+      changed++;
+      pos = contentStart + newContent.length;
+    } else {
+      pos = idx + mrkOpen.length;
+    }
+  }
+  return { result, changed };
+}
+
+async function qaParseAndPreview() {
+  const btn  = document.getElementById('qa-parse-btn');
+  const err  = document.getElementById('qa-error');
+  const prev = document.getElementById('qa-preview');
+  btn.disabled = true; err.style.display = 'none'; prev.style.display = 'none';
+
+  try {
+    // 1. Parse XLSX rows
+    const wb   = XLSX.read(qaXlsxBuf, { type: 'array' });
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
+    const rawIssues = qaExtractRawIssues(rows);
+    if (rawIssues.length === 0) throw new Error('No fixable issues found in QA report');
+
+    // 2. Open SDLRPX → find he-IL SDLXLIFF
+    const rpxBuf = await qaRpxFile.arrayBuffer();
+    const zip    = await JSZip.loadAsync(rpxBuf);
+    let xliffContent = null;
+    for (const [relPath, entry] of Object.entries(zip.files)) {
+      if (!entry.dir && relPath.endsWith('.sdlxliff') && /^he[-_]/i.test(relPath.split('/')[0])) {
+        xliffContent = await entry.async('string');
+        break;
+      }
+    }
+    if (!xliffContent) throw new Error('No he-IL SDLXLIFF found in package');
+
+    // 3. Classify each issue
+    qaParsedFixes = [];
+    for (const issue of rawIssues) {
+      const actual = qaGetMrkContent(xliffContent, issue.segId);
+      if (actual === null) continue; // segment not in this file
+
+      const hasXml    = /<[^>]+>/.test(actual);
+      const stripped  = actual.replace(/<[^>]+>/g, '').trim();
+      const isSentence = stripped.length > 60;
+      const correction = issue.type === 'keyterm' ? issue.correctTerm : issue.correction;
+      const needsAI    = hasXml || isSentence;
+
+      qaParsedFixes.push({
+        ...issue,
+        actualMrkContent: actual,
+        strippedActual: stripped,
+        correction,    // used for both direct + AI (AI uses as the term to insert)
+        needsAI,
+        aiCorrection: null
+      });
+    }
+
+    if (qaParsedFixes.length === 0) throw new Error('None of the flagged segments were found in the SDLXLIFF');
+
+    // 4. Render preview
+    const directN = qaParsedFixes.filter(f => !f.needsAI).length;
+    const aiN     = qaParsedFixes.filter(f =>  f.needsAI).length;
+    document.getElementById('qa-summary').textContent =
+      `${qaParsedFixes.length} segments to fix: ${directN} direct replacement${directN!==1?'s':''} + ${aiN} GPT-4o assisted`;
+
+    document.getElementById('qa-tbody').innerHTML = qaParsedFixes.map(f => {
+      const typeBadge = f.type === 'keyterm'
+        ? `<span style="background:#7c3aed33;color:#c084fc;padding:1px 5px;border-radius:4px">Key Term</span>`
+        : `<span style="background:#0891b233;color:#67e8f9;padding:1px 5px;border-radius:4px">Inconsistency</span>`;
+      const gptBadge = f.needsAI
+        ? ` <span style="background:#f59e0b22;color:#fbbf24;padding:1px 4px;border-radius:4px;font-size:.68rem">GPT</span>`
+        : '';
+      const fixDisplay = f.type === 'keyterm'
+        ? `→ use <strong style="color:#86efac">${f.correctTerm}</strong>`
+        : `→ <strong style="color:#86efac">${f.correction}</strong>`;
+      return `<tr style="border-bottom:1px solid #1e293b">
+        <td style="padding:.4rem .6rem;text-align:center;color:#94a3b8;font-family:monospace">${f.segId}</td>
+        <td style="padding:.4rem .6rem">${typeBadge}${gptBadge}</td>
+        <td style="padding:.4rem .6rem;color:#cbd5e1;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl" title="${f.strippedActual}">${f.strippedActual}</td>
+        <td style="padding:.4rem .6rem;color:#e2e8f0;direction:rtl">${fixDisplay}</td>
+      </tr>`;
+    }).join('');
+
+    prev.style.display = 'block';
+  } catch(e) {
+    err.style.display = 'block'; err.textContent = '❌ ' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function qaApplyFixes() {
+  const apiKey  = getApiKey();
+  const needGPT = qaParsedFixes.some(f => f.needsAI);
+  if (needGPT && !apiKey) { promptApiKey(); return; }
+
+  const btn  = document.getElementById('qa-apply-btn');
+  const prog = document.getElementById('qa-prog');
+  const bar  = document.getElementById('qa-prog-bar');
+  const txt  = document.getElementById('qa-prog-text');
+  const err  = document.getElementById('qa-error');
+  btn.disabled = true; prog.classList.add('show'); err.style.display = 'none';
+  bar.style.width = '5%';
+
+  try {
+    // Phase 1: GPT-4o for complex segments
+    const aiFixes = qaParsedFixes.filter(f => f.needsAI);
+    if (aiFixes.length > 0 && apiKey) {
+      const BATCH = 8;
+      for (let i = 0; i < aiFixes.length; i += BATCH) {
+        const batch = aiFixes.slice(i, i + BATCH);
+        bar.style.width = (5 + (i / aiFixes.length) * 55) + '%';
+        txt.textContent = `GPT-4o: segments ${i+1}–${Math.min(i+BATCH, aiFixes.length)} of ${aiFixes.length}…`;
+
+        const items = batch.map((f, j) =>
+          `${j+1}. Source: "${f.source}" | Correct term: "${f.correction}" | Current target: ${f.actualMrkContent}`
+        ).join('\n');
+
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey },
+          body: JSON.stringify({
+            model: 'gpt-4o', temperature: 0.1,
+            messages: [
+              { role: 'system', content: 'You fix Hebrew Trados SDLXLIFF translations. For each numbered segment: replace the wrong term with the specified correct term. Preserve ALL XML tags exactly as-is (like <x id="…"/>, <g id="…">, </g>). Output ONLY the corrected target content, numbered to match input, one per line.' },
+              { role: 'user',   content: items }
+            ]
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error?.message || 'GPT-4o error ' + res.status);
+        const lines = data.choices[0].message.content.trim().split('\n').filter(l => l.trim());
+        for (let j = 0; j < batch.length; j++) {
+          const m = (lines[j] || '').match(/^\d+\.\s*([\s\S]+)$/);
+          batch[j].aiCorrection = m ? m[1].trim() : null;
+        }
+
+        if (i + BATCH < aiFixes.length) await new Promise(r => setTimeout(r, 600));
+      }
+    }
+
+    bar.style.width = '65%'; txt.textContent = 'Opening SDLRPX package…';
+
+    // Phase 2: Open ZIP, copy all files, fix SDLXLIFF
+    const rpxBuf = await qaRpxFile.arrayBuffer();
+    const zip    = await JSZip.loadAsync(rpxBuf);
+    const outZip = new JSZip();
+
+    const xliffPaths = [];
+    const copyPromises = [];
+    zip.forEach((relPath, entry) => {
+      if (entry.dir) return;
+      if (relPath.endsWith('.sdlxliff') && /^he[-_]/i.test(relPath.split('/')[0])) {
+        xliffPaths.push(relPath);
+      } else {
+        copyPromises.push(entry.async('arraybuffer').then(ab => outZip.file(relPath, ab)));
+      }
+    });
+    await Promise.all(copyPromises);
+
+    bar.style.width = '78%'; txt.textContent = 'Applying fixes to SDLXLIFF…';
+    let totalFixed = 0;
+    for (const relPath of xliffPaths) {
+      let content = await zip.file(relPath).async('string');
+      for (const fix of qaParsedFixes) {
+        const newContent = fix.needsAI ? fix.aiCorrection : fix.correction;
+        if (!newContent) continue;
+        const { result, changed } = qaFixMrkInXliff(content, fix.segId, newContent);
+        content  = result;
+        totalFixed += changed;
+      }
+      outZip.file(relPath, content);
+    }
+
+    bar.style.width = '92%'; txt.textContent = 'Building revised package…';
+    const outBlob = await outZip.generateAsync({
+      type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 }
+    });
+    const url = URL.createObjectURL(outBlob);
+    const a   = document.createElement('a');
+    a.href = url; a.download = qaRpxName.replace(/(\.[^.]+)$/, '_QA_REVISED$1');
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+
+    bar.style.width = '100%';
+    txt.textContent = `✅ Done! Applied ${totalFixed} segment fix${totalFixed!==1?'es':''} — check your Downloads folder`;
+    setTimeout(() => prog.classList.remove('show'), 3000);
+
+  } catch(e) {
+    prog.classList.remove('show');
+    err.style.display = 'block'; err.textContent = '❌ ' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
 }
 </script>
 </body>
