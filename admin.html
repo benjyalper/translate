@@ -1293,7 +1293,7 @@ async function trTranslate() {
 }
 
 // ── QA REVISOR v2 ───────────────────────────────────────
-let qaXlsxBuf = null, qaRpxFile = null, qaRpxName = '';
+let qaXlsxBuf = null, qaRpxFile = null, qaRpxName = '', qaRpxBuf = null;
 let qaParsedFixes = []; // final list shown in table
 
 function qaOnXlsx(input) {
@@ -1476,8 +1476,8 @@ async function qaParseAndPreview() {
     const rawIssues = qaParseAllIssues(rows);
     if (!rawIssues.length) throw new Error('No fixable issues found in QA report');
 
-    const rpxBuf = await qaRpxFile.arrayBuffer();
-    const zip    = await JSZip.loadAsync(rpxBuf);
+    qaRpxBuf = await qaRpxFile.arrayBuffer(); // store so apply() can reuse without re-reading
+    const zip = await JSZip.loadAsync(qaRpxBuf);
     let xliffContent = null;
     for (const [relPath, entry] of Object.entries(zip.files)) {
       if (!entry.dir && relPath.endsWith('.sdlxliff') && /^he[-_]/i.test(relPath.split('/')[0])) {
@@ -1619,8 +1619,7 @@ Output only the corrected/translated text for each item, numbered to match, one 
     }
 
     bar.style.width = '67%'; txt.textContent = 'Opening package…';
-    const rpxBuf = await qaRpxFile.arrayBuffer();
-    const zip    = await JSZip.loadAsync(rpxBuf);
+    const zip = await JSZip.loadAsync(qaRpxBuf); // reuse buffer stored during parse
     const outZip = new JSZip();
     const xliffPaths = [];
     const copies = [];
