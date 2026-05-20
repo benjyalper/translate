@@ -37,6 +37,10 @@ app.use((req, res, next) => {
 
 // ── Static frontend ───────────────────────────────────────────
 app.use(express.static(path.join(__dirname, 'public')));
+// Also serve the site root (translate/) so admin.html is reachable at
+// http://localhost:3007/admin.html — avoids file:// CORS / Private Network
+// Access issues when using Assist Apply locally.
+app.use(express.static(path.join(__dirname, '..')));
 
 // ── Multer: audio ─────────────────────────────────────────────
 const audioStorage = multer.diskStorage({
@@ -529,6 +533,83 @@ app.post('/api/scrape', async (req, res) => {
     res.json({ ok: true, total: merged.length, scraper: scraperJobs.length, ai: aiJobs.length, jobs: merged, log });
   } finally {
     scrapeInProgress = false;
+  }
+});
+
+// ── POST /api/assist-apply ────────────────────────────────────
+// Launches a visible Chromium via Playwright, navigates to the job URL,
+// auto-fills detectable fields + uploads CV + pastes a GPT-drafted cover
+// letter, then leaves the browser open for the user to review & submit.
+// Only runs locally (requires a display — skip on Railway).
+app.use(express.json({ limit: '1mb' }));
+
+const ASSIST_SCRIPT = path.join(__dirname, 'assistApply.js');
+const PROFILE_FILE  = path.join(__dirname, 'profile.json');
+
+async function draftCoverLetter({ jobTitle, jobCompany, jobDescription }) {
+  if (!OPENAI_API_KEY) {
+    return `Dear ${jobCompany || 'hiring team'},\n\nI'm Benjy Alper, a Hebrew-English translator with 10+ years of experience and 500+ completed projects across legal, medical, business, technical, and literary work. I'd love to help with "${jobTitle || 'this role'}".\n\nTypical turnaround is under 24 hours. References and sample translations available on request.\n\nBest,\nBenjy\nbenjyalper@hotmail.com | +972 50-991-6633`;
+  }
+  let profile = {};
+  try { profile = JSON.parse(fs.readFileSync(PROFILE_FILE, 'utf8')); } catch {}
+
+  const prompt = `Write a concise, professional cover letter (120-180 words) for this translation job. Address it to the company if known. Sound human, specific, and confident — no fluff, no em-dashes, no "I am writing to apply".
+
+Job title: ${jobTitle || 'N/A'}
+Company: ${jobCompany || 'N/A'}
+Description: ${(jobDescription || '').slice(0, 1500)}
+
+Applicant profile:
+- Name: ${profile.fullName}
+- ${profile.headline}
+- ${profile.summary}
+- Specializations: ${(profile.specializations || []).join('; ')}
+- Tools: ${(profile.tools || []).join(', ')}
+- Contact: ${profile.email} | ${profile.phoneDisplay}
+
+Sign off with just the name, email, and phone. No subject line. No placeholders.`;
+
+  try {
+    const { data } = await axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      { model: 'gpt-4o', messages: [{ role: 'user', content: prompt }], temperature: 0.6, max_tokens: 400 },
+      { headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' }, timeout: 30000 }
+    );
+    return (data.choices?.[0]?.message?.content || '').trim();
+  } catch (e) {
+    console.warn('cover-letter draft failed:', e.message);
+    return `Hello,\n\nI'm Benjy Alper, a Hebrew-English translator with 10+ years of experience. I'd like to be considered for ${jobTitle || 'this role'}.\n\nBest,\nBenjy\nbenjyalper@hotmail.com`;
+  }
+}
+
+app.post('/api/assist-apply', async (req, res) => {
+  const { jobUrl, jobTitle = '', jobCompany = '', jobDescription = '' } = req.body || {};
+  if (!jobUrl) return res.status(400).json({ error: 'jobUrl is required' });
+
+  // Guard: Playwright needs a display. Railway containers don't have one.
+  if (process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_STATIC_URL) {
+    return res.status(400).json({ error: 'Assisted apply only runs locally — Railway has no display.' });
+  }
+
+  try {
+    const coverLetter = await draftCoverLetter({ jobTitle, jobCompany, jobDescription });
+    const payload = JSON.stringify({ jobUrl, jobTitle, jobCompany, coverLetter });
+
+    // Spawn detached so the browser keeps running after the HTTP response
+    const child = spawn('node', [ASSIST_SCRIPT, payload], {
+      cwd: __dirname,
+      env: process.env,
+      detached: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    child.stdout.on('data', d => process.stdout.write('[assist] ' + d));
+    child.stderr.on('data', d => process.stderr.write('[assist] ' + d));
+    child.on('error', e => console.error('assist spawn error:', e.message));
+
+    res.json({ ok: true, message: 'Browser launching — fields will be auto-filled. Review and submit manually.', coverLetter });
+  } catch (e) {
+    console.error('assist-apply error:', e);
+    res.status(500).json({ error: e.message || 'Assisted apply failed' });
   }
 });
 
