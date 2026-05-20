@@ -103,7 +103,7 @@ async function scrapeWWR() {
 async function scrapeWorkingNomads() {
   console.log('  Scraping WorkingNomads...');
   try {
-    const { data } = await axios.get('https://workingnomads.com/api/exposed_jobs/?category=writing-jobs', { timeout: 10000 });
+    const { data } = await axios.get('https://workingnomads.com/api/exposed_jobs/?category=writing-jobs', { timeout: 25000 });
     const jobs = Array.isArray(data) ? data : [];
     const filtered = jobs.filter(j =>
       isRelevant(j.title || '', j.description || '')
@@ -717,6 +717,104 @@ async function scrapeFreelancer() {
   }
 }
 
+// ── SOURCE: ProZ.com (Hebrew-specific RSS) ────────────────
+// ProZ is the #1 translation marketplace. Their RSS feeds are free and
+// pre-filtered by language pair. No auth, no bot blocking.
+async function scrapeProZ() {
+  console.log('  Scraping ProZ...');
+  const feeds = [
+    // Hebrew source language
+    'https://search.proz.com/?sp=jobs&rss=1&source=Hebrew',
+    // Hebrew target language
+    'https://search.proz.com/?sp=jobs&rss=1&target=Hebrew',
+    // Generic translation jobs RSS
+    'https://search.proz.com/?sp=jobs&rss=1',
+  ];
+  // Fetch with a real browser UA, then hand the XML to rss-parser —
+  // many sites 403 the default rss-parser User-Agent.
+  const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+  const jobs = [];
+  for (const url of feeds) {
+    try {
+      const { data: xml } = await axios.get(url, {
+        headers: { 'User-Agent': UA, 'Accept': 'application/rss+xml, application/xml, text/xml' },
+        timeout: 15000,
+      });
+      const feed = await parser.parseString(xml);
+      (feed.items || []).forEach(it => {
+        const title = clean(it.title);
+        const desc  = clean(it.contentSnippet || it.content || '');
+        // Keep anything Hebrew-related from the pair-specific feeds;
+        // on the generic feed, still require "hebrew" mention.
+        const requireHebrew = url === feeds[2];
+        if (requireHebrew && !/hebrew/i.test(title + ' ' + desc)) return;
+        jobs.push({
+          id: makeId('proz', it.link || title),
+          title,
+          company: clean(it.author || it['dc:creator'] || 'ProZ Client'),
+          location: 'Remote',
+          type: 'Freelance / Translation',
+          description: desc.slice(0, 500),
+          url: it.link || 'https://www.proz.com/translation-jobs/',
+          source: 'ProZ',
+          postedDate: parseDate(it.pubDate || it.isoDate),
+          tags: ['translation', 'hebrew'],
+          salary: '',
+        });
+      });
+    } catch (e) { /* try next feed */ }
+  }
+  const seen = new Set();
+  const unique = jobs.filter(j => { if (seen.has(j.id)) return false; seen.add(j.id); return true; });
+  console.log(`  ✓ ProZ: ${unique.length} jobs found`);
+  return unique;
+}
+
+// ── SOURCE: TranslatorsCafe (Hebrew jobs page) ────────────
+async function scrapeTranslatorsCafe() {
+  console.log('  Scraping TranslatorsCafe...');
+  try {
+    const { data } = await axios.get(
+      'https://www.translatorscafe.com/cafe/JobsSource.asp?Action=Source&SourceID=22', // 22 = Hebrew
+      {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml',
+          'Accept-Language': 'en-US,en;q=0.9',
+        },
+        timeout: 15000,
+      }
+    );
+    const $ = cheerio.load(data);
+    const jobs = [];
+    $('table tr, .jobrow, [class*="job"]').each((i, el) => {
+      if (i > 30) return;
+      const title = clean($('a', el).first().text());
+      const href  = $('a', el).first().attr('href') || '';
+      const desc  = clean($('td', el).eq(1).text()).slice(0, 300);
+      if (!title || title.length < 5) return;
+      if (!/translat|interpret|subtitl|proofread|linguist|locali[sz]/i.test(title + ' ' + desc)) return;
+      jobs.push({
+        id: makeId('tcafe', title + i),
+        title, company: 'TranslatorsCafe Client',
+        location: 'Remote',
+        type: 'Freelance / Translation',
+        description: desc,
+        url: href.startsWith('http') ? href : 'https://www.translatorscafe.com' + href,
+        source: 'TranslatorsCafe',
+        postedDate: today(),
+        tags: ['translation', 'hebrew'],
+        salary: '',
+      });
+    });
+    console.log(`  ✓ TranslatorsCafe: ${jobs.length} jobs found`);
+    return jobs;
+  } catch (e) {
+    console.warn(`  ✗ TranslatorsCafe: ${e.message}`);
+    return [];
+  }
+}
+
 // ── DEDUPLICATE ───────────────────────────────────────────
 function deduplicate(jobs) {
   const seen = new Set();
@@ -743,6 +841,16 @@ async function main() {
     scrapeLinkedInExtra(),
     scrapeArbeitnow(),
     scrapeTheMuse(),
+    // ── Translation-specific sources ──
+    scrapeProZ(),
+    scrapeIndeedHebrew(),
+    scrapeJooble(),
+    scrapeGoogle(),
+    scrapeUpwork(),
+    scrapeFreelancer(),
+    scrapeAdzuna(),
+    scrapeGlassdoor(),
+    scrapeJobrapido(),
   ]);
 
   const allJobs = results.flatMap(r => r.status === 'fulfilled' ? r.value : []);
