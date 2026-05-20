@@ -160,6 +160,16 @@
       transition:transform .15s,box-shadow .15s;display:inline-block;text-align:center;
     }
     .apply-btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(79,70,229,.35)}
+    .assist-btn{
+      padding:.55rem 1.1rem;border-radius:50px;
+      background:linear-gradient(135deg,#f59e0b,#d97706);
+      color:#fff;font-size:.78rem;font-weight:700;text-decoration:none;
+      white-space:nowrap;border:none;cursor:pointer;
+      transition:transform .15s,box-shadow .15s;display:inline-block;text-align:center;
+    }
+    .assist-btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(245,158,11,.4)}
+    .assist-btn:disabled{opacity:.5;cursor:wait;transform:none}
+    .job-actions{display:flex;flex-direction:column;gap:.5rem;align-items:stretch}
 
     /* ── JOB BOARDS PANEL ── */
     .boards-section{margin-top:3rem}
@@ -627,6 +637,96 @@
         <div id="qa-error" style="display:none;padding:.7rem 1rem;background:#1a0000;border:1px solid #7f1d1d;border-radius:8px;font-size:.82rem;color:#fca5a5;margin-top:.6rem"></div>
       </div><!-- /qa card -->
 
+      <!-- ── ✉️ EMAIL RESPONSE GENERATOR ────────────────────── -->
+      <div class="tool-card" style="grid-column:1/-1">
+        <div class="tool-header">
+          <div class="tool-icon">✉️</div>
+          <div>
+            <div class="tool-title">Email Response Generator</div>
+            <div class="tool-sub">Paste a job posting / client email → drafts a tailored reply in Benjy's voice · gpt-4o-mini default (~$0.0003/email)</div>
+          </div>
+        </div>
+        <div class="tool-divider"></div>
+
+        <!-- Input: paste OR file -->
+        <div style="display:grid;grid-template-columns:1.5fr 1fr;gap:1rem;margin-bottom:.8rem">
+          <div>
+            <label style="font-size:.75rem;color:#94a3b8;display:block;margin-bottom:.4rem">① Paste the job posting / incoming email</label>
+            <textarea id="er-input" rows="10"
+              placeholder="Hi, my name is Anita and I am from Maxsun Translation…"
+              style="width:100%;padding:.7rem .9rem;background:#0f0f17;border:1px solid var(--border);border-radius:8px;color:#e2e8f0;font-family:'Inter',sans-serif;font-size:.82rem;resize:vertical;outline:none"></textarea>
+            <div style="margin-top:.5rem">
+              <label class="tbtn" style="cursor:pointer;display:inline-flex;width:auto;padding:.5rem 1rem;font-size:.75rem;background:#1e1b4b;color:#a5b4fc">
+                📂 Or load .txt / .docx file
+                <input type="file" id="er-file" accept=".txt,.docx,.md" style="display:none" onchange="erOnFile(this)"/>
+              </label>
+              <span id="er-file-label" style="font-size:.72rem;color:#94a3b8;margin-left:.6rem"></span>
+            </div>
+          </div>
+          <div>
+            <label style="font-size:.75rem;color:#94a3b8;display:block;margin-bottom:.4rem">② Tone &amp; options</label>
+            <div style="display:flex;flex-direction:column;gap:.5rem">
+              <label style="font-size:.78rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem">
+                <span style="min-width:80px">Style:</span>
+                <select id="er-style" style="flex:1;padding:.5rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.8rem">
+                  <option value="warm-professional">Warm professional (default)</option>
+                  <option value="concise">Concise &amp; direct</option>
+                  <option value="formal">Formal / agency-style</option>
+                </select>
+              </label>
+              <label style="font-size:.78rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem">
+                <span style="min-width:80px">Length:</span>
+                <select id="er-length" style="flex:1;padding:.5rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.8rem">
+                  <option value="medium">Medium (8–14 lines)</option>
+                  <option value="short">Short (4–6 lines)</option>
+                  <option value="long">Detailed (15–20 lines)</option>
+                </select>
+              </label>
+              <label style="font-size:.78rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem">
+                <span style="min-width:80px">Model:</span>
+                <select id="er-model" style="flex:1;padding:.5rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.8rem">
+                  <option value="gpt-4o-mini">gpt-4o-mini (~$0.0003 / email)</option>
+                  <option value="gpt-4o">gpt-4o (~$0.008 / email · higher quality)</option>
+                </select>
+              </label>
+              <label style="font-size:.78rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem">
+                <input type="checkbox" id="er-rate" checked/> Include rate placeholder
+              </label>
+              <label style="font-size:.78rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem">
+                <input type="checkbox" id="er-cv" checked/> Mention CV attached
+              </label>
+              <label style="font-size:.78rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem">
+                <input type="checkbox" id="er-link" checked/> Include personal website link
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <button class="tbtn gold" id="er-btn" onclick="erGenerate()">✨ Generate Response</button>
+
+        <!-- Progress -->
+        <div class="tprog" id="er-prog">
+          <div class="tprog-text" id="er-prog-text">Drafting reply…</div>
+          <div class="tprog-bar-outer"><div class="tprog-bar-inner" id="er-prog-bar"></div></div>
+        </div>
+
+        <!-- Output -->
+        <div id="er-out-wrap" style="display:none;margin-top:.8rem">
+          <label style="font-size:.75rem;color:#94a3b8;display:block;margin-bottom:.4rem">③ Generated response (editable)</label>
+          <textarea id="er-output" rows="14"
+            style="width:100%;padding:.85rem 1rem;background:#0f0f17;border:1px solid #4f46e5;border-radius:8px;color:#e2e8f0;font-family:'Inter',sans-serif;font-size:.85rem;line-height:1.5;resize:vertical;outline:none;white-space:pre-wrap"></textarea>
+          <div style="display:flex;gap:.5rem;margin-top:.6rem;flex-wrap:wrap">
+            <button class="tbtn" style="width:auto;padding:.55rem 1.1rem;font-size:.78rem" onclick="erCopy()">📋 Copy</button>
+            <button class="tbtn" style="width:auto;padding:.55rem 1.1rem;font-size:.78rem;background:#1e1b4b;color:#a5b4fc" onclick="erDownload()">⬇ Download .txt</button>
+            <button class="tbtn" style="width:auto;padding:.55rem 1.1rem;font-size:.78rem;background:#1e1b4b;color:#a5b4fc" onclick="erRegenerate()">🔁 Regenerate</button>
+            <button class="tbtn" style="width:auto;padding:.55rem 1.1rem;font-size:.78rem;background:#1e1b4b;color:#a5b4fc" onclick="erOpenMail()">📧 Open in Mail</button>
+          </div>
+        </div>
+
+        <!-- Error -->
+        <div id="er-error" style="display:none;padding:.7rem 1rem;background:#1a0000;border:1px solid #7f1d1d;border-radius:8px;font-size:.82rem;color:#fca5a5;margin-top:.6rem"></div>
+      </div><!-- /email-response card -->
+
     </div><!-- /.tools-grid -->
   </div><!-- /#tools-panel -->
 
@@ -774,7 +874,10 @@ function renderJobs() {
       </div>
       <div class="job-right">
         <div class="job-date">📅 ${j.postedDate}</div>
-        <a href="${esc(j.url)}" target="_blank" class="apply-btn">Apply →</a>
+        <div class="job-actions">
+          <a href="${esc(j.url)}" target="_blank" class="apply-btn">Apply →</a>
+          <button class="assist-btn" onclick="assistApply(${idx}, this)" title="Open a browser with the form auto-filled — you review and click Submit">🚀 Assist Apply</button>
+        </div>
       </div>
     </div>
   `).join('');
@@ -791,12 +894,80 @@ function esc(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// ── ASSISTED APPLY ────────────────────────────────────────
+// Calls /api/assist-apply → server spawns Playwright with headed Chromium,
+// navigates to the job URL, auto-fills detectable fields + CV + cover letter,
+// leaves the window open for you to review and click Submit.
+async function assistApply(idx, btnEl) {
+  const q   = (document.getElementById('search-input').value || '').toLowerCase();
+  const src = document.getElementById('source-filter').value;
+  let jobs = allJobs.filter(j => {
+    const text = (j.title + ' ' + j.company + ' ' + j.description + ' ' + (j.tags||[]).join(' ')).toLowerCase();
+    return (!q || text.includes(q)) && (!src || j.source === src);
+  });
+  if (sortMode === 'rel') {
+    jobs.sort((a, b) => {
+      const aHeb = /hebrew/i.test(a.title) ? 1 : 0;
+      const bHeb = /hebrew/i.test(b.title) ? 1 : 0;
+      return bHeb - aHeb || new Date(b.postedDate) - new Date(a.postedDate);
+    });
+  } else {
+    jobs.sort((a, b) => new Date(b.postedDate) - new Date(a.postedDate));
+  }
+
+  const job = jobs[idx];
+  if (!job) return;
+
+  const isLocal = location.protocol === 'file:' ||
+                  location.hostname === 'localhost' ||
+                  location.hostname === '127.0.0.1';
+  if (!isLocal) {
+    alert('Assisted Apply only works when running locally.\n\nThe hosted version has no display for the browser window.\nRun the server on your machine (http://localhost:3007) to use this.');
+    return;
+  }
+
+  const toast    = document.getElementById('scrape-toast');
+  const toastMsg = document.getElementById('toast-msg');
+  const original = btnEl.innerHTML;
+  btnEl.disabled = true;
+  btnEl.innerHTML = '⏳ Launching…';
+  toast.classList.add('show');
+  toastMsg.innerHTML = `🚀 Drafting cover letter + launching browser for <strong>${esc(job.title)}</strong>…`;
+
+  try {
+    const res = await fetch(`${TOOLS_API}/api/assist-apply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jobUrl: job.url,
+        jobTitle: job.title,
+        jobCompany: job.company,
+        jobDescription: job.description || '',
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Assisted apply failed');
+    toastMsg.innerHTML = `✅ ${esc(data.message || 'Browser opened — review & submit')}`;
+    setTimeout(() => toast.classList.remove('show'), 6000);
+  } catch (e) {
+    toastMsg.innerHTML = `❌ ${esc(e.message)}`;
+    setTimeout(() => toast.classList.remove('show'), 5000);
+  } finally {
+    btnEl.disabled = false;
+    btnEl.innerHTML = original;
+  }
+}
+
 // ── SCRAPER TRIGGER ───────────────────────────────────────
 // On localhost → hit the Node server directly.
 // On Railway / iPhone → use a relative URL (nginx proxies /api/ → Node server).
-const TOOLS_API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-  ? 'http://localhost:3007'
-  : '';
+// file:// (double-clicked) and localhost both → hit the Node tools server directly.
+// Everything else (Railway) → relative URL so nginx can proxy /api/*.
+const TOOLS_API = (
+  location.protocol === 'file:' ||
+  location.hostname === 'localhost' ||
+  location.hostname === '127.0.0.1'
+) ? 'http://localhost:3007' : '';
 
 // Calls /api/scrape → runs scraper.js + GPT-4o AI discovery.
 // Server returns the full jobs array so we update the grid directly
@@ -1658,6 +1829,212 @@ Output only the corrected/translated text for each item, numbered to match, one 
     prog.classList.remove('show');
     err.style.display = 'block'; err.textContent = '❌ ' + e.message;
   } finally { btn.disabled = false; }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ✉️ EMAIL RESPONSE GENERATOR — drafts replies in Benjy's voice
+// ═══════════════════════════════════════════════════════════════
+const ER_PROFILE = {
+  name: 'Benjy Alper',
+  email: 'benjyalper@hotmail.com',
+  phone: '+972 50-991-6633',
+  website: 'https://translate-production-4ac8.up.railway.app/',
+  langs: 'Hebrew (native) ↔ English (native-level)',
+  experience: '10+ years, 500+ projects',
+  cat: 'SDL Trados Studio, memoQ',
+  specs: 'legal, medical, business/financial, technical/software, literary, academic',
+  turnaround: 'typically <24 hours',
+};
+
+async function erLoadDocx(file) {
+  // Read .docx using jszip → extract word/document.xml → strip tags
+  const buf = await file.arrayBuffer();
+  const zip = await JSZip.loadAsync(buf);
+  const xml = await zip.file('word/document.xml').async('text');
+  // Convert paragraph breaks then strip XML tags
+  return xml
+    .replace(/<w:p[ >][\s\S]*?<\/w:p>/g, m => {
+      const text = m.replace(/<[^>]+>/g, '');
+      return text + '\n';
+    })
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+    .trim();
+}
+
+async function erOnFile(input) {
+  const file = input.files?.[0];
+  if (!file) return;
+  const label = document.getElementById('er-file-label');
+  label.textContent = '⏳ Reading ' + file.name + '…';
+  try {
+    let text = '';
+    if (file.name.toLowerCase().endsWith('.docx')) {
+      text = await erLoadDocx(file);
+    } else {
+      text = await file.text();
+    }
+    document.getElementById('er-input').value = text;
+    label.textContent = '✓ ' + file.name + ' (' + text.length + ' chars)';
+  } catch (e) {
+    label.textContent = '❌ ' + e.message;
+  }
+}
+
+function erBuildSystemPrompt(style, length, includeRate, includeCV, includeLink) {
+  const lengthGuide = {
+    short:  '4–6 short lines, very tight',
+    medium: '8–14 lines, comfortable but efficient',
+    long:   '15–20 lines, more thorough — cover scope, terms, availability',
+  }[length] || '8–14 lines';
+
+  const styleGuide = {
+    'warm-professional': 'Warm, professional, human. Friendly opener, confident but not pushy.',
+    'concise':           'Direct and businesslike. Skip pleasantries beyond a one-line greeting.',
+    'formal':            'Formal agency-style register. Use "Dear …" salutation.',
+  }[style] || 'Warm, professional, human.';
+
+  return `You are drafting an email reply on behalf of Benjy Alper, a Hebrew-English freelance translator. Match the tone and structure of the examples below.
+
+APPLICANT PROFILE (use only what's relevant — don't dump everything):
+- Name: ${ER_PROFILE.name}
+- Email: ${ER_PROFILE.email}
+- Phone: ${ER_PROFILE.phone}
+- Website: ${ER_PROFILE.website}
+- Languages: ${ER_PROFILE.langs}
+- Experience: ${ER_PROFILE.experience}
+- CAT tools: ${ER_PROFILE.cat}
+- Specializations: ${ER_PROFILE.specs}
+- Turnaround: ${ER_PROFILE.turnaround}
+
+STYLE: ${styleGuide}
+LENGTH: ${lengthGuide}
+
+RULES:
+- Greet the sender BY NAME if a name is given in the posting (e.g. "Hi Anita,"). Otherwise "Dear [Company] Team," or "Hello,".
+- Mirror the sender's terminology (e.g. if they say "linguist network", echo it; if they say "datasheet, UI, catalogs", reuse those words).
+- Confirm the language pair direction explicitly (e.g. "English into Hebrew").
+- If the posting mentions a CAT tool, confirm Benjy uses it.
+- If the posting mentions a domain (renewable energy, medical, legal, etc.), confirm relevant experience naturally — don't oversell.
+${includeRate ? '- Include a rate section with USD placeholders: "Translation: USD ___ per source word" and "Proofreading/Editing: USD ___ per source word" (only if rate is being asked or it makes sense).' : '- Do NOT mention rates unless directly asked.'}
+${includeCV ? '- Mention that the CV is attached, briefly.' : '- Do NOT mention a CV attachment.'}
+${includeLink ? '- Include the personal website link at the end (after the signature line): ' + ER_PROFILE.website : '- Do NOT include the website link.'}
+- Ask for missing project details (scope, volume, deadline, file format, glossary/style guide) — but only if not already provided.
+- Sign off with just: "Best regards,\\nBenjy Alper" (plus email/website if appropriate).
+- NO em-dashes. NO "I am writing to express my interest" clichés (unless formal style explicitly requested). NO subject line. NO placeholders other than the rate ones above.
+- Output ONLY the email body. No commentary, no markdown headers.`;
+}
+
+let erLastInput = '';
+
+async function erGenerate() {
+  const apiKey = getApiKey();
+  if (!apiKey) { promptApiKey(); return; }
+
+  const input = document.getElementById('er-input').value.trim();
+  if (!input) {
+    document.getElementById('er-error').style.display = 'block';
+    document.getElementById('er-error').textContent = '❌ Please paste or upload an incoming email/posting first.';
+    return;
+  }
+  erLastInput = input;
+
+  const style       = document.getElementById('er-style').value;
+  const length      = document.getElementById('er-length').value;
+  const model       = document.getElementById('er-model').value || 'gpt-4o-mini';
+  const includeRate = document.getElementById('er-rate').checked;
+  const includeCV   = document.getElementById('er-cv').checked;
+  const includeLink = document.getElementById('er-link').checked;
+
+  const btn  = document.getElementById('er-btn');
+  const prog = document.getElementById('er-prog');
+  const bar  = document.getElementById('er-prog-bar');
+  const txt  = document.getElementById('er-prog-text');
+  const err  = document.getElementById('er-error');
+  const out  = document.getElementById('er-out-wrap');
+
+  err.style.display = 'none';
+  out.style.display = 'none';
+  btn.disabled = true;
+  prog.classList.add('show');
+  bar.style.width = '15%';
+  txt.textContent = 'Drafting reply with ' + model + '…';
+
+  try {
+    const systemPrompt = erBuildSystemPrompt(style, length, includeRate, includeCV, includeLink);
+
+    const r = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user',   content: 'Incoming message:\n\n' + input }
+        ],
+        temperature: 0.55,
+        max_tokens: 700,
+      }),
+    });
+    bar.style.width = '70%';
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      throw new Error(j.error?.message || ('OpenAI error ' + r.status));
+    }
+    const j = await r.json();
+    let reply = (j.choices?.[0]?.message?.content || '').trim();
+    // Strip accidental code fences
+    reply = reply.replace(/^```[a-z]*\n?/i, '').replace(/```$/,'').trim();
+
+    bar.style.width = '100%';
+    txt.textContent = '✓ Done';
+    document.getElementById('er-output').value = reply;
+    out.style.display = 'block';
+    setTimeout(() => prog.classList.remove('show'), 1500);
+  } catch (e) {
+    prog.classList.remove('show');
+    err.style.display = 'block';
+    err.textContent = '❌ ' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function erRegenerate() {
+  if (!erLastInput) return;
+  erGenerate();
+}
+
+function erCopy() {
+  const ta = document.getElementById('er-output');
+  ta.select();
+  navigator.clipboard.writeText(ta.value).then(
+    () => showAdminToast('✅ Copied to clipboard'),
+    () => showAdminToast('❌ Copy failed — select & copy manually')
+  );
+}
+
+function erDownload() {
+  const text = document.getElementById('er-output').value;
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'email-response-' + new Date().toISOString().slice(0,10) + '.txt';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+function erOpenMail() {
+  const body = document.getElementById('er-output').value;
+  // Try to detect sender email from input for "To:" prefill
+  const inputText = document.getElementById('er-input').value;
+  const m = inputText.match(/[\w.+-]+@[\w-]+\.[\w.-]+/);
+  const to = m ? m[0] : '';
+  const subject = 'Re: Hebrew ↔ English Translation';
+  const url = 'mailto:' + encodeURIComponent(to)
+            + '?subject=' + encodeURIComponent(subject)
+            + '&body='   + encodeURIComponent(body);
+  window.location.href = url;
 }
 </script>
 </body>
