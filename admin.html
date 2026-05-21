@@ -2303,6 +2303,32 @@ async function tcCallWhisper(src, name, endpoint, apiKey, languageHint) {
 //  - Uses user's custom vocabulary hints
 //  - Allows model selection (gpt-5.4 / gpt-5.5 / gpt-5.4-mini)
 // ───────────────────────────────────────────────────────────────
+// Parse "1. text\n2. text\n…" responses tolerantly. Continuation lines
+// without a leading "N." are appended to the most recently-started item.
+// Critical because GPT often wraps long translations onto multiple lines
+// — the old per-line-match parser silently dropped everything past line 1.
+function parseNumberedResponse(raw, expectedCount) {
+  const out = new Array(expectedCount).fill('');
+  let currentIdx = -1;
+  const lines = (raw || '').split('\n');
+  for (const rawLine of lines) {
+    const m = rawLine.match(/^\s*(\d+)\.\s*(.*)$/);
+    if (m) {
+      const idx = parseInt(m[1], 10) - 1;
+      if (idx >= 0 && idx < expectedCount) {
+        currentIdx = idx;
+        out[currentIdx] = m[2];
+      } else {
+        currentIdx = -1;
+      }
+    } else if (currentIdx >= 0) {
+      const trimmed = rawLine.trim();
+      if (trimmed) out[currentIdx] += (out[currentIdx] ? ' ' : '') + trimmed;
+    }
+  }
+  return out.map(s => s.trim());
+}
+
 async function tcTranslateSegmentsGPT(segments, model, apiKey, onProgress) {
   if (!segments || !segments.length) return [];
   const vocab = (document.getElementById('tc-hint-vocab')?.value || '').trim();
@@ -2343,14 +2369,8 @@ ${vocab ? 'PRESERVE THESE TERMS EXACTLY (in their original spelling/casing): ' +
       const data = await r.json();
       if (!r.ok) throw new Error(data.error?.message || ('GPT error ' + r.status));
       const raw = (data.choices?.[0]?.message?.content || '').trim();
-      const lines = raw.split('\n').filter(l => l.trim());
-      const parsed = [];
-      for (const line of lines) {
-        const m = line.match(/^\s*\d+\.\s*([\s\S]+)$/);
-        if (m) parsed.push(m[1].trim());
-      }
-      // Pad with empties if model returned fewer
-      while (parsed.length < slice.length) parsed.push('');
+      // Robust parser: handles multi-line continuation under each "N." marker
+      const parsed = parseNumberedResponse(raw, slice.length);
       // Map back into segments with text_en
       for (let j = 0; j < slice.length; j++) {
         out.push({ ...slice[j], text_en: parsed[j] });
@@ -2417,13 +2437,8 @@ ${vocab ? 'BRAND / VOCABULARY TERMS to recognize in their English form: ' + voca
       const data = await r.json();
       if (!r.ok) throw new Error(data.error?.message || ('GPT error ' + r.status));
       const raw = (data.choices?.[0]?.message?.content || '').trim();
-      const lines = raw.split('\n').filter(l => l.trim());
-      const parsed = [];
-      for (const line of lines) {
-        const m = line.match(/^\s*\d+\.\s*([\s\S]+)$/);
-        if (m) parsed.push(m[1].trim());
-      }
-      while (parsed.length < slice.length) parsed.push('');
+      // Robust parser: handles multi-line continuation under each "N." marker
+      const parsed = parseNumberedResponse(raw, slice.length);
       for (let j = 0; j < slice.length; j++) {
         // Only replace if the model returned something; otherwise keep original
         const cleaned = parsed[j];
@@ -3721,11 +3736,9 @@ async function trTranslateBatch(texts, apiKey, model) {
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error?.message || ('GPT error ' + res.status));
-  const lines = data.choices[0].message.content.trim().split('\n').filter(l => l.trim());
-  const out = [];
-  for (const line of lines) { const m = line.match(/^\d+\.\s*([\s\S]+)$/); if (m) out.push(m[1].trim()); }
-  while (out.length < texts.length) out.push('');
-  return out;
+  // Robust parser: handles multi-line continuation under each "N." marker
+  const raw = (data.choices?.[0]?.message?.content || '').trim();
+  return parseNumberedResponse(raw, texts.length);
 }
 
 async function trProcessXliff(content, apiKey, onProgress, model) {
@@ -4293,13 +4306,21 @@ RULES:
 }
 
 // Sentence-aware chunking. Returns an array of strings, each ~targetWords long.
-// Splits on Hebrew sentence punctuation + newlines so we don't break mid-sentence.
+// Tolerant: handles Hebrew punctuation, single newlines (treated as soft breaks
+// only when at least one strong-punctuation-end occurs nearby), and partial
+// sentence endings (comma + newline is still mid-sentence, period + newline
+// is a hard break).
 function htSplitIntoMinutes(text, wpm) {
   const targetWords = Math.max(40, parseInt(wpm, 10) || 150);
-  // Split on . ! ? ׃ ; or two+ newlines, keeping the punctuation with the prior sentence.
-  // Hebrew also uses standard Latin punctuation, so the regex stays simple.
-  const sentences = text
+  // Normalize newlines and collapse single newlines without nearby punctuation
+  // into spaces (so commas+\n don't fragment the text).
+  const normalized = (text || '')
     .replace(/\r\n?/g, '\n')
+    .replace(/([^.!?؟।。\n])\n+(?=\S)/g, '$1 ')   // mid-sentence newlines → spaces
+    .replace(/\n{2,}/g, '\n\n');                 // collapse runs of blank lines
+
+  // Now split on strong sentence boundaries: . ! ? ׃ ; or paragraph breaks
+  const sentences = normalized
     .split(/(?<=[.!?؟।。])\s+|\n{2,}/)
     .map(s => s.trim())
     .filter(Boolean);
@@ -4308,7 +4329,7 @@ function htSplitIntoMinutes(text, wpm) {
   let current = [];
   let currentWords = 0;
   for (const sentence of sentences) {
-    const wc = sentence.split(/\s+/).length;
+    const wc = sentence.split(/\s+/).filter(Boolean).length;
     current.push(sentence);
     currentWords += wc;
     if (currentWords >= targetWords) {
@@ -4324,7 +4345,7 @@ function htSplitIntoMinutes(text, wpm) {
       buckets[buckets.length - 1] += ' ' + current.join(' ');
     }
   }
-  if (buckets.length === 0) buckets.push(text.trim());
+  if (buckets.length === 0) buckets.push((text || '').trim());
   return buckets;
 }
 
