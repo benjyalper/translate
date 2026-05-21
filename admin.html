@@ -4064,7 +4064,7 @@ async function trTranslate() {
 
     const dl = document.getElementById('tr-dl');
     dl.href = outUrl;
-    dl.download = trFile.name.replace(/\.sdlppx$/i,'') + '_TRANSLATED.sdlrpx';
+    dl.download = trFile.name.replace(/\.sdlppx$/i,'') + '.sdlrpx';
     document.getElementById('tr-results').style.display = 'block';
 
     // Post-actions panel: appears whenever there are translated pairs AND priming
