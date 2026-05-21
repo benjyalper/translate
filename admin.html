@@ -992,6 +992,102 @@
         <div id="ht-error" style="display:none;padding:.7rem 1rem;background:#1a0000;border:1px solid #7f1d1d;border-radius:8px;font-size:.82rem;color:#fca5a5;margin-top:.6rem"></div>
       </div><!-- /hebrew text translator card -->
 
+      <!-- ── 📋 VERBOLABS TEMPLATE FILLER ─────────────────── -->
+      <div class="tool-card" style="grid-column:1/-1">
+        <div class="tool-header">
+          <div class="tool-icon">📋</div>
+          <div>
+            <div class="tool-title">VerboLabs Template Filler (ivrit.ai → English)</div>
+            <div class="tool-sub">Paste an ivrit.ai Hebrew transcript (with <code style="background:#0a0a14;padding:0 4px;border-radius:3px;color:#a5b4fc">[mm:ss-mm:ss] דובר N:</code> format) → GPT-5.4 translates → exports the exact VerboLabs 4-column template with OST &amp; Notes columns left blank for you to fill</div>
+          </div>
+        </div>
+        <div class="tool-divider"></div>
+
+        <div style="display:grid;grid-template-columns:2fr 1fr;gap:1rem;margin-bottom:.7rem">
+          <div>
+            <label style="font-size:.74rem;color:#94a3b8;display:block;margin-bottom:.3rem">① Paste ivrit.ai transcript (or load file below)</label>
+            <textarea id="vl-input" rows="10"
+              placeholder="[0:00-0:05] דובר 1: עניין הבא, פעיל הרשת הישראלי...&#10;[0:05-0:08] דובר 1: שגם היה כלוא בניגריה.&#10;[0:08-0:09] דובר 1: שלום לרודי רושמן.&#10;[0:09-0:10] דובר 0: שלום."
+              dir="rtl"
+              style="width:100%;padding:.7rem .9rem;background:#0f0f17;border:1px solid var(--border);border-radius:8px;color:#e2e8f0;font-family:'Inter',sans-serif;font-size:.84rem;resize:vertical;outline:none"></textarea>
+            <div style="margin-top:.4rem">
+              <label class="tbtn" style="cursor:pointer;display:inline-flex;width:auto;padding:.4rem 1rem;font-size:.72rem;background:#1e1b4b;color:#a5b4fc">
+                📂 Or load .docx / .txt file (incl. ivrit.ai download)
+                <input type="file" id="vl-file" accept=".txt,.docx,.md,.html,.htm,.mht" style="display:none" onchange="vlOnFile(this)"/>
+              </label>
+              <span id="vl-file-label" style="font-size:.72rem;color:#94a3b8;margin-left:.6rem"></span>
+            </div>
+          </div>
+
+          <div>
+            <label style="font-size:.74rem;color:#94a3b8;display:block;margin-bottom:.3rem">② Header fields (filled into the template top)</label>
+            <div style="display:flex;flex-direction:column;gap:.4rem">
+              <input type="text" id="vl-title" placeholder="Video Title (translated)"
+                style="padding:.45rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.78rem"/>
+              <input type="text" id="vl-link" placeholder="Video link (YouTube URL)"
+                style="padding:.45rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.78rem"/>
+              <input type="text" id="vl-lang" value="Hebrew" placeholder="Source language"
+                style="padding:.45rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.78rem"/>
+              <textarea id="vl-comments" rows="2" placeholder="Additional comments (optional)"
+                style="padding:.45rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-family:'Inter',sans-serif;font-size:.76rem;resize:vertical;outline:none"></textarea>
+              <label style="font-size:.76rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem">
+                <span style="min-width:60px">Model:</span>
+                <select id="vl-engine" style="flex:1;padding:.4rem .55rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.76rem">
+                  <option value="gpt-5.4" selected>gpt-5.4 (recommended)</option>
+                  <option value="gpt-5.5">gpt-5.5 (premium)</option>
+                  <option value="gpt-5.4-mini">gpt-5.4-mini (cheap)</option>
+                </select>
+              </label>
+              <label style="font-size:.76rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem">
+                <input type="checkbox" id="vl-summary" checked style="width:.95rem;height:.95rem;cursor:pointer"/>
+                <span>📝 Auto-generate 100–150 word summary</span>
+              </label>
+              <label style="font-size:.76rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem">
+                <input type="checkbox" id="vl-cleanup" checked style="width:.95rem;height:.95rem;cursor:pointer"/>
+                <span>🧹 Clean Hebrew transliterations first</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <button class="tbtn gold" id="vl-btn" onclick="vlGenerate()">✨ Generate VerboLabs Deliverable</button>
+
+        <!-- Progress -->
+        <div class="tprog" id="vl-prog">
+          <div class="tprog-text" id="vl-prog-text">Working…</div>
+          <div class="tprog-bar-outer"><div class="tprog-bar-inner" id="vl-prog-bar"></div></div>
+        </div>
+
+        <!-- Output -->
+        <div id="vl-results" style="display:none;margin-top:.8rem">
+          <div class="tres-badges" id="vl-badges" style="margin-bottom:.6rem"></div>
+          <div style="max-height:480px;overflow-y:auto;border:1px solid var(--border);border-radius:8px">
+            <table style="width:100%;border-collapse:collapse;font-size:.76rem">
+              <thead>
+                <tr style="background:#1e1b4b;position:sticky;top:0;z-index:1">
+                  <th style="padding:.5rem .6rem;text-align:center;color:#a5b4fc;width:120px">Timestamp<br><span style="font-weight:400;font-size:.66rem;color:#94a3b8">(hh:mm:ss)</span></th>
+                  <th style="padding:.5rem .6rem;text-align:left;color:#a5b4fc">Word-for-word Translation</th>
+                  <th style="padding:.5rem .6rem;text-align:left;color:#a5b4fc;width:120px">OST</th>
+                  <th style="padding:.5rem .6rem;text-align:left;color:#a5b4fc;width:120px">Notes</th>
+                </tr>
+              </thead>
+              <tbody id="vl-tbody"></tbody>
+            </table>
+          </div>
+          <div style="margin-top:.7rem;display:flex;gap:.5rem;flex-wrap:wrap">
+            <a class="tbtn gold" id="vl-dl" href="#" style="display:inline-flex;align-items:center;justify-content:center;gap:.4rem;text-decoration:none;padding:.7rem 1.5rem;width:auto">
+              ⬇ Download VerboLabs Deliverable (.doc)
+            </a>
+          </div>
+          <div style="margin-top:.6rem;font-size:.72rem;color:#64748b">
+            <strong style="color:#a5b4fc">Next:</strong> open the downloaded file in Word, fill in the OST &amp; Notes columns by watching the video, then submit to VerboLabs.
+          </div>
+        </div>
+
+        <!-- Error -->
+        <div id="vl-error" style="display:none;padding:.7rem 1rem;background:#1a0000;border:1px solid #7f1d1d;border-radius:8px;font-size:.82rem;color:#fca5a5;margin-top:.6rem"></div>
+      </div><!-- /verbolabs template filler card -->
+
       <!-- ── 📚 GLOSSARY MANAGER ──────────────────────────── -->
       <div class="tool-card" id="glossary-manager" style="grid-column:1/-1">
         <div class="tool-header">
@@ -4753,6 +4849,358 @@ Output only the corrected/translated text for each item, numbered to match, one 
     prog.classList.remove('show');
     err.style.display = 'block'; err.textContent = '❌ ' + e.message;
   } finally { btn.disabled = false; }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  📋 VERBOLABS TEMPLATE FILLER — ivrit.ai → English in template
+//  Input lines look like:  [0:00-0:05] דובר 1: Hebrew text
+//  Uses the timestamps already in the input (no estimation), groups
+//  by floor(startSec/60) into per-minute table rows. OST + Notes
+//  columns are intentionally left blank for manual filling.
+// ═══════════════════════════════════════════════════════════════
+
+// Parse the ivrit.ai format. Accepts raw text OR HTML — strips tags first.
+function vlParseIvritAi(rawInput) {
+  if (!rawInput) return [];
+  // Strip MHT quoted-printable artifacts then HTML tags
+  let text = String(rawInput)
+    .replace(/=\r?\n/g, '')              // MHT soft line breaks
+    .replace(/=([0-9A-F]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16))); // QP decode
+  text = text.replace(/<\/(p|div|br|li)>/gi, '\n').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '');
+  text = text.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+
+  const segments = [];
+  const lines = text.split(/\r?\n/);
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    // Match: [m:ss-m:ss] or [mm:ss-mm:ss] or [h:mm:ss-h:mm:ss] etc., then speaker label, colon, text
+    const m = line.match(/\[(\d{1,2}):(\d{2})(?::(\d{2}))?-(\d{1,2}):(\d{2})(?::(\d{2}))?\]\s*([^:]+?):\s*(.+)$/);
+    if (!m) continue;
+    const sH = m[3] ? parseInt(m[1], 10) : 0;
+    const sM = m[3] ? parseInt(m[2], 10) : parseInt(m[1], 10);
+    const sS = m[3] ? parseInt(m[3], 10) : parseInt(m[2], 10);
+    const eH = m[6] ? parseInt(m[4], 10) : 0;
+    const eM = m[6] ? parseInt(m[5], 10) : parseInt(m[4], 10);
+    const eS = m[6] ? parseInt(m[6], 10) : parseInt(m[5], 10);
+    const startSec = sH*3600 + sM*60 + sS;
+    const endSec   = eH*3600 + eM*60 + eS;
+    const speakerRaw = m[7].trim();
+    const hebrew = m[8].trim();
+    segments.push({ startSec, endSec, speakerRaw, hebrew });
+  }
+  return segments;
+}
+
+// Translate "דובר N" → "Speaker A/B/C…" (alphabetical, in order of appearance).
+// Returns a Map from original raw → translated label.
+function vlMapSpeakers(segments) {
+  const seen = new Map();
+  let nextLetter = 0;
+  const letters = 'ABCDEFGHIJKLMNOP';
+  for (const seg of segments) {
+    if (!seen.has(seg.speakerRaw)) {
+      // Try to extract a numeric index from the raw label (e.g. "דובר 0" → 0)
+      const numMatch = seg.speakerRaw.match(/\d+/);
+      const idx = numMatch ? parseInt(numMatch[0], 10) : nextLetter;
+      seen.set(seg.speakerRaw, 'Speaker ' + (letters[idx] || ('#' + idx)));
+      nextLetter++;
+    }
+  }
+  return seen;
+}
+
+// Group segments into minute-buckets (0:00–1:00, 1:00–2:00, …).
+function vlGroupByMinute(segments) {
+  if (!segments.length) return [];
+  const lastEnd = segments[segments.length - 1].endSec || segments[segments.length - 1].startSec;
+  const totalMin = Math.max(1, Math.ceil(lastEnd / 60));
+  const buckets = [];
+  for (let m = 0; m < totalMin; m++) {
+    buckets.push({ minute: m, start: m * 60, end: (m + 1) * 60, segments: [] });
+  }
+  for (const seg of segments) {
+    const idx = Math.min(buckets.length - 1, Math.max(0, Math.floor(seg.startSec / 60)));
+    buckets[idx].segments.push(seg);
+  }
+  return buckets;
+}
+
+// Within a bucket, merge consecutive segments by the same speaker so we
+// don't repeat the "Speaker A:" prefix on every short phrase.
+function vlMergeBySpeaker(segments) {
+  const turns = [];
+  let cur = null;
+  for (const s of segments) {
+    if (cur && cur.speakerRaw === s.speakerRaw) {
+      cur.hebrew  += ' ' + s.hebrew;
+      cur.english += ' ' + (s.english || '');
+      cur.endSec = s.endSec;
+    } else {
+      cur = { ...s, english: s.english || '' };
+      turns.push(cur);
+    }
+  }
+  return turns;
+}
+
+let vlLastResult = null;
+
+async function vlOnFile(input) {
+  const file = input.files?.[0];
+  if (!file) return;
+  const label = document.getElementById('vl-file-label');
+  label.textContent = '⏳ Reading ' + file.name + '…';
+  try {
+    let text = '';
+    const lower = file.name.toLowerCase();
+    if (lower.endsWith('.docx')) {
+      // The ivrit.ai download is a docx with an HTML payload inside (word/afchunk.mht).
+      // Try the standard docx reader first, then fall back to MHT.
+      const buf = await file.arrayBuffer();
+      const zip = await JSZip.loadAsync(buf);
+      // 1) Standard docx: word/document.xml
+      let raw = '';
+      const docXml = zip.file('word/document.xml');
+      if (docXml) raw = await docXml.async('text');
+      // 2) MHT-wrapped HTML: word/afchunk.mht
+      if (!raw || raw.length < 200) {
+        const mht = zip.file('word/afchunk.mht');
+        if (mht) raw = await mht.async('text');
+      }
+      text = raw;
+    } else if (lower.endsWith('.mht') || lower.endsWith('.html') || lower.endsWith('.htm')) {
+      text = await file.text();
+    } else {
+      text = await file.text();
+    }
+    document.getElementById('vl-input').value = text;
+    label.textContent = '✓ ' + file.name + ' (' + text.length + ' chars)';
+  } catch (e) {
+    label.textContent = '❌ ' + e.message;
+  }
+}
+
+async function vlGenerate() {
+  const apiKey = getApiKey();
+  if (!apiKey) { promptApiKey(); return; }
+  const raw = document.getElementById('vl-input').value.trim();
+  if (!raw) { vlShowError('Paste an ivrit.ai transcript or load a file first.'); return; }
+
+  const engine    = document.getElementById('vl-engine').value || 'gpt-5.4';
+  const wantClean = document.getElementById('vl-cleanup').checked;
+  const wantSum   = document.getElementById('vl-summary').checked;
+  const title     = document.getElementById('vl-title').value.trim();
+  const link      = document.getElementById('vl-link').value.trim();
+  const lang      = document.getElementById('vl-lang').value.trim() || 'Hebrew';
+  const comments  = document.getElementById('vl-comments').value.trim();
+
+  const btn  = document.getElementById('vl-btn');
+  const prog = document.getElementById('vl-prog');
+  const bar  = document.getElementById('vl-prog-bar');
+  const txt  = document.getElementById('vl-prog-text');
+  const err  = document.getElementById('vl-error');
+  const res  = document.getElementById('vl-results');
+  err.style.display = 'none'; res.style.display = 'none';
+  btn.disabled = true;
+  prog.classList.add('show');
+  bar.style.width = '5%';
+
+  try {
+    // 1) Parse ivrit.ai format
+    txt.textContent = 'Parsing ivrit.ai transcript…';
+    const segments = vlParseIvritAi(raw);
+    if (!segments.length) throw new Error('No "[mm:ss-mm:ss] speaker: text" lines found. The input must be an ivrit.ai transcript with timestamps.');
+    const speakerMap = vlMapSpeakers(segments);
+    console.log(`[vl] parsed ${segments.length} segments, ${speakerMap.size} speaker(s)`);
+    bar.style.width = '15%';
+
+    // 2) Optional Hebrew cleanup pass
+    let workingSegs = segments.map(s => ({ ...s, text: s.hebrew }));
+    if (wantClean) {
+      txt.textContent = `🧹 Cleaning transliterations in ${segments.length} segments…`;
+      const cleaned = await tcCleanHebrewSource(workingSegs, 'gpt-5.4', apiKey, (m) => { txt.textContent = '🧹 ' + m; });
+      workingSegs = cleaned.map((c, i) => ({ ...segments[i], hebrew: c.text || segments[i].hebrew, text: c.text || segments[i].hebrew }));
+      bar.style.width = '30%';
+    }
+
+    // 3) Translate each segment to English (preserve speaker tags via system prompt)
+    txt.textContent = `Translating ${segments.length} segments with ${engine}…`;
+    const segsForGPT = workingSegs.map(s => ({ ...s, text: s.hebrew }));
+    const translated = await tcTranslateSegmentsGPT(segsForGPT, engine, apiKey, (m) => { txt.textContent = m; });
+    workingSegs = workingSegs.map((s, i) => ({ ...s, english: translated[i]?.text_en || '' }));
+    bar.style.width = '75%';
+
+    // 4) Group by minute
+    txt.textContent = 'Grouping into per-minute boxes…';
+    const buckets = vlGroupByMinute(workingSegs);
+
+    // 5) Optional 100-150 word summary
+    let summary = '';
+    if (wantSum) {
+      txt.textContent = '📝 Generating 100–150 word summary…';
+      try {
+        const englishFull = workingSegs.map(s => s.english).filter(Boolean).join(' ');
+        summary = await tcGenerateSummary(englishFull || workingSegs.map(s => s.hebrew).join(' '), apiKey, (m) => { txt.textContent = '📝 ' + m; });
+      } catch (e) { console.warn('vl summary failed:', e.message); }
+    }
+    bar.style.width = '95%';
+
+    vlLastResult = { buckets, speakerMap, title, link, lang, comments, summary };
+    vlRenderResults(vlLastResult);
+
+    bar.style.width = '100%'; txt.textContent = '✅ Done!';
+    setTimeout(() => prog.classList.remove('show'), 1500);
+  } catch (e) {
+    prog.classList.remove('show');
+    vlShowError(e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function vlShowError(msg) {
+  const err = document.getElementById('vl-error');
+  err.style.display = 'block';
+  err.textContent = '❌ ' + msg;
+}
+
+// hh:mm:ss formatter for the template's left column
+function vlFmtTS(sec) {
+  sec = Math.max(0, Math.floor(sec));
+  const h = Math.floor(sec/3600);
+  const m = Math.floor((sec%3600)/60);
+  const s = sec % 60;
+  return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+
+function vlRenderResults({ buckets, speakerMap, title, link, lang, comments, summary }) {
+  const res = document.getElementById('vl-results');
+  res.style.display = 'block';
+
+  document.getElementById('vl-badges').innerHTML = `
+    <span class="tres-badge tb-seg">📑 ${buckets.length} minute box${buckets.length===1?'':'es'}</span>
+    <span class="tres-badge tb-lang">🎤 ${speakerMap.size} speaker${speakerMap.size===1?'':'s'}</span>
+    <span class="tres-badge tb-lang">📋 VerboLabs template</span>
+    ${summary ? '<span class="tres-badge tb-lang">📝 Summary generated</span>' : ''}`;
+
+  // Live preview table
+  document.getElementById('vl-tbody').innerHTML = buckets.map((b, i) => {
+    const turns = vlMergeBySpeaker(b.segments);
+    const cell = turns.map(t => {
+      const speakerLabel = speakerMap.get(t.speakerRaw) || t.speakerRaw;
+      return `<strong style="color:#a5b4fc">${esc(speakerLabel)}:</strong> ${esc(t.english || '')}`;
+    }).join('<br>');
+    return `<tr style="border-top:1px solid #1f2937">
+      <td style="padding:.5rem .6rem;text-align:center;color:#a5b4fc;vertical-align:top;font-family:monospace;font-weight:600">${vlFmtTS(b.start)}<br>→<br>${vlFmtTS(b.end)}</td>
+      <td style="padding:.5rem .6rem;vertical-align:top;line-height:1.5">${cell || '<span style="color:#64748b;font-style:italic">—</span>'}</td>
+      <td style="padding:.5rem .6rem;vertical-align:top;color:#64748b;font-style:italic;font-size:.7rem">(fill manually)</td>
+      <td style="padding:.5rem .6rem;vertical-align:top;color:#64748b;font-style:italic;font-size:.7rem">(fill manually)</td>
+    </tr>`;
+  }).join('');
+
+  // Build template-styled Word doc
+  const html = vlBuildTemplateHTML({ buckets, speakerMap, title, link, lang, comments, summary });
+  const blob = new Blob(['﻿' + html], { type: 'application/msword' });
+  const url = URL.createObjectURL(blob);
+  const dl = document.getElementById('vl-dl');
+  dl.href = url;
+  const slug = (title || 'verbolabs_translation').replace(/[^a-z0-9]+/gi, '_').slice(0, 50);
+  dl.download = `${slug}.doc`;
+}
+
+// Build the HTML that mimics the VerboLabs template structure.
+function vlBuildTemplateHTML({ buckets, speakerMap, title, link, lang, comments, summary }) {
+  const esch = (t) => (t || '').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const detailedRequest =
+    'A full video review is required for all videos with a word-for-word translation. ' +
+    'Please ensure for the whole video is provided, and provide additional context for ' +
+    'segments that include harassments, insults, and demeaning statements.';
+  const instructions = [
+    'Ensure translations are written word for word (WFW) and that the names of the speaker and listener are there if it is a conversation between 2 or more persons.',
+    'Use quotation marks (“”) for WFW translation.',
+    'Under “OST”, please translate any on-screen text.',
+    'Under “Notes” leave comments explaining specific references, e.g. names of politicians, their involvement in the elections, political terms, acronyms and organizations involved.',
+    'If any segment is inaudible in the video, please provide the timestamps and mark as [inaudible].',
+    'Please translate thumbnails, on-screen text, video title, description and any text on the video along with the main content translation.',
+  ];
+
+  const rowsHTML = buckets.map((b) => {
+    const turns = vlMergeBySpeaker(b.segments);
+    const cellHTML = turns.length
+      ? turns.map(t => {
+          const sp = speakerMap.get(t.speakerRaw) || t.speakerRaw;
+          return `<p style="margin:0 0 6pt 0"><b>${esch(sp)}:</b> ${esch(t.english || '')}</p>`;
+        }).join('')
+      : '<p style="margin:0;color:#888;font-style:italic">(no speech)</p>';
+    return `<tr>
+      <td style="border:1px solid #999;padding:6pt 8pt;vertical-align:top;width:120px;font-family:Consolas,monospace;font-size:10pt;text-align:center">
+        ${vlFmtTS(b.start)} → ${vlFmtTS(b.end)}
+      </td>
+      <td style="border:1px solid #999;padding:6pt 8pt;vertical-align:top;font-size:10pt;line-height:1.4">${cellHTML}</td>
+      <td style="border:1px solid #999;padding:6pt 8pt;vertical-align:top;width:140px;font-size:10pt">&nbsp;</td>
+      <td style="border:1px solid #999;padding:6pt 8pt;vertical-align:top;width:140px;font-size:10pt">&nbsp;</td>
+    </tr>`;
+  }).join('');
+
+  return `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head><meta charset="utf-8"><title>${esch(title || 'VerboLabs Translation')}</title>
+<style>
+body{font-family:Arial,sans-serif;font-size:12pt;line-height:1.4;color:#111}
+.title{text-align:center;font-style:italic;font-weight:bold;font-size:16pt;color:#222;background:#fff;margin:0 0 4pt 0;padding:6pt}
+.colorbar{margin:0 0 12pt 0;line-height:0}
+.colorbar span{display:inline-block;height:6pt;font-size:6pt;color:#fff}
+.cb-r{background:#cc0000;width:120pt}
+.cb-g{background:#6aa84f;width:120pt}
+.cb-b{background:#3c78d8;width:120pt}
+.field{margin:4pt 0;font-size:12pt}
+.field .k{font-weight:bold}
+h3{font-size:12pt;font-weight:bold;color:#222;margin:12pt 0 4pt 0}
+.section{margin:4pt 0 8pt 0;font-size:11pt;line-height:1.45}
+.instructions{margin:4pt 0 8pt 0;font-size:11pt;line-height:1.45;padding-left:20pt}
+.instructions li{margin-bottom:3pt}
+.placeholder{color:#888;font-style:italic;font-size:11pt}
+table.main{border-collapse:collapse;width:100%;margin-top:6pt}
+table.main th{background:#3c78d8;color:#fff;border:1px solid #2a5499;padding:6pt 8pt;font-size:11pt;text-align:left}
+table.main th.center{text-align:center}
+</style></head>
+<body>
+<p class="title">Standardised format for Translation</p>
+<div class="colorbar"><span class="cb-r">&nbsp;</span><span class="cb-g">&nbsp;</span><span class="cb-b">&nbsp;</span></div>
+
+<p class="field"><span class="k">Video Title Translation:</span> ${title ? esch(title) : '<span class="placeholder">(fill in)</span>'}</p>
+<p class="field"><span class="k">Video link:</span> ${link ? esch(link) : '<span class="placeholder">(fill in)</span>'}</p>
+<p class="field"><span class="k">Language:</span> ${esch(lang || 'Hebrew')}</p>
+
+<h3>Detailed request:</h3>
+<p class="section">+${esch(detailedRequest)}</p>
+
+<h3>Instructions:</h3>
+<ol class="instructions">${instructions.map(i => '<li>' + esch(i) + '</li>').join('')}</ol>
+
+<h3>Additional Comments:</h3>
+<p class="section">${comments ? esch(comments) : '<span class="placeholder">(none)</span>'}</p>
+
+<h3>Video Thumbnail:</h3>
+<p class="placeholder">(translate on-screen text from the YouTube thumbnail here)</p>
+
+<h3>Video Description:</h3>
+<p class="placeholder">(paste &amp; translate the YouTube description here)</p>
+
+<h3>Video Summary:</h3>
+<p class="section">${summary ? esch(summary) : '<span class="placeholder">(no summary generated)</span>'}</p>
+
+<table class="main">
+<thead><tr>
+  <th class="center" style="width:120px">Timestamp<br><span style="font-weight:normal;font-size:9pt">(hh:mm:ss)</span></th>
+  <th>Word-for-word Translation</th>
+  <th style="width:140px">OST</th>
+  <th style="width:140px">Notes</th>
+</tr></thead>
+<tbody>${rowsHTML}</tbody>
+</table>
+
+</body></html>`;
 }
 
 // ═══════════════════════════════════════════════════════════════
