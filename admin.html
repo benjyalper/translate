@@ -2877,9 +2877,42 @@ function trOnFile(input) {
 })();
 
 // TRADOS helpers (ported from server.js)
-function trXmlToPlaceholders(xml) { return xml.replace(/<x\s+id="(\d+)"\s*\/>/g, (_, id) => `{{TAG_${id}}}`); }
-function trPlaceholdersToXml(text) { return text.replace(/\{\{TAG_(\d+)\}\}/g, (_, id) => `<x id="${id}"/>`); }
-function trIsTranslatable(text) { return text.replace(/\{\{TAG_\d+\}\}/g,'').trim().length > 0; }
+// SDLXLIFF inline elements that we need to preserve verbatim across translation.
+// Handles self-closing (<x/>), paired (<g>…</g>, <bpt>…</bpt>), and isolated
+// tags. Each occurrence is replaced with a numbered placeholder so GPT can't
+// mangle the XML, and is restored byte-for-byte on the way out.
+const TR_INLINE_TAG_RE = /<\/?(?:x|g|bpt|ept|ph|it|sub|hi|mrk|cf|ut|bx|ex|isf)(?:\s[^>]*)?\/?>/g;
+
+function trXmlToPlaceholders(xml) {
+  // Returns { text, tagMap } — text has {{TAG_N}} where inline elements were.
+  // tagMap is an array of the original XML strings, indexed by N.
+  const tagMap = [];
+  const text = xml.replace(TR_INLINE_TAG_RE, (match) => {
+    const idx = tagMap.length;
+    tagMap.push(match);
+    return `{{TAG_${idx}}}`;
+  });
+  return { text, tagMap };
+}
+
+function trPlaceholdersToXml(text, tagMap) {
+  // 1) Escape any literal XML special characters that the translation
+  //    introduced (e.g. Hebrew text containing "10 < 20" or "&" or ">").
+  //    Without this step, raw < > & chars from GPT would corrupt the XML
+  //    and Trados would fail to open the package.
+  // 2) Restore each {{TAG_N}} placeholder to its original XML string.
+  //    Curly braces aren't XML-special, so the placeholders survive step 1.
+  let escaped = (text || '')
+    .replace(/&/g,  '&amp;')   // must be first
+    .replace(/</g,  '&lt;')
+    .replace(/>/g,  '&gt;');
+  return escaped.replace(/\{\{TAG_(\d+)\}\}/g, (orig, n) => {
+    const idx = parseInt(n, 10);
+    return (tagMap && tagMap[idx] != null) ? tagMap[idx] : orig;
+  });
+}
+
+function trIsTranslatable(text) { return (text || '').replace(/\{\{TAG_\d+\}\}/g,'').trim().length > 0; }
 
 function trExtractSegments(content) {
   const segs = [];
@@ -2891,21 +2924,24 @@ function trExtractSegments(content) {
     let sm;
     while ((sm = srcRe.exec(unitBody)) !== null) {
       const mid = sm[1], rawSrc = sm[2];
-      const sourceText = trXmlToPlaceholders(rawSrc);
+      // Extract inline tags as placeholders and store the map on the segment
+      const { text: sourceText, tagMap } = trXmlToPlaceholders(rawSrc);
       let targetText = '';
       const tgtBlock = unitBody.match(/<target>([\s\S]*?)<\/target>/);
       if (tgtBlock) {
         const tgtMrk = tgtBlock[1].match(new RegExp(`<mrk\\s+mtype="seg"\\s+mid="${mid}">(([\\s\\S]*?))<\\/mrk>`));
         if (tgtMrk) targetText = tgtMrk[2].trim();
       }
-      segs.push({ unitId, mid, rawSrc, sourceText, targetText });
+      segs.push({ unitId, mid, rawSrc, sourceText, targetText, tagMap });
     }
   }
   return segs;
 }
 
 function trInsertTranslation(content, seg, hebrewText) {
-  const xmlText = trPlaceholdersToXml(hebrewText);
+  // Use the per-segment tagMap captured during extraction. Falls back to an
+  // empty map (which still escapes XML chars) if for some reason it's missing.
+  const xmlText = trPlaceholdersToXml(hebrewText, seg.tagMap || []);
   const filled  = `<mrk mtype="seg" mid="${seg.mid}">${xmlText}</mrk>`;
   let out = content.replace(`<mrk mtype="seg" mid="${seg.mid}"/>`, filled);
   if (out === content) {
@@ -2915,6 +2951,22 @@ function trInsertTranslation(content, seg, hebrewText) {
     new RegExp(`(<sdl:seg\\s+id="${seg.mid}")(\\s*\\/?>)`),
     (m, open, close) => m.includes('conf=') ? m : `${open} conf="Translated"${close}`
   );
+}
+
+// Quick well-formedness check on the assembled SDLXLIFF.
+// Uses DOMParser which is built into every browser.
+function trValidateXml(xml) {
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(xml, 'application/xml');
+    const err = doc.querySelector('parsererror');
+    if (err) {
+      return { ok: false, message: (err.textContent || '').slice(0, 300) };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: e.message };
+  }
 }
 
 // ─── Glossary helpers ────────────────────────────────────────
@@ -3760,6 +3812,14 @@ async function trProcessXliff(content, apiKey, onProgress, model) {
       }
     }
     if (i + BATCH < empty.length) await new Promise(r => setTimeout(r, 500));
+  }
+  // Sanity check: ensure the assembled SDLXLIFF is well-formed XML before
+  // we bundle it into the return package. If a translation slipped a bad
+  // character through, fail loudly here rather than producing a broken
+  // .sdlrpx the user can't open in Trados.
+  const check = trValidateXml(content);
+  if (!check.ok) {
+    throw new Error('Translated SDLXLIFF failed XML validation: ' + check.message);
   }
   return { translated, total: segs.length, content, pairs };
 }
