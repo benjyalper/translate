@@ -1852,7 +1852,19 @@ async function tcCallWhisper(src, name, endpoint, apiKey, languageHint) {
     headers: { 'x-openai-key': apiKey },
     body: fd,
   });
-  const data = await res.json();
+  // Defensive parse: server may return HTML (nginx 502 during restart, 404, etc.)
+  const raw = await res.text();
+  let data;
+  try { data = JSON.parse(raw); }
+  catch {
+    if (res.status === 502 || res.status === 504) {
+      throw new Error(`Server restarting (HTTP ${res.status}). Wait 30 seconds and try again.`);
+    }
+    if (res.status === 404) {
+      throw new Error('/api/whisper not found on server — the latest deploy may not be live yet. Wait for Railway to finish deploying then retry.');
+    }
+    throw new Error(`Server returned non-JSON (HTTP ${res.status}). First chars: ${raw.slice(0,120).replace(/\s+/g,' ')}…`);
+  }
   if (!res.ok) throw new Error(data.error?.message || ('Whisper /' + endpoint + ' error ' + res.status));
   return data;
 }
