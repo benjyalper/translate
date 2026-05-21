@@ -2,3 +2,28 @@ JobScraper/node_modules/
 JobScraper/package-lock.json
 generate-samples.js
 generate-viewers.js
+
+# Claude Code session data
+.claude/
+
+# Generated test packages (created by make-trial-sdlppx.js)
+trial.sdlppx
+trial2.sdlppx
+trial*.sdlppx
+trial*.sdlrpx
+
+# Local-only assets / screenshots / personal scratch
+IMG_*.jpeg
+IMG_*.jpg
+IMG_*.png
+
+# Transcriber runtime artifacts
+transcriber/uploads/
+transcriber/output/
+transcriber/node_modules/
+transcriber/*.log
+
+# Env / secrets
+.env
+.env.local
+*.env

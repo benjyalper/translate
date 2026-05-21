@@ -539,8 +539,37 @@
         </div>
         <div class="tdrop-sel" id="tr-file-label"></div>
 
+        <!-- Glossary (optional, collapsible) -->
+        <details style="margin-top:.6rem;background:#0f0f17;border:1px solid var(--border);border-radius:8px;padding:.5rem .8rem">
+          <summary style="cursor:pointer;font-size:.78rem;color:#a5b4fc;font-weight:600;list-style:none">
+            📋 Optional: Glossary / Term Base <span id="tr-gloss-count" style="color:#64748b;font-weight:400">(none loaded)</span>
+          </summary>
+          <div style="margin-top:.6rem">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:.6rem">
+              <div>
+                <label style="font-size:.7rem;color:#94a3b8;display:block;margin-bottom:.3rem">Upload .tsv / .csv / .txt</label>
+                <div class="tdrop" style="padding:.6rem;min-height:0" id="tr-gloss-drop">
+                  <input type="file" id="tr-gloss-file" accept=".tsv,.csv,.txt" onchange="trOnGlossFile(this)"/>
+                  <div class="tdrop-text" style="font-size:.72rem">Drop file or click<br><small style="font-size:.65rem">Two columns: source &lt;TAB or comma&gt; target</small></div>
+                </div>
+              </div>
+              <div>
+                <label style="font-size:.7rem;color:#94a3b8;display:block;margin-bottom:.3rem">Or paste term pairs</label>
+                <textarea id="tr-gloss-paste" rows="3" placeholder="charging dock&#9;תחנת טעינה&#10;robot vacuum&#9;שואב רובוטי&#10;suction power&#9;עוצמת שאיבה"
+                  style="width:100%;padding:.4rem .5rem;background:#0a0a14;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-family:'Inter',sans-serif;font-size:.72rem;resize:vertical;outline:none"></textarea>
+                <button class="tbtn" style="width:auto;padding:.35rem .8rem;font-size:.7rem;margin-top:.3rem;background:#1e1b4b;color:#a5b4fc" onclick="trLoadGlossFromPaste()">↥ Load pasted terms</button>
+              </div>
+            </div>
+            <div id="tr-gloss-status" style="margin-top:.5rem;font-size:.72rem;color:#94a3b8"></div>
+            <div id="tr-gloss-preview" style="display:none;margin-top:.4rem;max-height:120px;overflow-y:auto;border:1px solid #1f2937;border-radius:6px;padding:.4rem .5rem;font-size:.7rem;color:#cbd5e1;background:#0a0a14;font-family:monospace"></div>
+            <div style="margin-top:.4rem">
+              <button class="tbtn" id="tr-gloss-clear" style="display:none;width:auto;padding:.3rem .7rem;font-size:.68rem;background:#1a0000;color:#fca5a5;border:1px solid #7f1d1d" onclick="trClearGloss()">✕ Clear glossary</button>
+            </div>
+          </div>
+        </details>
+
         <!-- Target lang -->
-        <div class="tlang-row">
+        <div class="tlang-row" style="margin-top:.6rem">
           <span class="tlang-lbl">Target&nbsp;lang:</span>
           <button class="tlang-btn active" onclick="trSetLang('he-IL',this)">🇮🇱 he-IL</button>
           <button class="tlang-btn"        onclick="trSetLang('he',this)">he</button>
@@ -1349,22 +1378,151 @@ function trInsertTranslation(content, seg, hebrewText) {
   );
 }
 
+// ─── Glossary helpers ────────────────────────────────────────
+// trGlossary is an array of { source, target } pairs, loaded from
+// file upload or pasted text. Used to prime the GPT system prompt
+// per batch with only the terms that actually appear in that batch.
+let trGlossary = [];
+
+function trParseGlossText(text) {
+  // Accepts TSV (tab-separated) or CSV (comma-separated) or " => " / " -> "
+  const out = [];
+  const lines = text.split(/\r?\n/);
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    let parts;
+    if (line.includes('\t'))             parts = line.split('\t');
+    else if (line.includes(' => '))      parts = line.split(' => ');
+    else if (line.includes(' -> '))      parts = line.split(' -> ');
+    else if (line.includes(','))         parts = line.split(/,(.+)/); // split on first comma
+    else continue;
+    const source = (parts[0] || '').trim().replace(/^"|"$/g, '');
+    const target = (parts[1] || '').trim().replace(/^"|"$/g, '');
+    if (source && target && source.toLowerCase() !== 'source' && source.toLowerCase() !== 'english') {
+      out.push({ source, target });
+    }
+  }
+  return out;
+}
+
+function trUpdateGlossUI() {
+  const count  = document.getElementById('tr-gloss-count');
+  const status = document.getElementById('tr-gloss-status');
+  const preview = document.getElementById('tr-gloss-preview');
+  const clearBtn = document.getElementById('tr-gloss-clear');
+  if (trGlossary.length === 0) {
+    count.textContent = '(none loaded)';
+    count.style.color = '#64748b';
+    status.textContent = '';
+    preview.style.display = 'none';
+    clearBtn.style.display = 'none';
+    return;
+  }
+  count.textContent = `(${trGlossary.length} terms loaded ✓)`;
+  count.style.color = '#34d399';
+  status.textContent = `✓ ${trGlossary.length} terms will be injected into translation prompts when matching source text is detected.`;
+  status.style.color = '#94a3b8';
+  preview.style.display = 'block';
+  preview.innerHTML = trGlossary.slice(0, 20).map(g =>
+    `<div>${g.source.replace(/</g,'&lt;')} → <span style="color:#a5b4fc">${g.target.replace(/</g,'&lt;')}</span></div>`
+  ).join('') + (trGlossary.length > 20 ? `<div style="color:#64748b;margin-top:.3rem">…and ${trGlossary.length - 20} more</div>` : '');
+  clearBtn.style.display = 'inline-flex';
+}
+
+async function trOnGlossFile(input) {
+  const file = input.files?.[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const parsed = trParseGlossText(text);
+    if (parsed.length === 0) {
+      document.getElementById('tr-gloss-status').textContent =
+        '❌ No valid term pairs found. Use format: "english<TAB>hebrew" or "english,hebrew" — one per line.';
+      document.getElementById('tr-gloss-status').style.color = '#fca5a5';
+      return;
+    }
+    trGlossary = parsed;
+    trUpdateGlossUI();
+    showAdminToast(`✅ Loaded ${parsed.length} glossary terms from ${file.name}`);
+  } catch (e) {
+    document.getElementById('tr-gloss-status').textContent = '❌ ' + e.message;
+    document.getElementById('tr-gloss-status').style.color = '#fca5a5';
+  }
+}
+
+function trLoadGlossFromPaste() {
+  const text = document.getElementById('tr-gloss-paste').value;
+  if (!text.trim()) {
+    document.getElementById('tr-gloss-status').textContent = '❌ Paste box is empty.';
+    document.getElementById('tr-gloss-status').style.color = '#fca5a5';
+    return;
+  }
+  const parsed = trParseGlossText(text);
+  if (parsed.length === 0) {
+    document.getElementById('tr-gloss-status').textContent =
+      '❌ No valid term pairs found. Use format: "english<TAB>hebrew" or "english,hebrew" — one per line.';
+    document.getElementById('tr-gloss-status').style.color = '#fca5a5';
+    return;
+  }
+  trGlossary = parsed;
+  trUpdateGlossUI();
+  showAdminToast(`✅ Loaded ${parsed.length} glossary terms from paste`);
+}
+
+function trClearGloss() {
+  trGlossary = [];
+  document.getElementById('tr-gloss-paste').value = '';
+  document.getElementById('tr-gloss-file').value = '';
+  trUpdateGlossUI();
+  showAdminToast('Glossary cleared');
+}
+
+function trFindRelevantTerms(batchTexts) {
+  if (!trGlossary.length) return [];
+  // Concatenate batch sources, lowercase, find any glossary term whose
+  // source appears as a substring. Word-boundary-aware for multi-word terms.
+  const haystack = batchTexts.join(' \n ').toLowerCase();
+  const seen = new Set();
+  const relevant = [];
+  for (const term of trGlossary) {
+    const needle = term.source.toLowerCase();
+    if (!needle || seen.has(needle)) continue;
+    // Simple substring check — handles "charging dock" inside a sentence.
+    if (haystack.includes(needle)) {
+      relevant.push(term);
+      seen.add(needle);
+    }
+  }
+  return relevant;
+}
+// ─── /Glossary helpers ──────────────────────────────────────
+
 async function trTranslateBatch(texts, apiKey, model) {
   const chosen = model || (document.getElementById('tr-model') && document.getElementById('tr-model').value) || 'gpt-5.4-mini';
   const numbered = texts.map((t, i) => `${i+1}. ${t}`).join('\n');
+
+  // Build base system prompt + optional glossary block
+  let systemPrompt = 'You are a professional translator. Translate each numbered item into Hebrew (he-IL).\nRules:\n- Preserve ALL placeholders exactly: {{TAG_0}}, {{TAG_1}}, etc.\n- Output ONLY the numbered translations, one per line, same order\n- Use formal Hebrew suitable for professional documents\n- No explanations or notes';
+  const relevant = trFindRelevantTerms(texts);
+  if (relevant.length > 0) {
+    systemPrompt += '\n\nGLOSSARY — these terms MUST be translated exactly as shown when they appear in the source:\n' +
+      relevant.map(t => `- "${t.source}" → "${t.target}"`).join('\n');
+  }
+
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: chosen, temperature: 0.2,
       messages: [
-        { role: 'system', content: 'You are a professional translator. Translate each numbered item into Hebrew (he-IL).\nRules:\n- Preserve ALL placeholders exactly: {{TAG_0}}, {{TAG_1}}, etc.\n- Output ONLY the numbered translations, one per line, same order\n- Use formal Hebrew suitable for professional documents\n- No explanations or notes' },
+        { role: 'system', content: systemPrompt },
         { role: 'user',   content: numbered }
       ]
     })
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error?.message || 'GPT-4o error ' + res.status);
+  if (!res.ok) throw new Error(data.error?.message || ('GPT error ' + res.status));
   const lines = data.choices[0].message.content.trim().split('\n').filter(l => l.trim());
   const out = [];
   for (const line of lines) { const m = line.match(/^\d+\.\s*([\s\S]+)$/); if (m) out.push(m[1].trim()); }
@@ -1459,12 +1617,17 @@ async function trTranslate() {
     bar.style.width = '100%'; txt.textContent = '✅ Done!';
     setTimeout(() => prog.classList.remove('show'), 1500);
 
+    const glossBadge = trGlossary.length > 0
+      ? `<span class="tres-badge tb-lang">📋 ${trGlossary.length} glossary terms primed</span>` : '';
     document.getElementById('tr-badges').innerHTML = `
       <span class="tres-badge tb-ok">✅ ${totalTranslated} translated</span>
       <span class="tres-badge tb-seg">📑 ${totalSegments} total</span>
-      <span class="tres-badge tb-lang">📄 ${xliffEntries.length} file(s)</span>`;
+      <span class="tres-badge tb-lang">📄 ${xliffEntries.length} file(s)</span>
+      ${glossBadge}`;
     document.getElementById('tr-stats').innerHTML =
-      `Translated <span>${totalTranslated}</span> of <span>${totalSegments}</span> segments across <span>${xliffEntries.length}</span> SDLXLIFF file(s) → ready to import into Trados Studio.`;
+      `Translated <span>${totalTranslated}</span> of <span>${totalSegments}</span> segments across <span>${xliffEntries.length}</span> SDLXLIFF file(s)` +
+      (trGlossary.length > 0 ? ` with <span>${trGlossary.length}</span> glossary terms available for priming` : '') +
+      ` → ready to import into Trados Studio.`;
 
     const dl = document.getElementById('tr-dl');
     dl.href = outUrl;
