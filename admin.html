@@ -2914,6 +2914,15 @@ function trPlaceholdersToXml(text, tagMap) {
 
 function trIsTranslatable(text) { return (text || '').replace(/\{\{TAG_\d+\}\}/g,'').trim().length > 0; }
 
+// Count words in a source string. Strips placeholder markers so they don't
+// inflate the count, and treats whitespace as word boundary (works equally
+// for Hebrew, English, mixed). Returns 0 for empty/whitespace input.
+function trCountWords(text) {
+  const clean = (text || '').replace(/\{\{TAG_\d+\}\}/g, ' ').trim();
+  if (!clean) return 0;
+  return clean.split(/\s+/).filter(Boolean).length;
+}
+
 function trExtractSegments(content) {
   const segs = [];
   const unitRe = /<trans-unit\s[^>]*id="([^"]+)"[^>]*>([\s\S]*?)<\/trans-unit>/g;
@@ -3796,9 +3805,28 @@ async function trTranslateBatch(texts, apiKey, model) {
 async function trProcessXliff(content, apiKey, onProgress, model) {
   const segs  = trExtractSegments(content);
   const empty = segs.filter(s => !s.targetText && trIsTranslatable(s.sourceText));
-  if (empty.length === 0) return { translated: 0, total: segs.length, content, pairs: [] };
+
+  // Word counts (across all segments in this file)
+  const totalWords          = segs.reduce((sum, s) => sum + trCountWords(s.sourceText), 0);
+  const preTranslatedSegs   = segs.filter(s => s.targetText && trIsTranslatable(s.sourceText));
+  const preTranslatedWords  = preTranslatedSegs.reduce((sum, s) => sum + trCountWords(s.sourceText), 0);
+  const toTranslateWords    = empty.reduce((sum, s) => sum + trCountWords(s.sourceText), 0);
+
+  if (empty.length === 0) return {
+    translated: 0,
+    total: segs.length,
+    content,
+    pairs: [],
+    totalWords,
+    preTranslatedSegments: preTranslatedSegs.length,
+    preTranslatedWords,
+    toTranslateWords,
+    translatedWords: 0,
+  };
+
   const BATCH = 20;
   let translated = 0;
+  let translatedWords = 0;
   const pairs = []; // captured source/target pairs for optional TM save
   for (let i = 0; i < empty.length; i += BATCH) {
     const batch = empty.slice(i, i + BATCH);
@@ -3809,6 +3837,7 @@ async function trProcessXliff(content, apiKey, onProgress, model) {
         content = trInsertTranslation(content, batch[j], translations[j]);
         pairs.push({ source: batch[j].sourceText, target: translations[j] });
         translated++;
+        translatedWords += trCountWords(batch[j].sourceText);
       }
     }
     if (i + BATCH < empty.length) await new Promise(r => setTimeout(r, 500));
@@ -3821,7 +3850,17 @@ async function trProcessXliff(content, apiKey, onProgress, model) {
   if (!check.ok) {
     throw new Error('Translated SDLXLIFF failed XML validation: ' + check.message);
   }
-  return { translated, total: segs.length, content, pairs };
+  return {
+    translated,
+    total: segs.length,
+    content,
+    pairs,
+    totalWords,
+    preTranslatedSegments: preTranslatedSegs.length,
+    preTranslatedWords,
+    toTranslateWords,
+    translatedWords,
+  };
 }
 
 async function trTranslate() {
@@ -3874,17 +3913,29 @@ async function trTranslate() {
     await Promise.all(copyPromises);
 
     let totalTranslated = 0, totalSegments = 0;
+    let totalWordsAll = 0, preTransSegsAll = 0, preTransWordsAll = 0;
+    let translatedWordsAll = 0, toTranslateWordsAll = 0;
     const allPairs = []; // collected source/target pairs across all files (for TM save)
     for (let fi = 0; fi < xliffEntries.length; fi++) {
       const { path: relPath, entry } = xliffEntries[fi];
       const rawContent = await entry.async('string');
-      const { translated, total, content: newContent, pairs } = await trProcessXliff(rawContent, apiKey, (done, all) => {
+      const {
+        translated, total, content: newContent, pairs,
+        totalWords, preTranslatedSegments, preTranslatedWords,
+        toTranslateWords, translatedWords,
+      } = await trProcessXliff(rawContent, apiKey, (done, all) => {
         const base = 20 + (fi / xliffEntries.length) * 70;
         const inc  = (done / all) * (70 / xliffEntries.length);
         bar.style.width = (base + inc) + '%';
         txt.textContent = `File ${fi+1}/${xliffEntries.length} (${trModel}): segments ${done}–${Math.min(done+20,all)} of ${all}…`;
       }, trModel);
-      totalTranslated += translated; totalSegments += total;
+      totalTranslated     += translated;
+      totalSegments       += total;
+      totalWordsAll       += totalWords          || 0;
+      preTransSegsAll     += preTranslatedSegments || 0;
+      preTransWordsAll    += preTranslatedWords  || 0;
+      toTranslateWordsAll += toTranslateWords    || 0;
+      translatedWordsAll  += translatedWords     || 0;
       if (pairs && pairs.length) allPairs.push(...pairs);
       outZip.file(relPath, newContent);
     }
@@ -3898,17 +3949,43 @@ async function trTranslate() {
     bar.style.width = '100%'; txt.textContent = '✅ Done!';
     setTimeout(() => prog.classList.remove('show'), 1500);
 
+    const fmt = (n) => Number(n || 0).toLocaleString();
     const glossBadge = trGlossary.length > 0
       ? `<span class="tres-badge tb-lang">📋 ${trGlossary.length} glossary terms primed</span>` : '';
+
+    // Compact badge row at the top
     document.getElementById('tr-badges').innerHTML = `
-      <span class="tres-badge tb-ok">✅ ${totalTranslated} translated</span>
-      <span class="tres-badge tb-seg">📑 ${totalSegments} total</span>
+      <span class="tres-badge tb-ok">✅ ${fmt(totalTranslated)} segments translated</span>
+      <span class="tres-badge tb-seg">📑 ${fmt(totalSegments)} segments in file</span>
+      <span class="tres-badge tb-lang">📝 ${fmt(translatedWordsAll)} / ${fmt(totalWordsAll)} words</span>
       <span class="tres-badge tb-lang">📄 ${xliffEntries.length} file(s)</span>
       ${glossBadge}`;
-    document.getElementById('tr-stats').innerHTML =
-      `Translated <span>${totalTranslated}</span> of <span>${totalSegments}</span> segments across <span>${xliffEntries.length}</span> SDLXLIFF file(s)` +
-      (trGlossary.length > 0 ? ` with <span>${trGlossary.length}</span> glossary terms available for priming` : '') +
-      ` → ready to import into Trados Studio.`;
+
+    // Detailed stats block — three groups: file totals, this run, skipped
+    document.getElementById('tr-stats').innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.6rem;margin-top:.3rem;font-size:.78rem">
+        <div style="background:#0a0a14;border:1px solid #1f2937;border-radius:8px;padding:.6rem .8rem">
+          <div style="color:#94a3b8;font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;margin-bottom:.3rem">📂 Original file</div>
+          <div style="color:#e2e8f0"><span style="color:#a5b4fc;font-weight:600">${fmt(totalSegments)}</span> segments</div>
+          <div style="color:#e2e8f0"><span style="color:#a5b4fc;font-weight:600">${fmt(totalWordsAll)}</span> source words</div>
+          <div style="color:#64748b;font-size:.72rem;margin-top:.2rem">across ${xliffEntries.length} SDLXLIFF file${xliffEntries.length===1?'':'s'}</div>
+        </div>
+        <div style="background:#0a1a0a;border:1px solid #14532d;border-radius:8px;padding:.6rem .8rem">
+          <div style="color:#86efac;font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;margin-bottom:.3rem">✅ This translation</div>
+          <div style="color:#e2e8f0"><span style="color:#34d399;font-weight:600">${fmt(totalTranslated)}</span> segments translated</div>
+          <div style="color:#e2e8f0"><span style="color:#34d399;font-weight:600">${fmt(translatedWordsAll)}</span> words translated</div>
+          <div style="color:#64748b;font-size:.72rem;margin-top:.2rem">model: ${trModel}</div>
+        </div>
+        <div style="background:#0a0a14;border:1px solid #1f2937;border-radius:8px;padding:.6rem .8rem">
+          <div style="color:#94a3b8;font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;margin-bottom:.3rem">⏭ Skipped (already translated)</div>
+          <div style="color:#e2e8f0"><span style="color:#a5b4fc;font-weight:600">${fmt(preTransSegsAll)}</span> segments</div>
+          <div style="color:#e2e8f0"><span style="color:#a5b4fc;font-weight:600">${fmt(preTransWordsAll)}</span> words</div>
+          <div style="color:#64748b;font-size:.72rem;margin-top:.2rem">preserved unchanged</div>
+        </div>
+      </div>
+      <div style="margin-top:.5rem;font-size:.78rem;color:#94a3b8">
+        ${trGlossary.length > 0 ? `Primed with <span style="color:#a5b4fc">${trGlossary.length}</span> glossary terms. ` : ''}Ready to import into Trados Studio.
+      </div>`;
 
     const dl = document.getElementById('tr-dl');
     dl.href = outUrl;
