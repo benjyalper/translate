@@ -526,6 +526,21 @@
           <button class="tlang-btn"        onclick="tcSetLang('en',this)">🇺🇸 English</button>
         </div>
 
+        <!-- Translation engine + Hebrew cleanup (Translate / Both modes only) -->
+        <div class="tlang-row" style="margin-top:.5rem" id="tc-engine-row">
+          <span class="tlang-lbl">Translation:</span>
+          <select id="tc-engine" style="flex:1;padding:.45rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.78rem">
+            <option value="gpt-5.4" selected>gpt-5.4 — high quality, preserves code-switching (recommended)</option>
+            <option value="gpt-5.5">gpt-5.5 — premium quality (2× cost)</option>
+            <option value="gpt-5.4-mini">gpt-5.4-mini — fast/cheap drafts</option>
+            <option value="whisper-translations">Whisper (legacy) — one-shot, faster, mediocre quality</option>
+          </select>
+        </div>
+        <label style="display:flex;align-items:center;gap:.45rem;font-size:.74rem;color:#cbd5e1;cursor:pointer;margin-top:.4rem;margin-left:.2rem" id="tc-cleanup-row">
+          <input type="checkbox" id="tc-cleanup-source" checked style="width:.95rem;height:.95rem;cursor:pointer"/>
+          <span>🧹 Clean transliterations in Hebrew source (fixes "מישן" → "mission" in the source column too)</span>
+        </label>
+
         <!-- Whisper prompt hints (code-switching + custom vocab) -->
         <details style="margin-top:.6rem;background:#0f0f17;border:1px solid var(--border);border-radius:8px;padding:.5rem .8rem">
           <summary style="cursor:pointer;font-size:.78rem;color:#a5b4fc;font-weight:600;list-style:none">
@@ -2143,6 +2158,146 @@ async function tcCallWhisper(src, name, endpoint, apiKey, languageHint) {
   return data;
 }
 
+// ───────────────────────────────────────────────────────────────
+//  Two-stage translation: Whisper Hebrew transcript → GPT → English
+//  Higher quality than Whisper's built-in /translations endpoint:
+//  - Preserves code-switched English (no transliterations)
+//  - Uses user's custom vocabulary hints
+//  - Allows model selection (gpt-5.4 / gpt-5.5 / gpt-5.4-mini)
+// ───────────────────────────────────────────────────────────────
+async function tcTranslateSegmentsGPT(segments, model, apiKey, onProgress) {
+  if (!segments || !segments.length) return [];
+  const vocab = (document.getElementById('tc-hint-vocab')?.value || '').trim();
+  const BATCH = 25;
+  const out = [];
+
+  const systemPrompt =
+`You are a professional Hebrew → English translator.
+
+CRITICAL RULES:
+1. Translate each numbered Hebrew item faithfully and naturally into English.
+2. Preserve meaning, tone, register. Use natural English (no literal translation).
+3. English words / brand names / product names / technical terms that appear in the source MUST remain in their original Latin script. Do NOT re-translate them.
+4. If a Hebrew word looks like a transliteration of an English word (e.g. "מישן" for "mission", "דשבורד" for "dashboard", "אונליין" for "online", "אפליקציה" for "app"), output the original English word, not a Hebrew rendering.
+5. Preserve segment boundaries — translate each numbered item independently, do NOT merge or split across numbers.
+6. Output ONLY the numbered translations, one per line, same order. No commentary, no markdown, no code fences.
+
+${vocab ? 'PRESERVE THESE TERMS EXACTLY (in their original spelling/casing): ' + vocab.replace(/\s+/g,' ').slice(0, 600) : ''}`;
+
+  for (let i = 0; i < segments.length; i += BATCH) {
+    const slice = segments.slice(i, i + BATCH);
+    if (onProgress) onProgress(`Translating segments ${i+1}–${Math.min(i+BATCH, segments.length)} of ${segments.length} (${model})…`);
+    const numbered = slice.map((s, j) => `${j+1}. ${(s.text || '').trim()}`).join('\n');
+    try {
+      const r = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          temperature: 0.2,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user',   content: numbered }
+          ]
+        })
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error?.message || ('GPT error ' + r.status));
+      const raw = (data.choices?.[0]?.message?.content || '').trim();
+      const lines = raw.split('\n').filter(l => l.trim());
+      const parsed = [];
+      for (const line of lines) {
+        const m = line.match(/^\s*\d+\.\s*([\s\S]+)$/);
+        if (m) parsed.push(m[1].trim());
+      }
+      // Pad with empties if model returned fewer
+      while (parsed.length < slice.length) parsed.push('');
+      // Map back into segments with text_en
+      for (let j = 0; j < slice.length; j++) {
+        out.push({ ...slice[j], text_en: parsed[j] });
+      }
+    } catch (e) {
+      console.warn('Translate batch failed at', i, e.message);
+      // Best-effort: keep original segments, leave text_en empty
+      for (const s of slice) out.push({ ...s, text_en: '' });
+    }
+    // Throttle between batches to avoid rate limits
+    if (i + BATCH < segments.length) await new Promise(r => setTimeout(r, 300));
+  }
+  return out;
+}
+
+// ───────────────────────────────────────────────────────────────
+//  Clean Hebrew transliterations: rewrite obvious English-words-in-
+//  Hebrew-script back to Latin script, keeping all real Hebrew intact.
+// ───────────────────────────────────────────────────────────────
+async function tcCleanHebrewSource(segments, model, apiKey, onProgress) {
+  if (!segments || !segments.length) return segments;
+  const vocab = (document.getElementById('tc-hint-vocab')?.value || '').trim();
+  const BATCH = 30;
+  const out = [];
+
+  const systemPrompt =
+`You are a Hebrew text editor. The input is Hebrew text from a Whisper transcript that sometimes contains English words mistakenly rendered in Hebrew characters.
+
+YOUR JOB: Replace English transliterations with the original Latin-script English word. Keep all genuine Hebrew text exactly as-is.
+
+RULES:
+- Only rewrite clear English transliterations (English brand names, technical terms, product names, common loanwords used in their English form).
+- Keep proper Hebrew words and names in Hebrew. When unsure, leave it in Hebrew.
+- Do NOT translate Hebrew to English. Only fix transliterations.
+- Preserve punctuation, spacing, and the numbered structure exactly.
+- Output ONLY the numbered items, one per line, in the same order. No commentary, no markdown.
+
+EXAMPLES (don't include these in output):
+"לחץ על הדשבורד" → "לחץ על ה-dashboard"
+"הוא הלך לעבוד על המישן" → "הוא הלך לעבוד על ה-mission"
+"זה רץ ב-JavaScript" → "זה רץ ב-JavaScript" (already correct, leave alone)
+"שלום וברוכים הבאים" → "שלום וברוכים הבאים" (pure Hebrew, no changes)
+
+${vocab ? 'BRAND / VOCABULARY TERMS to recognize in their English form: ' + vocab.replace(/\s+/g,' ').slice(0, 600) : ''}`;
+
+  for (let i = 0; i < segments.length; i += BATCH) {
+    const slice = segments.slice(i, i + BATCH);
+    if (onProgress) onProgress(`Cleaning transliterations in segments ${i+1}–${Math.min(i+BATCH, segments.length)} of ${segments.length}…`);
+    const numbered = slice.map((s, j) => `${j+1}. ${(s.text || '').trim()}`).join('\n');
+    try {
+      const r = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          temperature: 0.1,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user',   content: numbered }
+          ]
+        })
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error?.message || ('GPT error ' + r.status));
+      const raw = (data.choices?.[0]?.message?.content || '').trim();
+      const lines = raw.split('\n').filter(l => l.trim());
+      const parsed = [];
+      for (const line of lines) {
+        const m = line.match(/^\s*\d+\.\s*([\s\S]+)$/);
+        if (m) parsed.push(m[1].trim());
+      }
+      while (parsed.length < slice.length) parsed.push('');
+      for (let j = 0; j < slice.length; j++) {
+        // Only replace if the model returned something; otherwise keep original
+        const cleaned = parsed[j];
+        out.push({ ...slice[j], text: cleaned || slice[j].text });
+      }
+    } catch (e) {
+      console.warn('Cleanup batch failed at', i, e.message);
+      for (const s of slice) out.push({ ...s });
+    }
+    if (i + BATCH < segments.length) await new Promise(r => setTimeout(r, 300));
+  }
+  return out;
+}
+
 async function tcTranscribe() {
   const apiKey = getApiKey();
   if (!apiKey) { promptApiKey(); return; }
@@ -2206,23 +2361,78 @@ async function tcTranscribe() {
     const uploadSizeMB = (uploadBlob.size / 1024 / 1024).toFixed(2);
     console.log(`[transcriber] Uploading ${uploadSizeMB} MB (${uploadName}) — mode=${tcMode}`);
 
+    // Pick translation engine (used by Translate / Both modes)
+    const tcEngine = document.getElementById('tc-engine')?.value || 'gpt-5.4';
+    const useLegacyWhisperTranslate = (tcEngine === 'whisper-translations');
+    const wantCleanup = document.getElementById('tc-cleanup-source')?.checked;
+
     let data;
     if (tcMode === 'transcribe') {
       txt.textContent = `Uploading ${uploadSizeMB} MB to Whisper…`;
       data = await tcCallWhisper(uploadBlob, uploadName, 'transcriptions', apiKey, tcLang);
       data.__mode = 'transcribe';
+      // Optional cleanup pass on the Hebrew source
+      if (wantCleanup && /^he/.test(data.language || tcLang)) {
+        txt.textContent = '🧹 Cleaning transliterations in Hebrew source…';
+        data.segments = await tcCleanHebrewSource(data.segments, 'gpt-5.4', apiKey, (m) => { txt.textContent = '🧹 ' + m; });
+      }
     } else if (tcMode === 'translate') {
-      txt.textContent = `Uploading ${uploadSizeMB} MB to Whisper (translate mode)…`;
-      data = await tcCallWhisper(uploadBlob, uploadName, 'translations', apiKey, null);
-      data.__mode = 'translate';
-      data.language = 'en'; // /translations always outputs English
+      if (useLegacyWhisperTranslate) {
+        // Legacy: Whisper one-shot translate
+        txt.textContent = `Uploading ${uploadSizeMB} MB to Whisper (legacy translate)…`;
+        data = await tcCallWhisper(uploadBlob, uploadName, 'translations', apiKey, null);
+        data.__mode = 'translate';
+        data.language = 'en';
+      } else {
+        // High-quality two-stage: Whisper → GPT translate
+        txt.textContent = `Pass 1/2: Transcribing source language (${uploadSizeMB} MB)…`;
+        const transcribed = await tcCallWhisper(uploadBlob, uploadName, 'transcriptions', apiKey, tcLang);
+        // Optional cleanup pass on the Hebrew source BEFORE translating (better input → better output)
+        if (wantCleanup && /^he/.test(transcribed.language || tcLang)) {
+          txt.textContent = '🧹 Cleaning transliterations in Hebrew source…';
+          transcribed.segments = await tcCleanHebrewSource(transcribed.segments, 'gpt-5.4', apiKey, (m) => { txt.textContent = '🧹 ' + m; });
+        }
+        txt.textContent = `Pass 2/2: Translating to English with ${tcEngine}…`;
+        const translatedSegs = await tcTranslateSegmentsGPT(transcribed.segments, tcEngine, apiKey, (m) => { txt.textContent = m; });
+        // Build a result shape that looks like a /translations response:
+        // segments .text holds the ENGLISH (so existing code paths work)
+        data = {
+          segments: translatedSegs.map(s => ({ start: s.start, end: s.end, text: s.text_en })),
+          language: 'en',
+          duration: transcribed.duration,
+          text: translatedSegs.map(s => s.text_en).filter(Boolean).join(' '),
+          __mode: 'translate',
+        };
+      }
     } else { // 'both'
-      txt.textContent = `Pass 1/2: Transcribing source language (${uploadSizeMB} MB)…`;
-      const transcribed = await tcCallWhisper(uploadBlob, uploadName, 'transcriptions', apiKey, tcLang);
-      txt.textContent = `Pass 2/2: Translating to English (${uploadSizeMB} MB)…`;
-      const translated  = await tcCallWhisper(uploadBlob, uploadName, 'translations',   apiKey, null);
-      data = tcAlignBoth(transcribed, translated);
-      data.__mode = 'both';
+      if (useLegacyWhisperTranslate) {
+        txt.textContent = `Pass 1/2: Transcribing source language (${uploadSizeMB} MB)…`;
+        const transcribed = await tcCallWhisper(uploadBlob, uploadName, 'transcriptions', apiKey, tcLang);
+        txt.textContent = `Pass 2/2: Translating to English (${uploadSizeMB} MB)…`;
+        const translated  = await tcCallWhisper(uploadBlob, uploadName, 'translations',   apiKey, null);
+        data = tcAlignBoth(transcribed, translated);
+        data.__mode = 'both';
+      } else {
+        // High-quality two-stage: ONE Whisper call → GPT segment-translate
+        // Both source AND target share the same Whisper timeline → no alignment needed
+        txt.textContent = `Pass 1/2: Transcribing source language (${uploadSizeMB} MB)…`;
+        const transcribed = await tcCallWhisper(uploadBlob, uploadName, 'transcriptions', apiKey, tcLang);
+        if (wantCleanup && /^he/.test(transcribed.language || tcLang)) {
+          txt.textContent = '🧹 Cleaning transliterations in Hebrew source…';
+          transcribed.segments = await tcCleanHebrewSource(transcribed.segments, 'gpt-5.4', apiKey, (m) => { txt.textContent = '🧹 ' + m; });
+        }
+        txt.textContent = `Pass 2/2: Translating to English with ${tcEngine}…`;
+        const enriched = await tcTranslateSegmentsGPT(transcribed.segments, tcEngine, apiKey, (m) => { txt.textContent = m; });
+        // enriched has text (Hebrew) + text_en (English) per segment — perfect alignment
+        data = {
+          segments: enriched,
+          language: transcribed.language || tcLang,
+          duration: transcribed.duration,
+          text: transcribed.text,
+          text_en: enriched.map(s => s.text_en).filter(Boolean).join(' '),
+          __mode: 'both',
+        };
+      }
     }
 
     // Optional OCR pass — only if user enabled it AND file is a video
