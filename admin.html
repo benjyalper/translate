@@ -1448,13 +1448,20 @@ async function tcLoadFFmpeg() {
   if (tcFFmpegInstance) return tcFFmpegInstance;
   if (tcFFmpegLoading) return tcFFmpegLoading;
   tcFFmpegLoading = (async () => {
-    if (typeof FFmpegWASM === 'undefined') {
+    if (typeof FFmpegWASM === 'undefined' || typeof FFmpegUtil === 'undefined') {
       throw new Error('ffmpeg.wasm not available — refresh the page and try again');
     }
+    // Browsers refuse to construct a Web Worker from a cross-origin URL even
+    // when the host (unpkg) sets CORS headers. Workaround: fetch each script
+    // as text, wrap it in a Blob (same-origin by definition), then let
+    // ffmpeg.wasm construct the Worker from that blob: URL.
+    const ffmpegBase = 'https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd';
+    const coreBase   = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
     const inst = new FFmpegWASM.FFmpeg();
     await inst.load({
-      coreURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js',
-      wasmURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm',
+      classWorkerURL: await FFmpegUtil.toBlobURL(`${ffmpegBase}/814.ffmpeg.js`, 'text/javascript'),
+      coreURL: await FFmpegUtil.toBlobURL(`${coreBase}/ffmpeg-core.js`, 'text/javascript'),
+      wasmURL: await FFmpegUtil.toBlobURL(`${coreBase}/ffmpeg-core.wasm`, 'application/wasm'),
     });
     tcFFmpegInstance = inst;
     return inst;
