@@ -671,6 +671,74 @@
         </div>
       </div><!-- /transcriber card -->
 
+      <!-- ── 🎵 AUDIO EXTRACTOR (MP4 → WAV) ─────────────── -->
+      <div class="tool-card">
+        <div class="tool-header">
+          <div class="tool-icon">🎵</div>
+          <div>
+            <div class="tool-title">Audio Extractor (MP4 → audio)</div>
+            <div class="tool-sub">Strip audio out of any video file → download as WAV · perfect for manual upload to ivrit.ai or other transcription services</div>
+          </div>
+        </div>
+        <div class="tool-divider"></div>
+
+        <div class="tdrop" id="ax-drop">
+          <input type="file" id="ax-file" accept="audio/*,video/*,.mp3,.mp4,.m4a,.wav,.webm,.ogg,.flac,.mov,.mkv,.avi" onchange="axOnFile(this)"/>
+          <div class="tdrop-icon">🎬</div>
+          <div class="tdrop-text">Drop video or audio file<br><small>MP4, MOV, MKV, WebM, M4A, MP3, WAV — any size (slicing is in-browser)</small></div>
+        </div>
+        <div class="tdrop-sel" id="ax-file-label"></div>
+
+        <!-- Time range (optional) -->
+        <div id="ax-range-box" style="display:none;margin-top:.6rem;background:#0f0f17;border:1px solid var(--border);border-radius:8px;padding:.5rem .8rem">
+          <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.4rem">
+            <span style="font-size:.78rem;color:#a5b4fc;font-weight:600">⏱ Time range (optional)</span>
+            <span id="ax-range-duration" style="font-size:.7rem;color:#64748b"></span>
+            <button class="tbtn" style="margin-left:auto;width:auto;padding:.3rem .7rem;font-size:.68rem;background:#1e1b4b;color:#a5b4fc" onclick="axResetRange()">↺ Full file</button>
+          </div>
+          <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+            <label style="font-size:.7rem;color:#94a3b8">Start:</label>
+            <input type="text" id="ax-range-start" value="00:00" placeholder="mm:ss" oninput="axOnRangeChange()"
+              style="width:75px;padding:.4rem .5rem;background:#0a0a14;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.75rem;font-family:monospace;text-align:center"/>
+            <label style="font-size:.7rem;color:#94a3b8;margin-left:.3rem">End:</label>
+            <input type="text" id="ax-range-end" value="00:00" placeholder="mm:ss" oninput="axOnRangeChange()"
+              style="width:75px;padding:.4rem .5rem;background:#0a0a14;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.75rem;font-family:monospace;text-align:center"/>
+            <span id="ax-range-status" style="font-size:.7rem;color:#34d399;margin-left:.3rem"></span>
+          </div>
+        </div>
+
+        <!-- Output format -->
+        <div class="tlang-row" style="margin-top:.5rem">
+          <span class="tlang-lbl">Output:</span>
+          <select id="ax-format" style="flex:1;padding:.45rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.78rem">
+            <option value="speech" selected>16 kHz mono WAV (recommended for transcription · ~1.9 MB/min)</option>
+            <option value="hifi">Source-rate stereo WAV (full quality · ~10 MB/min)</option>
+          </select>
+        </div>
+
+        <button class="tbtn gold" id="ax-btn" onclick="axExtract()" disabled>🎵 Extract Audio</button>
+
+        <!-- Progress -->
+        <div class="tprog" id="ax-prog">
+          <div class="tprog-text" id="ax-prog-text">Working…</div>
+          <div class="tprog-bar-outer"><div class="tprog-bar-inner" id="ax-prog-bar"></div></div>
+        </div>
+
+        <!-- Result -->
+        <div id="ax-results" style="display:none;margin-top:.6rem">
+          <div class="tres-badges" id="ax-badges" style="margin-bottom:.6rem"></div>
+          <a class="tbtn gold" id="ax-dl" href="#" style="display:inline-flex;align-items:center;justify-content:center;gap:.4rem;text-decoration:none;padding:.7rem 1.5rem;width:auto">
+            ⬇ Download Audio
+          </a>
+          <div style="margin-top:.6rem;font-size:.72rem;color:#64748b">
+            Next step: upload this file to <a href="https://transcribe.ivrit.ai" target="_blank" rel="noopener" style="color:#a5b4fc;text-decoration:underline">transcribe.ivrit.ai</a> for high-quality Hebrew transcription. Then paste the result into the <strong style="color:#a5b4fc">📝 Hebrew Text Translator</strong> below.
+          </div>
+        </div>
+
+        <!-- Error -->
+        <div id="ax-error" style="display:none;padding:.7rem 1rem;background:#1a0000;border:1px solid #7f1d1d;border-radius:8px;font-size:.82rem;color:#fca5a5;margin-top:.6rem"></div>
+      </div><!-- /audio extractor card -->
+
       <!-- ── 🔄 TRADOS ────────────────────────────────────── -->
       <div class="tool-card">
         <div class="tool-header">
@@ -1782,6 +1850,217 @@ function tcEncodeWav(samples, sampleRate) {
     offset += 2;
   }
   return new Blob([buffer], { type: 'audio/wav' });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  🎵 AUDIO EXTRACTOR — strip audio from any video/audio file
+//  Reuses the Web Audio API decoder + WAV encoder. Two output modes:
+//   - "speech": 16 kHz mono — best for transcription (Whisper, ivrit.ai)
+//   - "hifi":   source sample rate, stereo — best for archival
+// ═══════════════════════════════════════════════════════════════
+let axFile = null;
+let axFileDuration = 0;
+
+async function axOnFile(input) {
+  axFile = input.files?.[0];
+  const lbl = document.getElementById('ax-file-label');
+  const rangeBox = document.getElementById('ax-range-box');
+  const btn = document.getElementById('ax-btn');
+  if (!axFile) { rangeBox.style.display = 'none'; btn.disabled = true; return; }
+  lbl.style.display = 'block';
+  lbl.textContent = `📎 ${axFile.name} (${(axFile.size/1024/1024).toFixed(2)} MB) — detecting duration…`;
+  btn.disabled = false;
+  // Reuse the existing transcriber duration helper
+  axFileDuration = await tcDetectDuration(axFile);
+  if (axFileDuration > 0) {
+    lbl.textContent = `📎 ${axFile.name} (${(axFile.size/1024/1024).toFixed(2)} MB · ${tcFormatTime(axFileDuration)})`;
+    rangeBox.style.display = 'block';
+    document.getElementById('ax-range-duration').textContent = `· file is ${tcFormatTime(axFileDuration)} long`;
+    document.getElementById('ax-range-start').value = '00:00';
+    document.getElementById('ax-range-end').value   = tcFormatTime(axFileDuration);
+    axOnRangeChange();
+  } else {
+    lbl.textContent = `📎 ${axFile.name} (${(axFile.size/1024/1024).toFixed(2)} MB) — duration unknown`;
+    rangeBox.style.display = 'block';
+    document.getElementById('ax-range-duration').textContent = '· set range manually if needed';
+  }
+}
+
+(function(){
+  const dz = document.getElementById('ax-drop');
+  if (!dz) return;
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+  dz.addEventListener('drop', e => {
+    e.preventDefault(); dz.classList.remove('drag-over');
+    const f = e.dataTransfer.files[0];
+    if (f) axOnFile({ files: [f] });
+  });
+})();
+
+function axResetRange() {
+  if (!axFileDuration) return;
+  document.getElementById('ax-range-start').value = '00:00';
+  document.getElementById('ax-range-end').value   = tcFormatTime(axFileDuration);
+  axOnRangeChange();
+}
+
+function axOnRangeChange() {
+  const startEl  = document.getElementById('ax-range-start');
+  const endEl    = document.getElementById('ax-range-end');
+  const statusEl = document.getElementById('ax-range-status');
+  if (!axFileDuration) return;
+  const startSec = tcParseTime(startEl.value);
+  const endSec   = tcParseTime(endEl.value);
+  if (isNaN(startSec) || isNaN(endSec)) { statusEl.textContent = '⚠️ Invalid format'; statusEl.style.color = '#fca5a5'; return; }
+  if (startSec >= endSec) { statusEl.textContent = '⚠️ Start must be before End'; statusEl.style.color = '#fca5a5'; return; }
+  if (endSec > axFileDuration + 1) { statusEl.textContent = `⚠️ End past file duration (${tcFormatTime(axFileDuration)})`; statusEl.style.color = '#fca5a5'; return; }
+  const dur = endSec - startSec;
+  const isFull = startSec === 0 && Math.abs(endSec - axFileDuration) < 1;
+  statusEl.textContent = isFull
+    ? `✓ Full file (${tcFormatTime(dur)})`
+    : `✓ Slice: ${tcFormatTime(dur)}`;
+  statusEl.style.color = '#34d399';
+}
+
+// "Hi-fi" variant: keep source sample rate + stereo. Slower to encode (larger
+// output) but preserves the original audio quality 1:1.
+async function axSliceHiFi(file, startSec, endSec, onProgress) {
+  if (onProgress) onProgress('Reading file…');
+  const arrayBuffer = await file.arrayBuffer();
+  if (onProgress) onProgress('Decoding audio…');
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) throw new Error('Web Audio API not supported in this browser.');
+  const ctx = new AC();
+  let audioBuffer;
+  try { audioBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0)); }
+  catch (e) { ctx.close(); throw new Error('Could not decode this file: ' + e.message); }
+  ctx.close();
+
+  const srcRate = audioBuffer.sampleRate;
+  const numCh   = audioBuffer.numberOfChannels;
+  const startSample = Math.max(0, Math.floor(startSec * srcRate));
+  const endSample   = Math.min(audioBuffer.length, Math.floor(endSec * srcRate));
+  const sliceLen    = endSample - startSample;
+  if (sliceLen <= 0) throw new Error('Invalid slice range');
+
+  // Slice each channel without mixing or resampling
+  const channels = [];
+  for (let ch = 0; ch < numCh; ch++) {
+    const src = audioBuffer.getChannelData(ch);
+    const out = new Float32Array(sliceLen);
+    for (let i = 0; i < sliceLen; i++) out[i] = src[startSample + i];
+    channels.push(out);
+  }
+  if (onProgress) onProgress(`Encoding ${numCh}-channel WAV at ${srcRate} Hz…`);
+  return axEncodeWav(channels, srcRate);
+}
+
+// Multi-channel 16-bit PCM WAV writer. (tcEncodeWav only handles mono.)
+function axEncodeWav(channels, sampleRate) {
+  const numChannels = channels.length;
+  const numSamples  = channels[0].length;
+  const bytesPerSample = 2;
+  const dataLen = numSamples * numChannels * bytesPerSample;
+  const buffer  = new ArrayBuffer(44 + dataLen);
+  const view    = new DataView(buffer);
+  // RIFF header
+  view.setUint32(0,  0x52494646, false);          // "RIFF"
+  view.setUint32(4,  36 + dataLen, true);
+  view.setUint32(8,  0x57415645, false);          // "WAVE"
+  // fmt chunk
+  view.setUint32(12, 0x666d7420, false);          // "fmt "
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);                     // PCM
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * numChannels * bytesPerSample, true);
+  view.setUint16(32, numChannels * bytesPerSample, true);
+  view.setUint16(34, 16, true);
+  // data chunk
+  view.setUint32(36, 0x64617461, false);          // "data"
+  view.setUint32(40, dataLen, true);
+  // Interleave channel samples
+  let offset = 44;
+  for (let i = 0; i < numSamples; i++) {
+    for (let ch = 0; ch < numChannels; ch++) {
+      let s = channels[ch][i];
+      if (s > 1)  s = 1;
+      if (s < -1) s = -1;
+      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+      offset += 2;
+    }
+  }
+  return new Blob([buffer], { type: 'audio/wav' });
+}
+
+async function axExtract() {
+  if (!axFile) return;
+  const format = document.getElementById('ax-format').value || 'speech';
+  const btn  = document.getElementById('ax-btn');
+  const prog = document.getElementById('ax-prog');
+  const bar  = document.getElementById('ax-prog-bar');
+  const txt  = document.getElementById('ax-prog-text');
+  const err  = document.getElementById('ax-error');
+  const res  = document.getElementById('ax-results');
+  err.style.display = 'none';
+  res.style.display = 'none';
+  btn.disabled = true;
+  prog.classList.add('show');
+  let pct = 0;
+  const fake = setInterval(() => { pct = Math.min(pct + (pct<60?4:pct<85?1.5:.4), 92); bar.style.width = pct + '%'; }, 350);
+  try {
+    // Resolve range
+    let startSec = 0, endSec = axFileDuration || 0;
+    if (axFileDuration > 0) {
+      const s = tcParseTime(document.getElementById('ax-range-start').value);
+      const e = tcParseTime(document.getElementById('ax-range-end').value);
+      const valid = !isNaN(s) && !isNaN(e) && s < e && e <= axFileDuration + 1;
+      if (!valid) throw new Error('Invalid time range — check Start and End values');
+      startSec = s; endSec = e;
+    }
+    if (endSec <= startSec) {
+      // Fallback when duration couldn't be detected
+      const s = tcParseTime(document.getElementById('ax-range-start').value) || 0;
+      const e = tcParseTime(document.getElementById('ax-range-end').value)   || 0;
+      if (e > s) { startSec = s; endSec = e; }
+      else throw new Error('Set Start and End time range manually — duration could not be auto-detected.');
+    }
+
+    let blob;
+    if (format === 'hifi') {
+      blob = await axSliceHiFi(axFile, startSec, endSec, (m) => { txt.textContent = m; });
+    } else {
+      // Reuse the transcriber's 16 kHz mono pipeline
+      blob = await tcSliceFile(axFile, startSec, endSec, (m) => { txt.textContent = m; });
+    }
+    clearInterval(fake);
+    bar.style.width = '100%'; txt.textContent = '✅ Done!';
+    setTimeout(() => prog.classList.remove('show'), 1200);
+
+    const sizeMB = (blob.size / 1024 / 1024).toFixed(2);
+    const durLabel = tcFormatTime(endSec - startSec);
+    document.getElementById('ax-badges').innerHTML = `
+      <span class="tres-badge tb-ok">✅ Extracted</span>
+      <span class="tres-badge tb-dur">⏱ ${durLabel}</span>
+      <span class="tres-badge tb-seg">📦 ${sizeMB} MB</span>
+      <span class="tres-badge tb-lang">${format === 'hifi' ? '🎼 Source-rate stereo' : '🎤 16 kHz mono'}</span>`;
+    const dl = document.getElementById('ax-dl');
+    const url = URL.createObjectURL(blob);
+    dl.href = url;
+    const base = axFile.name.replace(/\.[^.]+$/, '');
+    const isFull = startSec === 0 && Math.abs(endSec - (axFileDuration || endSec)) < 1;
+    const suffix = isFull ? '' : `_${tcFormatTime(startSec).replace(':','-')}_${tcFormatTime(endSec).replace(':','-')}`;
+    dl.download = `${base}${suffix}.wav`;
+    res.style.display = 'block';
+  } catch (e) {
+    clearInterval(fake);
+    prog.classList.remove('show');
+    err.style.display = 'block';
+    err.textContent = '❌ ' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
