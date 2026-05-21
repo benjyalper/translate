@@ -546,6 +546,36 @@
           </div>
         </details>
 
+        <!-- Video OCR options (only meaningful for video files) -->
+        <details style="margin-top:.5rem;background:#0f0f17;border:1px solid var(--border);border-radius:8px;padding:.5rem .8rem">
+          <summary style="cursor:pointer;font-size:.78rem;color:#a5b4fc;font-weight:600;list-style:none">
+            📺 On-screen text extraction (video files — titles, captions, watermarks)
+          </summary>
+          <div style="margin-top:.5rem">
+            <label style="display:flex;align-items:center;gap:.5rem;font-size:.76rem;color:#cbd5e1;cursor:pointer;margin-bottom:.6rem">
+              <input type="checkbox" id="tc-ocr-enabled" style="width:1rem;height:1rem;cursor:pointer"/>
+              <span>Also extract <strong>on-screen text</strong> from video frames via GPT-5.4 vision</span>
+            </label>
+            <div style="display:flex;flex-wrap:wrap;gap:.6rem;align-items:center;font-size:.72rem;color:#cbd5e1">
+              <label>Sample every</label>
+              <select id="tc-ocr-interval" style="padding:.3rem .55rem;background:#0a0a14;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.72rem">
+                <option value="1">1 second (most thorough · expensive)</option>
+                <option value="2" selected>2 seconds (balanced · recommended)</option>
+                <option value="3">3 seconds</option>
+                <option value="5">5 seconds (fast/cheap)</option>
+              </select>
+              <label style="display:flex;align-items:center;gap:.4rem;margin-left:.5rem">
+                <input type="checkbox" id="tc-ocr-scene" checked style="width:.95rem;height:.95rem;cursor:pointer"/>
+                <span>Skip duplicate frames (scene-change detection)</span>
+              </label>
+            </div>
+            <div style="font-size:.66rem;color:#64748b;margin-top:.5rem">
+              Frames are extracted in your browser and downsized to 512×288 before sending to GPT-5.4 vision.
+              Hebrew text is automatically translated to English. Cost: ~$0.005–$0.02 per 3 min of video.
+            </div>
+          </div>
+        </details>
+
         <button class="tbtn" id="tc-btn" onclick="tcTranscribe()" disabled>✨ Transcribe</button>
 
         <!-- Progress -->
@@ -1559,6 +1589,175 @@ function tcEncodeWav(samples, sampleRate) {
   return new Blob([buffer], { type: 'audio/wav' });
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  📺 Video OCR — extract on-screen text via GPT-5.4 vision
+// ═══════════════════════════════════════════════════════════════
+
+// 1) Extract a downsized frame from a <video> element at a specific time.
+async function tcGrabFrame(video, atSec, canvas, ctx) {
+  return new Promise((resolve, reject) => {
+    const onSeek = () => {
+      video.removeEventListener('seeked', onSeek);
+      try {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+        resolve(dataUrl);
+      } catch (e) { reject(e); }
+    };
+    video.addEventListener('seeked', onSeek);
+    try { video.currentTime = atSec; }
+    catch (e) { video.removeEventListener('seeked', onSeek); reject(e); }
+  });
+}
+
+// 2) Cheap histogram similarity for scene-change detection.
+function tcFrameHistogram(canvas, ctx) {
+  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  // 16-bucket grayscale histogram, normalized
+  const bins = new Array(16).fill(0);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const lum = (img.data[i] * 0.299 + img.data[i+1] * 0.587 + img.data[i+2] * 0.114) | 0;
+    bins[Math.min(15, lum >> 4)]++;
+  }
+  const total = (canvas.width * canvas.height) || 1;
+  return bins.map(v => v / total);
+}
+function tcHistDistance(a, b) {
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d += Math.abs(a[i] - b[i]);
+  return d / 2; // 0 = identical, 1 = totally different
+}
+
+// 3) Extract keyframes from a video file across the given time range.
+async function tcExtractKeyframes(file, startSec, endSec, intervalSec, useSceneDetect, onProgress) {
+  const url = URL.createObjectURL(file);
+  const video = document.createElement('video');
+  video.src = url;
+  video.muted = true;
+  video.crossOrigin = 'anonymous';
+  // Wait for metadata
+  await new Promise((resolve, reject) => {
+    video.onloadedmetadata = resolve;
+    video.onerror = () => reject(new Error('Could not load video for keyframe extraction'));
+    setTimeout(() => reject(new Error('Video metadata load timeout')), 15000);
+  });
+  // Compute downsized canvas dimensions (max 512px wide, preserve aspect)
+  const targetW = 512;
+  const ratio = (video.videoWidth && video.videoHeight)
+    ? video.videoHeight / video.videoWidth : 9/16;
+  const w = targetW;
+  const h = Math.round(targetW * ratio) || 288;
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+  const frames = []; // { timestamp, dataUrl }
+  let prevHist = null;
+  const SCENE_THRESHOLD = 0.10; // ~10% histogram change → keep frame
+  let totalSampled = 0;
+  const expected = Math.max(1, Math.ceil((endSec - startSec) / intervalSec));
+
+  for (let t = startSec; t <= endSec; t += intervalSec) {
+    totalSampled++;
+    if (onProgress) onProgress(`Sampling frame ${totalSampled}/${expected} at ${tcFormatTime(t)}…`);
+    let dataUrl;
+    try { dataUrl = await tcGrabFrame(video, t, canvas, ctx); }
+    catch (e) { console.warn('frame grab failed at', t, e); continue; }
+    if (useSceneDetect) {
+      const hist = tcFrameHistogram(canvas, ctx);
+      if (prevHist && tcHistDistance(prevHist, hist) < SCENE_THRESHOLD) {
+        // Scene unchanged — skip
+        prevHist = hist;
+        continue;
+      }
+      prevHist = hist;
+    }
+    frames.push({ timestamp: t, dataUrl });
+  }
+  URL.revokeObjectURL(url);
+  return frames;
+}
+
+// 4) Call GPT-5.4 vision in batches to OCR + translate.
+async function tcOCRBatch(frames, apiKey, onProgress) {
+  if (!frames.length) return [];
+  const BATCH = 4; // 4 images per request — keeps tokens manageable
+  const results = [];
+  for (let i = 0; i < frames.length; i += BATCH) {
+    const slice = frames.slice(i, i + BATCH);
+    if (onProgress) onProgress(`OCR pass ${Math.floor(i/BATCH)+1}/${Math.ceil(frames.length/BATCH)} — ${slice.length} frames…`);
+    const content = [];
+    content.push({
+      type: 'text',
+      text:
+`You are an OCR + translation assistant. For each image (a video keyframe), extract any visible text — titles, captions, on-screen graphics, watermarks, lower thirds. Translate Hebrew text to English.
+
+OUTPUT FORMAT: a JSON array with exactly ${slice.length} elements, one per image in order.
+Each element: { "text": "...", "text_en": "...", "language": "he|en|other|none" }
+
+- If no readable text is visible, return { "text": "", "text_en": "", "language": "none" } for that image.
+- "text" = original on-screen text (Hebrew kept in Hebrew, English in Latin).
+- "text_en" = English translation. If original is already English, "text_en" = "text".
+- IGNORE: subtitles burned into the video (those overlap with audio); player UI/timestamps; YouTube/social media chrome.
+- KEEP: titles, lower-thirds, on-screen captions of speaker names, location/scene labels, infographics, watermarks, logos with text.
+- Output ONLY the JSON array, no markdown fences, no commentary.`
+    });
+    for (const f of slice) {
+      content.push({ type: 'image_url', image_url: { url: f.dataUrl, detail: 'low' } });
+    }
+    try {
+      const r = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'gpt-5.4',
+          temperature: 0.1,
+          messages: [{ role: 'user', content }],
+        })
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error?.message || ('Vision API error ' + r.status));
+      let raw = (data.choices?.[0]?.message?.content || '').trim();
+      raw = raw.replace(/^```[a-z]*\n?/i, '').replace(/```$/, '').trim();
+      let parsed;
+      try { parsed = JSON.parse(raw); } catch (e) { throw new Error('Bad JSON from vision: ' + raw.slice(0,200)); }
+      if (!Array.isArray(parsed)) throw new Error('Expected JSON array, got: ' + raw.slice(0,200));
+      for (let j = 0; j < slice.length; j++) {
+        const r = parsed[j] || {};
+        if (r.text && String(r.text).trim()) {
+          results.push({
+            timestamp: slice[j].timestamp,
+            text: String(r.text).trim(),
+            text_en: String(r.text_en || r.text).trim(),
+            language: r.language || 'other',
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('OCR batch failed:', e.message);
+      // Continue with remaining batches; don't fail the whole pass
+    }
+  }
+  return results;
+}
+
+// 5) Merge OCR results with audio segments, deduplicating identical adjacent
+// screen-text events (the same title shown across multiple consecutive frames).
+function tcDedupeScreenText(items) {
+  if (!items.length) return [];
+  const out = [];
+  let last = null;
+  for (const it of items) {
+    if (last && last.text === it.text && (it.timestamp - last.end_estimate) <= 6) {
+      last.end_estimate = it.timestamp; // extend the duration
+      continue;
+    }
+    last = { ...it, end_estimate: it.timestamp + 2 };
+    out.push(last);
+  }
+  return out;
+}
+
 (function(){
   const dz = document.getElementById('tc-drop');
   if (!dz) return;
@@ -1713,8 +1912,35 @@ async function tcTranscribe() {
       data = tcAlignBoth(transcribed, translated);
       data.__mode = 'both';
     }
-    clearInterval(fake);
 
+    // Optional OCR pass — only if user enabled it AND file is a video
+    const ocrEnabled = document.getElementById('tc-ocr-enabled')?.checked;
+    const isVideo = (tcFile && ((tcFile.type || '').startsWith('video/') || /\.(mp4|webm|mov|m4v|mkv|avi)$/i.test(tcFile.name)));
+    if (ocrEnabled && tcActiveTab === 'upload' && isVideo && tcFileDuration > 0) {
+      const interval = parseInt(document.getElementById('tc-ocr-interval').value, 10) || 2;
+      const useScene = document.getElementById('tc-ocr-scene').checked;
+      // Use the SAME time range the user picked for the audio
+      const startSec = tcParseTime(document.getElementById('tc-range-start').value) || 0;
+      const endSec   = tcParseTime(document.getElementById('tc-range-end').value)   || tcFileDuration;
+      txt.textContent = '📺 Extracting video frames…';
+      try {
+        const frames = await tcExtractKeyframes(tcFile, startSec, endSec, interval, useScene, (msg) => { txt.textContent = '📺 ' + msg; });
+        if (frames.length === 0) {
+          console.log('[OCR] no frames extracted in selected range');
+        } else {
+          txt.textContent = `📺 OCR + translating ${frames.length} keyframe(s)…`;
+          const rawScreen = await tcOCRBatch(frames, apiKey, (msg) => { txt.textContent = '📺 ' + msg; });
+          const screen   = tcDedupeScreenText(rawScreen);
+          data.screen_texts = screen;
+          console.log('[OCR] captured', screen.length, 'screen-text events');
+        }
+      } catch (e) {
+        console.warn('OCR pass failed:', e.message);
+        showAdminToast('⚠️ OCR pass failed: ' + e.message + ' (audio results still shown)');
+      }
+    }
+
+    clearInterval(fake);
     bar.style.width = '100%'; txt.textContent = '✅ Done!';
     setTimeout(() => prog.classList.remove('show'), 1500);
     tcShowResults(data);
@@ -1755,6 +1981,7 @@ function tcAlignBoth(transcribed, translated) {
 
 function tcShowResults(data) {
   const segments = data.segments || [];
+  const screenTexts = Array.isArray(data.screen_texts) ? data.screen_texts : [];
   const language = data.language || '';
   const duration = data.duration || (segments.length ? segments[segments.length-1].end : 0);
   const mode = data.__mode || 'transcribe';
@@ -1766,34 +1993,51 @@ function tcShowResults(data) {
   const modeBadge = isBoth ? '<span class="tres-badge tb-lang">📝🌐 Side-by-side</span>'
                   : isTranslate ? '<span class="tres-badge tb-lang">🌐 Translated → English</span>'
                   : '';
+  const ocrBadge = screenTexts.length > 0
+    ? `<span class="tres-badge tb-lang">📺 ${screenTexts.length} on-screen text${screenTexts.length===1?'':'s'}</span>`
+    : '';
 
   document.getElementById('tc-badges').innerHTML = `
     <span class="tres-badge tb-lang">${langMap[language] || language || 'Auto'}</span>
     <span class="tres-badge tb-dur">⏱ ${tcFmt(duration)}</span>
     <span class="tres-badge tb-seg">📑 ${segments.length} segments</span>
-    ${modeBadge}`;
+    ${modeBadge}
+    ${ocrBadge}`;
 
+  // Build merged timeline: audio segments + screen-text events, sorted by start
+  const audioRows = segments.map(s => ({
+    type: 'audio',
+    start: s.start, end: s.end,
+    text: s.text || '', text_en: s.text_en || '',
+  }));
+  const screenRows = screenTexts.map(s => ({
+    type: 'screen',
+    start: s.timestamp, end: s.end_estimate || (s.timestamp + 2),
+    text: s.text || '', text_en: s.text_en || '',
+    language: s.language,
+  }));
+  const allRows = audioRows.concat(screenRows).sort((a, b) => a.start - b.start);
+
+  const hasOcr = screenRows.length > 0;
+  // Headers
   const thead = document.querySelector('#tc-results thead tr');
   if (thead) {
-    thead.innerHTML = isBoth
-      ? '<th>Start</th><th>End</th><th>Source</th><th>English</th>'
-      : '<th>Start</th><th>End</th><th>Transcript</th>';
+    if (hasOcr && isBoth)        thead.innerHTML = '<th>Type</th><th>Start</th><th>End</th><th>Source</th><th>English</th>';
+    else if (hasOcr)             thead.innerHTML = '<th>Type</th><th>Start</th><th>End</th><th>Transcript</th>';
+    else if (isBoth)             thead.innerHTML = '<th>Start</th><th>End</th><th>Source</th><th>English</th>';
+    else                         thead.innerHTML = '<th>Start</th><th>End</th><th>Transcript</th>';
   }
 
-  document.getElementById('tc-tbody').innerHTML = segments.map(s => {
-    if (isBoth) {
-      return `<tr>
-        <td class="tts">${tcFmt(s.start)}</td>
-        <td class="tts">${tcFmt(s.end)}</td>
-        <td class="${sourceIsRTL?'trtl':''}">${esc((s.text||'').trim())}</td>
-        <td>${esc((s.text_en||'').trim())}</td>
-      </tr>`;
-    }
-    return `<tr>
-      <td class="tts">${tcFmt(s.start)}</td>
-      <td class="tts">${tcFmt(s.end)}</td>
-      <td class="${sourceIsRTL?'trtl':''}">${esc((s.text||'').trim())}</td>
-    </tr>`;
+  document.getElementById('tc-tbody').innerHTML = allRows.map(r => {
+    const isScreen = r.type === 'screen';
+    const rowStyle = isScreen ? ' style="background:rgba(79,70,229,0.08)"' : '';
+    const typeCell = hasOcr ? `<td style="text-align:center;font-size:1rem"${rowStyle ? '' : ''}>${isScreen ? '📺' : '🔊'}</td>` : '';
+    const srcRTL = sourceIsRTL && (isScreen ? (r.language === 'he') : true);
+    const srcCell = `<td class="${srcRTL?'trtl':''}">${esc((r.text||'').trim())}</td>`;
+    const cells = isBoth
+      ? `<td class="tts">${tcFmt(r.start)}</td><td class="tts">${tcFmt(r.end)}</td>${srcCell}<td>${esc((r.text_en||'').trim())}</td>`
+      : `<td class="tts">${tcFmt(r.start)}</td><td class="tts">${tcFmt(r.end)}</td>${srcCell}`;
+    return `<tr${rowStyle}>${typeCell}${cells}</tr>`;
   }).join('');
 
   const fullText = data.text || segments.map(s => (s.text||'').trim()).join(' ');
@@ -1804,26 +2048,35 @@ function tcShowResults(data) {
   ft.style.direction = sourceIsRTL && !isBoth ? 'rtl' : 'ltr';
   ft.style.textAlign = sourceIsRTL && !isBoth ? 'right' : 'left';
 
+  // Word/HTML export — same merged timeline + Type column when OCR was used
   const dateStr = new Date().toLocaleString();
-  const headerHTML = isBoth
-    ? '<tr><th>Start</th><th>End</th><th>Source</th><th>English</th></tr>'
-    : '<tr><th>Start</th><th>End</th><th>Transcript</th></tr>';
+  let headerHTML;
+  if (hasOcr && isBoth)        headerHTML = '<tr><th>Type</th><th>Start</th><th>End</th><th>Source</th><th>English</th></tr>';
+  else if (hasOcr)             headerHTML = '<tr><th>Type</th><th>Start</th><th>End</th><th>Transcript</th></tr>';
+  else if (isBoth)             headerHTML = '<tr><th>Start</th><th>End</th><th>Source</th><th>English</th></tr>';
+  else                         headerHTML = '<tr><th>Start</th><th>End</th><th>Transcript</th></tr>';
   const esch = (t) => (t || '').trim().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  const rows = segments.map(s => {
-    const srcCell = `<td${sourceIsRTL?' dir="rtl" style="text-align:right"':''}>${esch(s.text)}</td>`;
+  const rows = allRows.map(r => {
+    const isScreen = r.type === 'screen';
+    const rowBg = isScreen ? ' style="background-color:#eef2ff"' : '';
+    const typeLabel = isScreen ? '📺 Screen' : '🔊 Audio';
+    const typeCell = hasOcr ? `<td style="text-align:center;white-space:nowrap">${typeLabel}</td>` : '';
+    const srcRTL = sourceIsRTL && (isScreen ? (r.language === 'he') : true);
+    const srcCell = `<td${srcRTL?' dir="rtl" style="text-align:right"':''}>${esch(r.text)}</td>`;
     if (isBoth) {
-      const enCell = `<td>${esch(s.text_en)}</td>`;
-      return `<tr><td class="ts">${tcFmt(s.start)}</td><td class="ts">${tcFmt(s.end)}</td>${srcCell}${enCell}</tr>`;
+      const enCell = `<td>${esch(r.text_en)}</td>`;
+      return `<tr${rowBg}>${typeCell}<td class="ts">${tcFmt(r.start)}</td><td class="ts">${tcFmt(r.end)}</td>${srcCell}${enCell}</tr>`;
     }
-    return `<tr><td class="ts">${tcFmt(s.start)}</td><td class="ts">${tcFmt(s.end)}</td>${srcCell}</tr>`;
+    return `<tr${rowBg}>${typeCell}<td class="ts">${tcFmt(r.start)}</td><td class="ts">${tcFmt(r.end)}</td>${srcCell}</tr>`;
   }).join('');
   const title = isBoth ? 'Transcript + Translation' : isTranslate ? 'Translation (English)' : 'Transcription';
-  const htmlDoc = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${title}</title><style>body{font-family:Arial,sans-serif;font-size:11pt}h2{color:#1e3a8a}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:6px 10px;font-size:10pt;vertical-align:top}.ts{text-align:center;white-space:nowrap;color:#374151}.meta{color:#6b7280;font-size:9.5pt;margin-bottom:12px}</style></head><body><h2>&#127897; ${title}</h2><p class="meta">Mode: ${mode} &nbsp;|&nbsp; Source language: ${language||'auto'} &nbsp;|&nbsp; Duration: ${tcFmt(duration)} &nbsp;|&nbsp; Segments: ${segments.length} &nbsp;|&nbsp; Date: ${dateStr}</p><table><thead>${headerHTML}</thead><tbody>${rows}</tbody></table><hr><p style="color:#6b7280;font-size:9pt;text-align:center">&#8212; End &#8212;</p></body></html>`;
+  const metaLine = `Mode: ${mode} &nbsp;|&nbsp; Source language: ${language||'auto'} &nbsp;|&nbsp; Duration: ${tcFmt(duration)} &nbsp;|&nbsp; Audio segments: ${segments.length}${hasOcr ? ' &nbsp;|&nbsp; On-screen texts: ' + screenRows.length : ''} &nbsp;|&nbsp; Date: ${dateStr}`;
+  const htmlDoc = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${title}</title><style>body{font-family:Arial,sans-serif;font-size:11pt}h2{color:#1e3a8a}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:6px 10px;font-size:10pt;vertical-align:top}.ts{text-align:center;white-space:nowrap;color:#374151}.meta{color:#6b7280;font-size:9.5pt;margin-bottom:12px}</style></head><body><h2>&#127897; ${title}</h2><p class="meta">${metaLine}</p><table><thead>${headerHTML}</thead><tbody>${rows}</tbody></table><hr><p style="color:#6b7280;font-size:9pt;text-align:center">&#8212; End &#8212;</p></body></html>`;
   const blob = new Blob(['\ufeff' + htmlDoc], { type: 'application/msword' });
   const url  = URL.createObjectURL(blob);
   const dl   = document.getElementById('tc-dl');
   dl.href = url;
-  dl.download = (isBoth ? 'Transcript_plus_Translation' : isTranslate ? 'Translation_EN' : 'Transcription') + '.doc';
+  dl.download = (isBoth ? 'Transcript_plus_Translation' : isTranslate ? 'Translation_EN' : 'Transcription') + (hasOcr ? '_with_OCR' : '') + '.doc';
   document.getElementById('tc-results').style.display = 'block';
 }
 
