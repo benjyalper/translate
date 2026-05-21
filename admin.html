@@ -843,6 +843,10 @@
                 </select>
               </label>
               <label style="font-size:.78rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem">
+                <input type="checkbox" id="ht-speakers" checked style="width:.95rem;height:.95rem;cursor:pointer"/>
+                <span>🎤 Auto-detect speakers (Speaker A / B / C)</span>
+              </label>
+              <label style="font-size:.78rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem">
                 <input type="checkbox" id="ht-cleanup" checked style="width:.95rem;height:.95rem;cursor:pointer"/>
                 <span>🧹 Clean transliterations in Hebrew first</span>
               </label>
@@ -2020,9 +2024,30 @@ OUTPUT FORMAT: a JSON array with exactly ${buckets.length} strings — one Notes
 // Build the VerboLabs-formatted HTML/DOCX from the merged data
 function tcBuildVerboLabsHTML(opts) {
   const { title, pair, thumb, description, comments, summary, buckets, notes, mode } = opts;
+  const simpleMinuteLabels = !!opts.simpleMinuteLabels; // hide HH:MM:SS ranges
   const esch = (t) => (t || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const isTranslate = (mode === 'translate');
   const isBoth = (mode === 'both');
+
+  // Render text with [Speaker X:] tags as bold inline labels, one turn per line.
+  // No tags → returns the text as-is (escaped).
+  function renderSpeakerText(text) {
+    if (!text) return '';
+    const parts = String(text).split(/(\[Speaker\s+[A-Z]:\])/);
+    let html = '';
+    let opened = false;
+    for (const part of parts) {
+      if (!part) continue;
+      if (/^\[Speaker\s+[A-Z]:\]$/.test(part)) {
+        if (opened) html += '<br>';
+        html += '<strong>' + esch(part) + '</strong> ';
+        opened = true;
+      } else {
+        html += esch(part.trim());
+      }
+    }
+    return html;
+  }
 
   const boilerplate = `Detailed instructions:
 • Translate every word — word-for-word, no skips
@@ -2077,21 +2102,33 @@ ${comments ? `<h3>Additional Comments</h3><div class="box"><div class="body">${e
 
 ${summary ? `<h2>📝 Video Summary (100–150 words)</h2><div class="box"><div class="body">${esch(summary)}</div></div>` : ''}
 
-<h2>📦 Timestamps &amp; Per-Minute Boxes</h2>
+<h2>📦 ${simpleMinuteLabels ? 'Per-Minute Boxes' : 'Timestamps &amp; Per-Minute Boxes'}</h2>
 `;
 
   buckets.forEach((b, i) => {
-    const minLabel = `MINUTE ${i+1} · ${tcFormatTime(b.start)} – ${tcFormatTime(b.end)}`;
+    const minLabel = simpleMinuteLabels
+      ? `MINUTE ${i+1}`
+      : `MINUTE ${i+1} · ${tcFormatTime(b.start)} – ${tcFormatTime(b.end)}`;
+
     // Translation: prefer text_en if available (Both/Translate mode), else text
     const translationRows = b.segments.map(s => {
       const eng = (s.text_en || s.text || '').trim();
-      const speaker = '[Speaker ?]'; // placeholder for manual filling
+      const hasSpeaker = /\[Speaker\s+[A-Z]:\]/.test(eng);
+      const speaker = hasSpeaker ? '' : '<strong>[Speaker ?]</strong> ';
+      if (simpleMinuteLabels) {
+        // No per-line timestamp column for text-input mode (no real timing)
+        return `<tr><td>${speaker}${renderSpeakerText(eng)}</td></tr>`;
+      }
       const tsLabel = `${tcFormatTime(s.start)}`;
-      return `<tr><td class="ts">${tsLabel}</td><td><strong>${speaker}</strong> ${esch(eng)}</td></tr>`;
+      return `<tr><td class="ts">${tsLabel}</td><td>${speaker}${renderSpeakerText(eng)}</td></tr>`;
     }).join('');
     const transOriginalRows = isBoth ? b.segments.map(s => {
       const src = (s.text || '').trim();
-      return src ? `<tr><td class="ts">${tcFormatTime(s.start)}</td><td>${esch(src)}</td></tr>` : '';
+      if (!src) return '';
+      if (simpleMinuteLabels) {
+        return `<tr><td dir="rtl" style="text-align:right">${renderSpeakerText(src)}</td></tr>`;
+      }
+      return `<tr><td class="ts">${tcFormatTime(s.start)}</td><td dir="rtl" style="text-align:right">${renderSpeakerText(src)}</td></tr>`;
     }).join('') : '';
 
     const ostRows = b.ocr.length
@@ -2281,7 +2318,8 @@ CRITICAL RULES:
 3. English words / brand names / product names / technical terms that appear in the source MUST remain in their original Latin script. Do NOT re-translate them.
 4. If a Hebrew word looks like a transliteration of an English word (e.g. "מישן" for "mission", "דשבורד" for "dashboard", "אונליין" for "online", "אפליקציה" for "app"), output the original English word, not a Hebrew rendering.
 5. Preserve segment boundaries — translate each numbered item independently, do NOT merge or split across numbers.
-6. Output ONLY the numbered translations, one per line, same order. No commentary, no markdown, no code fences.
+6. Preserve speaker markers like [Speaker A:], [Speaker B:], [Speaker C:] EXACTLY as they appear in the source — same speaker letter, same position in the text.
+7. Output ONLY the numbered translations, one per line, same order. No commentary, no markdown, no code fences.
 
 ${vocab ? 'PRESERVE THESE TERMS EXACTLY (in their original spelling/casing): ' + vocab.replace(/\s+/g,' ').slice(0, 600) : ''}`;
 
@@ -2348,6 +2386,7 @@ RULES:
 - Keep proper Hebrew words and names in Hebrew. When unsure, leave it in Hebrew.
 - Do NOT translate Hebrew to English. Only fix transliterations.
 - Preserve punctuation, spacing, and the numbered structure exactly.
+- Preserve speaker markers like [Speaker A:], [Speaker B:] EXACTLY as they appear (same letter, same position).
 - Output ONLY the numbered items, one per line, in the same order. No commentary, no markdown.
 
 EXAMPLES (don't include these in output):
@@ -4216,6 +4255,43 @@ async function htOnFile(input) {
   }
 }
 
+// One GPT-5.4 call: insert [Speaker A:], [Speaker B:], etc. into the raw Hebrew
+// text wherever the speaker changes. Returns the same text with markers inline.
+async function htDetectSpeakers(text, apiKey, onProgress) {
+  if (onProgress) onProgress('🎤 Detecting speakers…');
+  const sys =
+`You analyze Hebrew transcripts to identify distinct speakers and tag their turns.
+
+INPUT: a Hebrew transcript (one or more speakers — interview, dialogue, monologue, etc.).
+OUTPUT: the same Hebrew text with speaker markers inserted inline. NOTHING ELSE.
+
+RULES:
+- Use markers in the form [Speaker A:] [Speaker B:] [Speaker C:] in order of appearance.
+- Insert ONE marker at the start of each turn (a speaker's continuous utterance).
+- If the same speaker has multiple consecutive sentences, only ONE marker at the start of that turn.
+- If it's clearly one person speaking the entire piece (monologue, narration), use only [Speaker A:] once at the very start.
+- Max 6 distinct speakers. If you'd identify more, combine similar voices into the most likely speaker.
+- DO NOT translate, paraphrase, or modify the Hebrew text in any way — only insert the markers.
+- Preserve all original punctuation, line breaks, and content exactly.
+- If you can't tell who is speaking, default to keeping the previous speaker label.
+- OUTPUT THE ANNOTATED HEBREW TEXT DIRECTLY. NO commentary, NO markdown, NO code fences, NO leading text.`;
+  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gpt-5.4',
+      temperature: 0.1,
+      messages: [
+        { role: 'system', content: sys },
+        { role: 'user',   content: text }
+      ]
+    })
+  });
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error?.message || 'Speaker detection failed');
+  return (data.choices?.[0]?.message?.content || '').trim();
+}
+
 // Sentence-aware chunking. Returns an array of strings, each ~targetWords long.
 // Splits on Hebrew sentence punctuation + newlines so we don't break mid-sentence.
 function htSplitIntoMinutes(text, wpm) {
@@ -4296,10 +4372,26 @@ async function htTranslate() {
   prog.classList.add('show');
   bar.style.width = '5%';
 
+  const wantSpeakers = document.getElementById('ht-speakers').checked;
+
   try {
+    // 0) Optional speaker detection — runs on RAW Hebrew before chunking
+    let workingText = input;
+    if (wantSpeakers) {
+      txt.textContent = '🎤 Detecting speakers (one GPT-5.4 call)…';
+      try {
+        workingText = await htDetectSpeakers(input, apiKey, (m) => { txt.textContent = m; });
+        console.log('[ht] speaker detection complete');
+      } catch (e) {
+        console.warn('[ht] speaker detection failed:', e.message);
+        showAdminToast('⚠️ Speaker detection failed — continuing without speaker tags');
+      }
+      bar.style.width = '10%';
+    }
+
     // 1) Split into ~1-minute chunks
     txt.textContent = 'Splitting Hebrew text into ~1-minute chunks…';
-    const chunks = htSplitIntoMinutes(input, wpm);
+    const chunks = htSplitIntoMinutes(workingText, wpm);
     console.log(`[ht] split into ${chunks.length} chunks @ ${wpm} wpm`);
     bar.style.width = '15%';
 
@@ -4384,20 +4476,51 @@ function htRenderResults({ buckets, summary, notes, title }) {
     sumBox.style.display = 'none';
   }
 
-  // Table
+  // Helper: render text with [Speaker X:] tags as bold + line-break per turn
+  function renderWithSpeakers(text) {
+    if (!text) return '';
+    // Split before each [Speaker X:] marker so each piece begins with one
+    const parts = String(text).split(/(\[Speaker\s+[A-Z]:\])/);
+    let html = '';
+    let openSpeaker = null;
+    for (const part of parts) {
+      if (!part) continue;
+      const m = part.match(/^\[Speaker\s+([A-Z]):\]$/);
+      if (m) {
+        if (openSpeaker !== null) html += '<br>';
+        html += `<strong style="color:#a5b4fc">${esc(part)}</strong> `;
+        openSpeaker = m[1];
+      } else {
+        html += esc(part.trim());
+      }
+    }
+    return html;
+  }
+
+  // Update table header — column 1 is now just "Minute"
+  const thead = document.querySelector('#ht-results thead tr');
+  if (thead) {
+    thead.innerHTML = `
+      <th style="padding:.5rem .6rem;text-align:center;color:#a5b4fc;width:90px">Minute</th>
+      <th style="padding:.5rem .6rem;text-align:left;color:#a5b4fc;width:45%">Hebrew (source)</th>
+      <th style="padding:.5rem .6rem;text-align:left;color:#a5b4fc;width:45%">English</th>`;
+  }
+
   document.getElementById('ht-tbody').innerHTML = buckets.map((b, i) => {
     const heb = b.segments[0].text || '';
     const eng = b.segments[0].text_en || '';
     const note = notes && notes[i] ? notes[i] : '';
     return `<tr style="border-top:1px solid #1f2937">
-      <td style="padding:.5rem .6rem;text-align:center;font-family:monospace;color:#a5b4fc;vertical-align:top">${tcFormatTime(b.start)}–${tcFormatTime(b.end)}</td>
-      <td style="padding:.5rem .6rem;direction:rtl;text-align:right;vertical-align:top;line-height:1.5">${esc(heb)}</td>
-      <td style="padding:.5rem .6rem;vertical-align:top;line-height:1.5">${esc(eng)}</td>
+      <td style="padding:.5rem .6rem;text-align:center;color:#a5b4fc;vertical-align:top;font-weight:600">MINUTE ${i+1}</td>
+      <td style="padding:.5rem .6rem;direction:rtl;text-align:right;vertical-align:top;line-height:1.6">${renderWithSpeakers(heb)}</td>
+      <td style="padding:.5rem .6rem;vertical-align:top;line-height:1.6">${renderWithSpeakers(eng)}</td>
     </tr>
     ${note ? `<tr><td></td><td colspan="2" style="padding:.4rem .6rem;background:rgba(254,243,199,.06);font-size:.74rem;color:#fcd34d"><strong>🚨 Notes:</strong> ${esc(note)}</td></tr>` : ''}`;
   }).join('');
 
-  // Build VerboLabs-style Word doc using the existing helper
+  // Build VerboLabs-style Word doc using the existing helper.
+  // simpleMinuteLabels=true → no HH:MM:SS, just "MINUTE 1", "MINUTE 2", etc.
+  // The Hebrew Text tool has no real timestamps (text-only input).
   const html = tcBuildVerboLabsHTML({
     title: title || 'Hebrew Text Translation',
     pair: 'Hebrew → English',
@@ -4408,6 +4531,7 @@ function htRenderResults({ buckets, summary, notes, title }) {
     buckets,
     notes,
     mode: 'both',
+    simpleMinuteLabels: true,
   });
   const blob = new Blob(['﻿' + html], { type: 'application/msword' });
   const url  = URL.createObjectURL(blob);
