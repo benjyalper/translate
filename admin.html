@@ -487,9 +487,17 @@
           <div class="tdrop-sel" id="tc-file-label"></div>
         </div>
 
-        <!-- Language + button -->
+        <!-- Mode -->
         <div class="tlang-row">
-          <span class="tlang-lbl">Language:</span>
+          <span class="tlang-lbl">Output:</span>
+          <button class="tlang-btn active" id="tc-mode-transcribe" onclick="tcSetMode('transcribe',this)" title="Transcribe in source language (Hebrew → Hebrew text, English → English text)">📝 Transcribe (source)</button>
+          <button class="tlang-btn"        id="tc-mode-translate"  onclick="tcSetMode('translate',this)"  title="Translate audio directly into English (any source language → English text)">🌐 Translate → English</button>
+          <button class="tlang-btn"        id="tc-mode-both"       onclick="tcSetMode('both',this)"       title="Both: source language AND English (2 API calls, ~2× cost). Best for VerboLabs-style jobs needing both languages side-by-side.">📝🌐 Both side-by-side</button>
+        </div>
+
+        <!-- Language + button -->
+        <div class="tlang-row" id="tc-lang-row">
+          <span class="tlang-lbl">Source&nbsp;lang:</span>
           <button class="tlang-btn active" onclick="tcSetLang('auto',this)">🔍 Auto</button>
           <button class="tlang-btn"        onclick="tcSetLang('he',this)">🇮🇱 Hebrew</button>
           <button class="tlang-btn"        onclick="tcSetLang('en',this)">🇺🇸 English</button>
@@ -1259,6 +1267,34 @@ function showAdminToast(msg, duration=5000) {
 let tcLang = 'auto', tcRecording = false, tcMediaRecorder = null;
 let tcChunks = [], tcBlob = null, tcFile = null;
 let tcTimerInterval = null, tcTimerSec = 0, tcActiveTab = 'record';
+let tcMode = 'transcribe'; // 'transcribe' | 'translate' | 'both'
+
+function tcSetMode(mode, el) {
+  tcMode = mode;
+  el.closest('.tlang-row').querySelectorAll('.tlang-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  // The translation endpoint auto-detects source language and always outputs English,
+  // so the "Source lang" picker is only meaningful for transcribe-only mode.
+  const langRow = document.getElementById('tc-lang-row');
+  if (langRow) {
+    if (mode === 'transcribe' || mode === 'both') {
+      langRow.style.opacity = '1';
+      langRow.style.pointerEvents = 'auto';
+      langRow.querySelector('.tlang-lbl').textContent = mode === 'both' ? 'Source lang (transcription pass):' : 'Source lang:';
+    } else {
+      langRow.style.opacity = '0.45';
+      langRow.style.pointerEvents = 'none';
+      langRow.querySelector('.tlang-lbl').textContent = 'Source lang (auto-detected for translation):';
+    }
+  }
+  // Button label reflects the action
+  const btn = document.getElementById('tc-btn');
+  if (btn) {
+    btn.textContent = mode === 'translate' ? '✨ Translate to English'
+                    : mode === 'both'      ? '✨ Transcribe + Translate'
+                    :                        '✨ Transcribe';
+  }
+}
 
 function tcSwitchTab(tab, btn) {
   tcActiveTab = tab;
@@ -1333,6 +1369,27 @@ function tcUpdateBtn() {
   document.getElementById('tc-btn').disabled = !(tcActiveTab==='record' ? tcBlob : tcFile);
 }
 
+async function tcCallWhisper(src, name, endpoint, apiKey, languageHint) {
+  // endpoint: 'transcriptions' (source-language out) or 'translations' (English out, no language param)
+  const fd = new FormData();
+  fd.append('file', src, name);
+  fd.append('model', 'whisper-1');
+  fd.append('response_format', 'verbose_json');
+  fd.append('timestamp_granularities[]', 'segment');
+  // The /translations endpoint does NOT accept the `language` parameter
+  if (endpoint === 'transcriptions' && languageHint && languageHint !== 'auto') {
+    fd.append('language', languageHint);
+  }
+  const res = await fetch('https://api.openai.com/v1/audio/' + endpoint, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + apiKey },
+    body: fd,
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error?.message || ('Whisper /' + endpoint + ' error ' + res.status));
+  return data;
+}
+
 async function tcTranscribe() {
   const apiKey = getApiKey();
   if (!apiKey) { promptApiKey(); return; }
@@ -1354,22 +1411,25 @@ async function tcTranscribe() {
       : '.' + (tcFile.name.split('.').pop() || 'webm');
     const name = tcActiveTab === 'record' ? `recording${ext}` : tcFile.name;
 
-    txt.textContent = 'Sending to Whisper AI…';
-    const fd = new FormData();
-    fd.append('file', src, name);
-    fd.append('model', 'whisper-1');
-    fd.append('response_format', 'verbose_json');
-    fd.append('timestamp_granularities[]', 'segment');
-    if (tcLang !== 'auto') fd.append('language', tcLang);
-
-    const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: { Authorization: 'Bearer ' + apiKey },
-      body: fd,
-    });
-    const data = await res.json();
+    let data;
+    if (tcMode === 'transcribe') {
+      txt.textContent = 'Transcribing with Whisper…';
+      data = await tcCallWhisper(src, name, 'transcriptions', apiKey, tcLang);
+      data.__mode = 'transcribe';
+    } else if (tcMode === 'translate') {
+      txt.textContent = 'Translating audio to English with Whisper…';
+      data = await tcCallWhisper(src, name, 'translations', apiKey, null);
+      data.__mode = 'translate';
+      data.language = 'en'; // /translations always outputs English
+    } else { // 'both'
+      txt.textContent = 'Pass 1/2: Transcribing source language…';
+      const transcribed = await tcCallWhisper(src, name, 'transcriptions', apiKey, tcLang);
+      txt.textContent = 'Pass 2/2: Translating to English…';
+      const translated  = await tcCallWhisper(src, name, 'translations',   apiKey, null);
+      data = tcAlignBoth(transcribed, translated);
+      data.__mode = 'both';
+    }
     clearInterval(fake);
-    if (!res.ok) throw new Error(data.error?.message || 'Whisper API error ' + res.status);
 
     bar.style.width = '100%'; txt.textContent = '✅ Done!';
     setTimeout(() => prog.classList.remove('show'), 1500);
@@ -1380,41 +1440,106 @@ async function tcTranscribe() {
   } finally { btn.disabled = false; }
 }
 
+function tcAlignBoth(transcribed, translated) {
+  const tSegs = transcribed.segments || [];
+  const eSegs = translated.segments  || [];
+  function bestOverlap(start, end) {
+    let best = null, bestScore = 0;
+    for (const e of eSegs) {
+      const o = Math.max(0, Math.min(end, e.end) - Math.max(start, e.start));
+      if (o > bestScore) { bestScore = o; best = e; }
+    }
+    return best;
+  }
+  const merged = tSegs.map(s => {
+    const m = bestOverlap(s.start, s.end);
+    return {
+      start: s.start,
+      end:   s.end,
+      text:  s.text,
+      text_en: m ? (m.text || '').trim() : '',
+    };
+  });
+  return {
+    segments: merged,
+    language: transcribed.language || tcLang,
+    duration: transcribed.duration || (tSegs.length ? tSegs[tSegs.length-1].end : 0),
+    text:    transcribed.text,
+    text_en: translated.text,
+  };
+}
+
 function tcShowResults(data) {
   const segments = data.segments || [];
   const language = data.language || '';
   const duration = data.duration || (segments.length ? segments[segments.length-1].end : 0);
+  const mode = data.__mode || 'transcribe';
   const isHe = /^he/.test(language);
-  const langMap = { he:'Hebrew 🇮🇱', en:'English 🇺🇸' };
+  const isBoth = (mode === 'both');
+  const isTranslate = (mode === 'translate');
+  const sourceIsRTL = isHe && !isTranslate;
+  const langMap = { he:'Hebrew 🇮🇱', en:'English 🇺🇸', ar:'Arabic 🇸🇦', ru:'Russian 🇷🇺', fr:'French 🇫🇷', es:'Spanish 🇪🇸' };
+  const modeBadge = isBoth ? '<span class="tres-badge tb-lang">📝🌐 Side-by-side</span>'
+                  : isTranslate ? '<span class="tres-badge tb-lang">🌐 Translated → English</span>'
+                  : '';
 
   document.getElementById('tc-badges').innerHTML = `
     <span class="tres-badge tb-lang">${langMap[language] || language || 'Auto'}</span>
     <span class="tres-badge tb-dur">⏱ ${tcFmt(duration)}</span>
-    <span class="tres-badge tb-seg">📑 ${segments.length} segments</span>`;
+    <span class="tres-badge tb-seg">📑 ${segments.length} segments</span>
+    ${modeBadge}`;
 
-  document.getElementById('tc-tbody').innerHTML = segments.map(s => `
-    <tr>
+  const thead = document.querySelector('#tc-results thead tr');
+  if (thead) {
+    thead.innerHTML = isBoth
+      ? '<th>Start</th><th>End</th><th>Source</th><th>English</th>'
+      : '<th>Start</th><th>End</th><th>Transcript</th>';
+  }
+
+  document.getElementById('tc-tbody').innerHTML = segments.map(s => {
+    if (isBoth) {
+      return `<tr>
+        <td class="tts">${tcFmt(s.start)}</td>
+        <td class="tts">${tcFmt(s.end)}</td>
+        <td class="${sourceIsRTL?'trtl':''}">${esc((s.text||'').trim())}</td>
+        <td>${esc((s.text_en||'').trim())}</td>
+      </tr>`;
+    }
+    return `<tr>
       <td class="tts">${tcFmt(s.start)}</td>
       <td class="tts">${tcFmt(s.end)}</td>
-      <td class="${isHe?'trtl':''}">${esc(s.text.trim())}</td>
-    </tr>`).join('');
+      <td class="${sourceIsRTL?'trtl':''}">${esc((s.text||'').trim())}</td>
+    </tr>`;
+  }).join('');
 
-  const fullText = data.text || segments.map(s=>s.text.trim()).join(' ');
+  const fullText = data.text || segments.map(s => (s.text||'').trim()).join(' ');
   const ft = document.getElementById('tc-fulltext');
-  ft.textContent = fullText;
-  ft.style.direction = isHe ? 'rtl' : 'ltr';
-  ft.style.textAlign = isHe ? 'right' : 'left';
+  ft.textContent = (isBoth && data.text_en)
+    ? (data.text || '') + '\n\n— English —\n' + data.text_en
+    : fullText;
+  ft.style.direction = sourceIsRTL && !isBoth ? 'rtl' : 'ltr';
+  ft.style.textAlign = sourceIsRTL && !isBoth ? 'right' : 'left';
 
-  // Build Word-compatible HTML file for download
-  const rows = segments.map(s =>
-    `<tr><td class="ts">${tcFmt(s.start)}</td><td class="ts">${tcFmt(s.end)}</td><td${isHe?' dir="rtl" style="text-align:right"':''}>${s.text.trim().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</td></tr>`
-  ).join('');
   const dateStr = new Date().toLocaleString();
-  const htmlDoc = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>Transcription</title><style>body{font-family:Arial,sans-serif;font-size:11pt}h2{color:#1e3a8a}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:6px 10px;font-size:10pt}.ts{text-align:center;white-space:nowrap;color:#374151}.meta{color:#6b7280;font-size:9.5pt;margin-bottom:12px}</style></head><body><h2>&#127897; Transcription</h2><p class="meta">Language: ${language||'auto'} &nbsp;|&nbsp; Duration: ${tcFmt(duration)} &nbsp;|&nbsp; Segments: ${segments.length} &nbsp;|&nbsp; Date: ${dateStr}</p><table><thead><tr><th>Start</th><th>End</th><th>Transcript</th></tr></thead><tbody>${rows}</tbody></table><hr><p style="color:#6b7280;font-size:9pt;text-align:center">&#8212; End of Transcription &#8212;</p></body></html>`;
+  const headerHTML = isBoth
+    ? '<tr><th>Start</th><th>End</th><th>Source</th><th>English</th></tr>'
+    : '<tr><th>Start</th><th>End</th><th>Transcript</th></tr>';
+  const esch = (t) => (t || '').trim().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const rows = segments.map(s => {
+    const srcCell = `<td${sourceIsRTL?' dir="rtl" style="text-align:right"':''}>${esch(s.text)}</td>`;
+    if (isBoth) {
+      const enCell = `<td>${esch(s.text_en)}</td>`;
+      return `<tr><td class="ts">${tcFmt(s.start)}</td><td class="ts">${tcFmt(s.end)}</td>${srcCell}${enCell}</tr>`;
+    }
+    return `<tr><td class="ts">${tcFmt(s.start)}</td><td class="ts">${tcFmt(s.end)}</td>${srcCell}</tr>`;
+  }).join('');
+  const title = isBoth ? 'Transcript + Translation' : isTranslate ? 'Translation (English)' : 'Transcription';
+  const htmlDoc = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${title}</title><style>body{font-family:Arial,sans-serif;font-size:11pt}h2{color:#1e3a8a}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:6px 10px;font-size:10pt;vertical-align:top}.ts{text-align:center;white-space:nowrap;color:#374151}.meta{color:#6b7280;font-size:9.5pt;margin-bottom:12px}</style></head><body><h2>&#127897; ${title}</h2><p class="meta">Mode: ${mode} &nbsp;|&nbsp; Source language: ${language||'auto'} &nbsp;|&nbsp; Duration: ${tcFmt(duration)} &nbsp;|&nbsp; Segments: ${segments.length} &nbsp;|&nbsp; Date: ${dateStr}</p><table><thead>${headerHTML}</thead><tbody>${rows}</tbody></table><hr><p style="color:#6b7280;font-size:9pt;text-align:center">&#8212; End &#8212;</p></body></html>`;
   const blob = new Blob(['\ufeff' + htmlDoc], { type: 'application/msword' });
   const url  = URL.createObjectURL(blob);
   const dl   = document.getElementById('tc-dl');
-  dl.href = url; dl.download = 'Transcription.doc';
+  dl.href = url;
+  dl.download = (isBoth ? 'Transcript_plus_Translation' : isTranslate ? 'Translation_EN' : 'Transcription') + '.doc';
   document.getElementById('tc-results').style.display = 'block';
 }
 
