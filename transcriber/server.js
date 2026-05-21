@@ -284,7 +284,9 @@ function addDirToZip(zip, baseDir, currentDir) {
 // Uses memory storage so we don't write to disk for every proxy call.
 const uploadAudioMem = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB — generous; Whisper rejects > 25 MB anyway
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB — Whisper hard-caps at 25 MB but
+                                            // give the proxy headroom so OpenAI's clean
+                                            // error message bubbles through, not Multer's
   fileFilter: (req, file, cb) => {
     const ok = /audio|video|octet-stream/.test(file.mimetype) ||
                /\.(mp3|mp4|m4a|wav|webm|ogg|mpeg|mpga|flac)$/i.test(file.originalname);
@@ -292,7 +294,16 @@ const uploadAudioMem = multer({
   }
 });
 
-app.post('/api/whisper', uploadAudioMem.single('file'), async (req, res) => {
+// Multer error handler — catches LIMIT_FILE_SIZE before it bubbles to nginx as a generic 413
+app.post('/api/whisper', (req, res, next) => {
+  uploadAudioMem.single('file')(req, res, (err) => {
+    if (err && err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ error: { message: 'Upload exceeds server limit (100 MB). Pick a shorter time range in the Transcriber so the client slices first.' } });
+    }
+    if (err) return res.status(500).json({ error: { message: 'Upload failed: ' + err.message } });
+    next();
+  });
+}, async (req, res) => {
   const userKey = req.headers['x-openai-key'] || OPENAI_API_KEY;
   if (!userKey) return res.status(400).json({ error: { message: 'No API key — set one in the admin panel or configure OPENAI_API_KEY on the server.' } });
   if (!req.file) return res.status(400).json({ error: { message: 'No file uploaded' } });

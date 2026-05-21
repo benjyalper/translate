@@ -1891,19 +1891,40 @@ async function tcTranscribe() {
     let uploadBlob = src;
     let uploadName = tcActiveTab === 'record' ? `recording${ext}` : tcFile.name;
 
-    // If user picked a time range that's not the full file, slice in-browser via Web Audio API
-    if (tcActiveTab === 'upload' && tcFileDuration > 0) {
-      const startSec = tcParseTime(document.getElementById('tc-range-start').value);
-      const endSec   = tcParseTime(document.getElementById('tc-range-end').value);
-      const isFull   = startSec === 0 && Math.abs(endSec - tcFileDuration) < 1;
-      const valid    = !isNaN(startSec) && !isNaN(endSec) && startSec < endSec && endSec <= tcFileDuration + 1;
-      if (valid && !isFull) {
-        txt.textContent = 'Decoding audio in browser…';
+    // Always run uploaded files through the Web Audio slice pipeline.
+    // Even on "full file", this:
+    //   - Strips the video track (often 80%+ of the file size)
+    //   - Mixes to mono and downsamples to 16 kHz (Whisper's native rate)
+    //   - Yields a small WAV (~32 KB/sec) regardless of source codec/size
+    // This guarantees we don't hit upload size limits (Multer / Railway edge /
+    // OpenAI's 25 MB cap) for any reasonably long file.
+    if (tcActiveTab === 'upload' && tcFile) {
+      const fileSizeMB = tcFile.size / 1024 / 1024;
+      // If duration is known we trust the user's range; otherwise use full file
+      let startSec = 0, endSec = tcFileDuration || 0;
+      if (tcFileDuration > 0) {
+        const s = tcParseTime(document.getElementById('tc-range-start').value);
+        const e = tcParseTime(document.getElementById('tc-range-end').value);
+        const valid = !isNaN(s) && !isNaN(e) && s < e && e <= tcFileDuration + 1;
+        if (!valid) throw new Error('Invalid time range — please check Start and End values');
+        startSec = s; endSec = e;
+      }
+      // If we have a valid duration and range, always compress to mono 16 kHz WAV
+      if (endSec > startSec) {
+        txt.textContent = `Decoding audio in browser (${fileSizeMB.toFixed(1)} MB source)…`;
         uploadBlob = await tcSliceFile(tcFile, startSec, endSec, (msg) => { txt.textContent = msg; });
-        uploadName = tcFile.name.replace(/\.[^.]+$/, '') + `_${tcFormatTime(startSec).replace(':','-')}_${tcFormatTime(endSec).replace(':','-')}.wav`;
-        console.log(`[transcriber] Sliced ${tcFormatTime(endSec - startSec)} of audio → ${(uploadBlob.size/1024/1024).toFixed(2)} MB WAV`);
-      } else if (!isFull && !valid) {
-        throw new Error('Invalid time range — please check Start and End values');
+        const isFull = startSec === 0 && Math.abs(endSec - (tcFileDuration || endSec)) < 1;
+        uploadName = tcFile.name.replace(/\.[^.]+$/, '') + (isFull
+          ? '_audio.wav'
+          : `_${tcFormatTime(startSec).replace(':','-')}_${tcFormatTime(endSec).replace(':','-')}.wav`);
+        console.log(`[transcriber] Compressed ${tcFormatTime(endSec - startSec)} from ${fileSizeMB.toFixed(2)} MB source → ${(uploadBlob.size/1024/1024).toFixed(2)} MB mono 16 kHz WAV`);
+        // Hard sanity check vs Whisper's 25 MB cap
+        if (uploadBlob.size > 25 * 1024 * 1024) {
+          throw new Error(`Slice is ${(uploadBlob.size/1024/1024).toFixed(1)} MB — exceeds Whisper's 25 MB limit. Shorten the time range (16 kHz mono WAV ≈ 1.9 MB/min, so max ~13 min per slice).`);
+        }
+      } else if (fileSizeMB > 24) {
+        // No duration detected, but file is too big to send raw
+        throw new Error(`File is ${fileSizeMB.toFixed(1)} MB and duration couldn't be detected — set a time range manually so the slicer can compress it before upload.`);
       }
     }
 
