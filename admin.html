@@ -7,6 +7,10 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <!-- ffmpeg.wasm — lazy-loaded only when the user actually slices audio.
+       Single-threaded build avoids COOP/COEP requirements. -->
+  <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
+  <script src="https://unpkg.com/@ffmpeg/util@0.12.1/dist/umd/util.js"></script>
   <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
     :root{
@@ -482,9 +486,31 @@
           <div class="tdrop" id="tc-drop">
             <input type="file" id="tc-file" accept="audio/*,video/*,.mp3,.mp4,.m4a,.wav,.webm,.ogg,.flac" onchange="tcOnFile(this)"/>
             <div class="tdrop-icon">📂</div>
-            <div class="tdrop-text">Drop audio file or click to browse<br><small>MP3, WAV, M4A, WEBM, FLAC — max 25 MB</small></div>
+            <div class="tdrop-text">Drop audio/video file or click to browse<br><small>MP3, WAV, M4A, WEBM, FLAC, MP4 — large files are sliced in-browser</small></div>
           </div>
           <div class="tdrop-sel" id="tc-file-label"></div>
+
+          <!-- Time range selector (appears once a file with detectable duration loads) -->
+          <div id="tc-range-box" style="display:none;margin-top:.7rem;background:#0f0f17;border:1px solid var(--border);border-radius:8px;padding:.7rem .9rem">
+            <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.4rem">
+              <span style="font-size:.78rem;color:#a5b4fc;font-weight:600">⏱ Time range</span>
+              <span id="tc-range-duration" style="font-size:.72rem;color:#64748b"></span>
+              <button class="tbtn" style="margin-left:auto;width:auto;padding:.3rem .7rem;font-size:.68rem;background:#1e1b4b;color:#a5b4fc" onclick="tcResetRange()">↺ Full file</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+              <label style="font-size:.72rem;color:#94a3b8">Start:</label>
+              <input type="text" id="tc-range-start" value="00:00" placeholder="mm:ss" oninput="tcOnRangeChange()"
+                style="width:80px;padding:.4rem .55rem;background:#0a0a14;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.78rem;font-family:monospace;text-align:center"/>
+              <label style="font-size:.72rem;color:#94a3b8;margin-left:.5rem">End:</label>
+              <input type="text" id="tc-range-end" value="00:00" placeholder="mm:ss" oninput="tcOnRangeChange()"
+                style="width:80px;padding:.4rem .55rem;background:#0a0a14;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.78rem;font-family:monospace;text-align:center"/>
+              <span id="tc-range-status" style="font-size:.72rem;color:#34d399;margin-left:.3rem"></span>
+            </div>
+            <div style="font-size:.68rem;color:#64748b;margin-top:.45rem">
+              Format: <code style="color:#a5b4fc">mm:ss</code> (e.g. <code>03:00</code>) or <code>hh:mm:ss</code> (e.g. <code>01:23:45</code>).
+              Slicing happens in your browser — only the selected range is uploaded.
+            </div>
+          </div>
         </div>
 
         <!-- Mode -->
@@ -1311,11 +1337,161 @@ function tcSetLang(lang, el) {
   el.classList.add('active');
 }
 
-function tcOnFile(input) {
+// ── Time range slicing (ffmpeg.wasm lazy-loaded) ──────────
+let tcFileDuration = 0;        // seconds, 0 = unknown
+let tcFFmpegInstance = null;   // loaded on first slice
+let tcFFmpegLoading = null;
+
+function tcParseTime(s) {
+  if (!s) return NaN;
+  const t = String(s).trim();
+  // Accept mm:ss, hh:mm:ss, plain seconds
+  const parts = t.split(':').map(p => Number(p));
+  if (parts.some(n => isNaN(n))) return NaN;
+  let sec = 0;
+  if (parts.length === 1)      sec = parts[0];
+  else if (parts.length === 2) sec = parts[0]*60 + parts[1];
+  else if (parts.length === 3) sec = parts[0]*3600 + parts[1]*60 + parts[2];
+  return sec;
+}
+function tcFormatTime(sec) {
+  sec = Math.max(0, Math.round(sec));
+  const h = Math.floor(sec/3600), m = Math.floor((sec%3600)/60), s = sec%60;
+  return h > 0
+    ? [h,m,s].map(v => String(v).padStart(2,'0')).join(':')
+    : [m,s].map(v => String(v).padStart(2,'0')).join(':');
+}
+
+async function tcDetectDuration(file) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const isVideo = (file.type || '').startsWith('video/') || /\.(mp4|webm|mov|m4v|mkv|avi)$/i.test(file.name);
+    const el = document.createElement(isVideo ? 'video' : 'audio');
+    el.preload = 'metadata';
+    el.src = url;
+    const cleanup = () => { URL.revokeObjectURL(url); };
+    el.onloadedmetadata = () => {
+      const d = isFinite(el.duration) ? el.duration : 0;
+      cleanup(); resolve(d);
+    };
+    el.onerror = () => { cleanup(); resolve(0); };
+    // Timeout fallback
+    setTimeout(() => { cleanup(); resolve(0); }, 8000);
+  });
+}
+
+function tcResetRange() {
+  if (!tcFileDuration) return;
+  document.getElementById('tc-range-start').value = '00:00';
+  document.getElementById('tc-range-end').value   = tcFormatTime(tcFileDuration);
+  tcOnRangeChange();
+}
+
+function tcOnRangeChange() {
+  const startEl  = document.getElementById('tc-range-start');
+  const endEl    = document.getElementById('tc-range-end');
+  const statusEl = document.getElementById('tc-range-status');
+  if (!tcFileDuration) return;
+  const startSec = tcParseTime(startEl.value);
+  const endSec   = tcParseTime(endEl.value);
+  if (isNaN(startSec) || isNaN(endSec)) {
+    statusEl.textContent = '⚠️ Invalid format';
+    statusEl.style.color = '#fca5a5';
+    return;
+  }
+  if (startSec >= endSec) {
+    statusEl.textContent = '⚠️ Start must be before End';
+    statusEl.style.color = '#fca5a5';
+    return;
+  }
+  if (endSec > tcFileDuration + 1) {
+    statusEl.textContent = `⚠️ End past file duration (${tcFormatTime(tcFileDuration)})`;
+    statusEl.style.color = '#fca5a5';
+    return;
+  }
+  const dur = endSec - startSec;
+  const isFull = startSec === 0 && Math.abs(endSec - tcFileDuration) < 1;
+  if (isFull) {
+    statusEl.textContent = `✓ Full file (${tcFormatTime(dur)})`;
+  } else {
+    statusEl.textContent = `✓ Slice: ${tcFormatTime(dur)} (will extract in-browser)`;
+  }
+  statusEl.style.color = '#34d399';
+}
+
+async function tcOnFile(input) {
   tcFile = input.files[0];
   const lbl = document.getElementById('tc-file-label');
-  if (tcFile) { lbl.style.display='block'; lbl.textContent=`📎 ${tcFile.name} (${(tcFile.size/1024/1024).toFixed(2)} MB)`; }
+  const rangeBox = document.getElementById('tc-range-box');
+  if (!tcFile) { rangeBox.style.display = 'none'; tcUpdateBtn(); return; }
+  lbl.style.display='block';
+  lbl.textContent=`📎 ${tcFile.name} (${(tcFile.size/1024/1024).toFixed(2)} MB) — detecting duration…`;
   tcUpdateBtn();
+  // Detect duration via hidden audio/video element
+  tcFileDuration = await tcDetectDuration(tcFile);
+  if (tcFileDuration > 0) {
+    lbl.textContent = `📎 ${tcFile.name} (${(tcFile.size/1024/1024).toFixed(2)} MB · ${tcFormatTime(tcFileDuration)})`;
+    rangeBox.style.display = 'block';
+    document.getElementById('tc-range-duration').textContent = `· file is ${tcFormatTime(tcFileDuration)} long`;
+    document.getElementById('tc-range-start').value = '00:00';
+    document.getElementById('tc-range-end').value   = tcFormatTime(tcFileDuration);
+    tcOnRangeChange();
+  } else {
+    // Couldn't detect — still allow user to set a range manually
+    lbl.textContent = `📎 ${tcFile.name} (${(tcFile.size/1024/1024).toFixed(2)} MB) — duration unknown`;
+    rangeBox.style.display = 'block';
+    document.getElementById('tc-range-duration').textContent = '· duration not detected — set range manually if needed';
+  }
+}
+
+async function tcLoadFFmpeg() {
+  if (tcFFmpegInstance) return tcFFmpegInstance;
+  if (tcFFmpegLoading) return tcFFmpegLoading;
+  tcFFmpegLoading = (async () => {
+    if (typeof FFmpegWASM === 'undefined') {
+      throw new Error('ffmpeg.wasm not available — refresh the page and try again');
+    }
+    const inst = new FFmpegWASM.FFmpeg();
+    await inst.load({
+      coreURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js',
+      wasmURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm',
+    });
+    tcFFmpegInstance = inst;
+    return inst;
+  })();
+  return tcFFmpegLoading;
+}
+
+async function tcSliceFile(file, startSec, endSec, onProgress) {
+  const ffmpeg = await tcLoadFFmpeg();
+  if (onProgress) onProgress('Loading file into ffmpeg…');
+  // Pick input extension based on file type
+  const lowerName = (file.name || 'input').toLowerCase();
+  const ext = lowerName.split('.').pop() || 'mp4';
+  const inputName  = `input.${ext}`;
+  const outputName = 'output.mp3';
+  const arrayBuf = await file.arrayBuffer();
+  await ffmpeg.writeFile(inputName, new Uint8Array(arrayBuf));
+  if (onProgress) onProgress(`Extracting ${tcFormatTime(endSec - startSec)} of audio…`);
+  // Extract only the requested range as 64 kbps mono MP3 (plenty for Whisper)
+  const dur = endSec - startSec;
+  await ffmpeg.exec([
+    '-y',
+    '-ss', String(startSec),
+    '-t',  String(dur),
+    '-i',  inputName,
+    '-vn',                  // strip video
+    '-ac', '1',              // mono
+    '-ar', '16000',          // 16 kHz is more than enough for Whisper
+    '-b:a','64k',
+    outputName
+  ]);
+  if (onProgress) onProgress('Slice ready, preparing upload…');
+  const data = await ffmpeg.readFile(outputName);
+  // Cleanup
+  try { await ffmpeg.deleteFile(inputName); } catch {}
+  try { await ffmpeg.deleteFile(outputName); } catch {}
+  return new Blob([data.buffer], { type: 'audio/mpeg' });
 }
 
 (function(){
@@ -1326,8 +1502,10 @@ function tcOnFile(input) {
   dz.addEventListener('drop', e => {
     e.preventDefault(); dz.classList.remove('drag-over');
     const f = e.dataTransfer.files[0];
-    if (f) { tcFile=f; document.getElementById('tc-file-label').style.display='block';
-             document.getElementById('tc-file-label').textContent=`📎 ${f.name}`; tcUpdateBtn(); }
+    if (f) {
+      const fakeInput = { files: [f] };
+      tcOnFile(fakeInput); // routes through the same duration-detection path
+    }
   });
 })();
 
@@ -1409,23 +1587,40 @@ async function tcTranscribe() {
     const ext  = tcActiveTab === 'record'
       ? (src.type.includes('ogg') ? '.ogg' : src.type.includes('mp4') ? '.m4a' : '.webm')
       : '.' + (tcFile.name.split('.').pop() || 'webm');
-    const name = tcActiveTab === 'record' ? `recording${ext}` : tcFile.name;
+    let uploadBlob = src;
+    let uploadName = tcActiveTab === 'record' ? `recording${ext}` : tcFile.name;
+
+    // If user picked a time range that's not the full file, slice with ffmpeg.wasm
+    if (tcActiveTab === 'upload' && tcFileDuration > 0) {
+      const startSec = tcParseTime(document.getElementById('tc-range-start').value);
+      const endSec   = tcParseTime(document.getElementById('tc-range-end').value);
+      const isFull   = startSec === 0 && Math.abs(endSec - tcFileDuration) < 1;
+      const valid    = !isNaN(startSec) && !isNaN(endSec) && startSec < endSec && endSec <= tcFileDuration + 1;
+      if (valid && !isFull) {
+        txt.textContent = 'Loading ffmpeg.wasm (~30 MB, first time only)…';
+        uploadBlob = await tcSliceFile(tcFile, startSec, endSec, (msg) => { txt.textContent = msg; });
+        uploadName = tcFile.name.replace(/\.[^.]+$/, '') + `_${tcFormatTime(startSec).replace(':','-')}_${tcFormatTime(endSec).replace(':','-')}.mp3`;
+        console.log(`[transcriber] Sliced ${tcFormatTime(endSec - startSec)} of audio → ${(uploadBlob.size/1024/1024).toFixed(2)} MB`);
+      } else if (!isFull && !valid) {
+        throw new Error('Invalid time range — please check Start and End values');
+      }
+    }
 
     let data;
     if (tcMode === 'transcribe') {
       txt.textContent = 'Transcribing with Whisper…';
-      data = await tcCallWhisper(src, name, 'transcriptions', apiKey, tcLang);
+      data = await tcCallWhisper(uploadBlob, uploadName, 'transcriptions', apiKey, tcLang);
       data.__mode = 'transcribe';
     } else if (tcMode === 'translate') {
       txt.textContent = 'Translating audio to English with Whisper…';
-      data = await tcCallWhisper(src, name, 'translations', apiKey, null);
+      data = await tcCallWhisper(uploadBlob, uploadName, 'translations', apiKey, null);
       data.__mode = 'translate';
       data.language = 'en'; // /translations always outputs English
     } else { // 'both'
       txt.textContent = 'Pass 1/2: Transcribing source language…';
-      const transcribed = await tcCallWhisper(src, name, 'transcriptions', apiKey, tcLang);
+      const transcribed = await tcCallWhisper(uploadBlob, uploadName, 'transcriptions', apiKey, tcLang);
       txt.textContent = 'Pass 2/2: Translating to English…';
-      const translated  = await tcCallWhisper(src, name, 'translations',   apiKey, null);
+      const translated  = await tcCallWhisper(uploadBlob, uploadName, 'translations',   apiKey, null);
       data = tcAlignBoth(transcribed, translated);
       data.__mode = 'both';
     }
