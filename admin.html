@@ -3292,7 +3292,8 @@ async function erGenerate() {
           { role: 'user',   content: 'Incoming message:\n\n' + input }
         ],
         temperature: 0.55,
-        max_tokens: 700,
+        // GPT-5.x family uses max_completion_tokens instead of max_tokens
+        max_completion_tokens: 700,
       }),
     });
     bar.style.width = '70%';
