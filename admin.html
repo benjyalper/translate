@@ -4866,7 +4866,14 @@ function vlParseIvritAi(rawInput) {
   let text = String(rawInput)
     .replace(/=\r?\n/g, '')              // MHT soft line breaks
     .replace(/=([0-9A-F]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16))); // QP decode
-  text = text.replace(/<\/(p|div|br|li)>/gi, '\n').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '');
+  // Insert newlines at common paragraph boundaries (HTML + Word XML), then strip
+  // every remaining tag. The Word XML cases let us also handle a plain docx
+  // (where text content lives in <w:t> tags inside <w:p> paragraphs).
+  text = text
+    .replace(/<\/(?:p|div|li|tr)>/gi, '\n')
+    .replace(/<\/w:p>/gi, '\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]+>/g, '');
   text = text.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
 
   const segments = [];
@@ -4955,18 +4962,24 @@ async function vlOnFile(input) {
     let text = '';
     const lower = file.name.toLowerCase();
     if (lower.endsWith('.docx')) {
-      // The ivrit.ai download is a docx with an HTML payload inside (word/afchunk.mht).
-      // Try the standard docx reader first, then fall back to MHT.
+      // ivrit.ai exports a docx whose document.xml is a shell containing
+      // <w:altChunk r:id="htmlChunk"/> pointing at word/afchunk.mht (the
+      // real HTML payload). Look for ANY .mht/.htm/.html file inside the
+      // zip first; only fall back to document.xml if there's no chunk.
       const buf = await file.arrayBuffer();
       const zip = await JSZip.loadAsync(buf);
-      // 1) Standard docx: word/document.xml
       let raw = '';
-      const docXml = zip.file('word/document.xml');
-      if (docXml) raw = await docXml.async('text');
-      // 2) MHT-wrapped HTML: word/afchunk.mht
-      if (!raw || raw.length < 200) {
-        const mht = zip.file('word/afchunk.mht');
-        if (mht) raw = await mht.async('text');
+      // 1) Scan for HTML-wrapped payload (ivrit.ai and similar tools)
+      for (const filename of Object.keys(zip.files)) {
+        if (/^word\/.*\.(mht|htm|html)$/i.test(filename)) {
+          const got = await zip.file(filename).async('text');
+          if (got && got.length > 100) { raw = got; break; }
+        }
+      }
+      // 2) Fallback: regular docx with text in word/document.xml
+      if (!raw) {
+        const docXml = zip.file('word/document.xml');
+        if (docXml) raw = await docXml.async('text');
       }
       text = raw;
     } else if (lower.endsWith('.mht') || lower.endsWith('.html') || lower.endsWith('.htm')) {
