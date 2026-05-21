@@ -798,6 +798,107 @@
         <div id="tr-error" style="display:none;padding:.7rem 1rem;background:#1a0000;border:1px solid #7f1d1d;border-radius:8px;font-size:.82rem;color:#fca5a5"></div>
       </div><!-- /trados card -->
 
+      <!-- ── 📝 HEBREW TEXT → ENGLISH (per-minute formatted) ── -->
+      <div class="tool-card" style="grid-column:1/-1">
+        <div class="tool-header">
+          <div class="tool-icon">📝</div>
+          <div>
+            <div class="tool-title">Hebrew Text → English (per-minute formatted)</div>
+            <div class="tool-sub">Paste a Hebrew transcript → GPT-5.4 translates + auto-segments into ~1-minute chunks → VerboLabs-style deliverable</div>
+          </div>
+        </div>
+        <div class="tool-divider"></div>
+
+        <!-- Input -->
+        <div style="display:grid;grid-template-columns:2fr 1fr;gap:1rem;margin-bottom:.7rem">
+          <div>
+            <label style="font-size:.74rem;color:#94a3b8;display:block;margin-bottom:.3rem">① Paste Hebrew text (or load file below)</label>
+            <textarea id="ht-input" rows="10"
+              placeholder="שלום וברוכים הבאים..."
+              dir="rtl"
+              style="width:100%;padding:.7rem .9rem;background:#0f0f17;border:1px solid var(--border);border-radius:8px;color:#e2e8f0;font-family:'Inter',sans-serif;font-size:.84rem;resize:vertical;outline:none"></textarea>
+            <div style="margin-top:.4rem">
+              <label class="tbtn" style="cursor:pointer;display:inline-flex;width:auto;padding:.4rem 1rem;font-size:.72rem;background:#1e1b4b;color:#a5b4fc">
+                📂 Or load .txt / .docx file
+                <input type="file" id="ht-file" accept=".txt,.docx,.md" style="display:none" onchange="htOnFile(this)"/>
+              </label>
+              <span id="ht-file-label" style="font-size:.72rem;color:#94a3b8;margin-left:.6rem"></span>
+            </div>
+          </div>
+
+          <div>
+            <label style="font-size:.74rem;color:#94a3b8;display:block;margin-bottom:.3rem">② Options</label>
+            <div style="display:flex;flex-direction:column;gap:.5rem">
+              <label style="font-size:.76rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem">
+                <span style="min-width:110px">Words per minute:</span>
+                <input type="number" id="ht-wpm" value="150" min="80" max="220" step="10"
+                  style="flex:1;padding:.4rem .55rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.78rem"/>
+              </label>
+              <label style="font-size:.76rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem">
+                <span style="min-width:110px">Model:</span>
+                <select id="ht-engine" style="flex:1;padding:.4rem .55rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.78rem">
+                  <option value="gpt-5.4" selected>gpt-5.4 (recommended)</option>
+                  <option value="gpt-5.5">gpt-5.5 (premium)</option>
+                  <option value="gpt-5.4-mini">gpt-5.4-mini (cheap)</option>
+                </select>
+              </label>
+              <label style="font-size:.78rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem">
+                <input type="checkbox" id="ht-cleanup" checked style="width:.95rem;height:.95rem;cursor:pointer"/>
+                <span>🧹 Clean transliterations in Hebrew first</span>
+              </label>
+              <label style="font-size:.78rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem">
+                <input type="checkbox" id="ht-summary" checked style="width:.95rem;height:.95rem;cursor:pointer"/>
+                <span>📝 Auto-generate 100–150 word summary</span>
+              </label>
+              <label style="font-size:.78rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem">
+                <input type="checkbox" id="ht-notes" checked style="width:.95rem;height:.95rem;cursor:pointer"/>
+                <span>🚨 Auto-generate per-minute Notes</span>
+              </label>
+              <label style="font-size:.76rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem;margin-top:.3rem">
+                <span style="min-width:110px">Title:</span>
+                <input type="text" id="ht-title" placeholder="Optional document title"
+                  style="flex:1;padding:.4rem .55rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.75rem"/>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <button class="tbtn gold" id="ht-btn" onclick="htTranslate()">✨ Translate &amp; Format</button>
+
+        <!-- Progress -->
+        <div class="tprog" id="ht-prog">
+          <div class="tprog-text" id="ht-prog-text">Working…</div>
+          <div class="tprog-bar-outer"><div class="tprog-bar-inner" id="ht-prog-bar"></div></div>
+        </div>
+
+        <!-- Output -->
+        <div id="ht-results" style="display:none;margin-top:.8rem">
+          <div class="tres-badges" id="ht-badges" style="margin-bottom:.6rem"></div>
+          <div id="ht-summary-box" style="display:none;margin-bottom:.7rem;padding:.7rem .9rem;background:#0f0f17;border:1px solid var(--border);border-radius:8px;font-size:.82rem;color:#e2e8f0;line-height:1.5"></div>
+          <div style="max-height:500px;overflow-y:auto;border:1px solid var(--border);border-radius:8px">
+            <table style="width:100%;border-collapse:collapse;font-size:.78rem">
+              <thead>
+                <tr style="background:#1e1b4b;position:sticky;top:0;z-index:1">
+                  <th style="padding:.5rem .6rem;text-align:center;color:#a5b4fc;width:90px">Minute</th>
+                  <th style="padding:.5rem .6rem;text-align:left;color:#a5b4fc;width:45%">Hebrew (source)</th>
+                  <th style="padding:.5rem .6rem;text-align:left;color:#a5b4fc;width:45%">English</th>
+                </tr>
+              </thead>
+              <tbody id="ht-tbody"></tbody>
+            </table>
+          </div>
+          <div style="margin-top:.7rem;display:flex;gap:.5rem;flex-wrap:wrap">
+            <a class="tbtn gold" id="ht-dl" href="#" style="display:inline-flex;align-items:center;justify-content:center;gap:.4rem;text-decoration:none;padding:.7rem 1.5rem;width:auto">
+              ⬇ Download Word Doc
+            </a>
+            <button class="tbtn" style="width:auto;padding:.7rem 1.2rem;font-size:.78rem;background:#1e1b4b;color:#a5b4fc" onclick="htCopyEnglish()">📋 Copy English only</button>
+          </div>
+        </div>
+
+        <!-- Error -->
+        <div id="ht-error" style="display:none;padding:.7rem 1rem;background:#1a0000;border:1px solid #7f1d1d;border-radius:8px;font-size:.82rem;color:#fca5a5;margin-top:.6rem"></div>
+      </div><!-- /hebrew text translator card -->
+
       <!-- ── 📚 GLOSSARY MANAGER ──────────────────────────── -->
       <div class="tool-card" id="glossary-manager" style="grid-column:1/-1">
         <div class="tool-header">
@@ -4087,6 +4188,244 @@ Output only the corrected/translated text for each item, numbered to match, one 
     prog.classList.remove('show');
     err.style.display = 'block'; err.textContent = '❌ ' + e.message;
   } finally { btn.disabled = false; }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  📝 HEBREW TEXT → ENGLISH (per-minute formatted)
+//  Reuses tcTranslateSegmentsGPT, tcCleanHebrewSource,
+//  tcGenerateSummary, tcGenerateMinuteNotes from the transcriber.
+// ═══════════════════════════════════════════════════════════════
+
+// Reuse the same docx parser as the email generator
+async function htOnFile(input) {
+  const file = input.files?.[0];
+  if (!file) return;
+  const label = document.getElementById('ht-file-label');
+  label.textContent = '⏳ Reading ' + file.name + '…';
+  try {
+    let text = '';
+    if (file.name.toLowerCase().endsWith('.docx')) {
+      text = await erLoadDocx(file); // same helper used by email generator
+    } else {
+      text = await file.text();
+    }
+    document.getElementById('ht-input').value = text;
+    label.textContent = '✓ ' + file.name + ' (' + text.length + ' chars)';
+  } catch (e) {
+    label.textContent = '❌ ' + e.message;
+  }
+}
+
+// Sentence-aware chunking. Returns an array of strings, each ~targetWords long.
+// Splits on Hebrew sentence punctuation + newlines so we don't break mid-sentence.
+function htSplitIntoMinutes(text, wpm) {
+  const targetWords = Math.max(40, parseInt(wpm, 10) || 150);
+  // Split on . ! ? ׃ ; or two+ newlines, keeping the punctuation with the prior sentence.
+  // Hebrew also uses standard Latin punctuation, so the regex stays simple.
+  const sentences = text
+    .replace(/\r\n?/g, '\n')
+    .split(/(?<=[.!?؟।。])\s+|\n{2,}/)
+    .map(s => s.trim())
+    .filter(Boolean);
+
+  const buckets = [];
+  let current = [];
+  let currentWords = 0;
+  for (const sentence of sentences) {
+    const wc = sentence.split(/\s+/).length;
+    current.push(sentence);
+    currentWords += wc;
+    if (currentWords >= targetWords) {
+      buckets.push(current.join(' '));
+      current = []; currentWords = 0;
+    }
+  }
+  if (current.length) {
+    if (buckets.length === 0 || currentWords >= targetWords * 0.5) {
+      buckets.push(current.join(' '));
+    } else {
+      // Tiny remainder — fold into previous bucket
+      buckets[buckets.length - 1] += ' ' + current.join(' ');
+    }
+  }
+  if (buckets.length === 0) buckets.push(text.trim());
+  return buckets;
+}
+
+// Build per-minute "buckets" object compatible with tcGenerateMinuteNotes
+// and tcBuildVerboLabsHTML. Each bucket needs: minute, start, end, segments, ocr.
+// We synthesize ONE segment per minute holding the full chunk text.
+function htBucketsFromChunks(chunks) {
+  return chunks.map((chunk, i) => ({
+    minute: i,
+    start: i * 60,
+    end:   (i + 1) * 60,
+    segments: [{ start: i * 60, end: (i + 1) * 60, text: chunk, text_en: '' }],
+    ocr: [],
+  }));
+}
+
+let htLastResult = null; // for copy-english
+
+async function htTranslate() {
+  const apiKey = getApiKey();
+  if (!apiKey) { promptApiKey(); return; }
+  const input = document.getElementById('ht-input').value.trim();
+  if (!input) {
+    htShowError('Please paste Hebrew text or load a file first.');
+    return;
+  }
+
+  const wpm     = parseInt(document.getElementById('ht-wpm').value, 10) || 150;
+  const engine  = document.getElementById('ht-engine').value || 'gpt-5.4';
+  const wantClean   = document.getElementById('ht-cleanup').checked;
+  const wantSummary = document.getElementById('ht-summary').checked;
+  const wantNotes   = document.getElementById('ht-notes').checked;
+  const title       = document.getElementById('ht-title').value.trim();
+
+  const btn  = document.getElementById('ht-btn');
+  const prog = document.getElementById('ht-prog');
+  const bar  = document.getElementById('ht-prog-bar');
+  const txt  = document.getElementById('ht-prog-text');
+  const err  = document.getElementById('ht-error');
+  const res  = document.getElementById('ht-results');
+
+  err.style.display = 'none';
+  res.style.display = 'none';
+  btn.disabled = true;
+  prog.classList.add('show');
+  bar.style.width = '5%';
+
+  try {
+    // 1) Split into ~1-minute chunks
+    txt.textContent = 'Splitting Hebrew text into ~1-minute chunks…';
+    const chunks = htSplitIntoMinutes(input, wpm);
+    console.log(`[ht] split into ${chunks.length} chunks @ ${wpm} wpm`);
+    bar.style.width = '15%';
+
+    // Build buckets (each has 1 synthetic segment)
+    let buckets = htBucketsFromChunks(chunks);
+
+    // 2) Optional Hebrew cleanup
+    if (wantClean) {
+      txt.textContent = '🧹 Cleaning transliterations…';
+      const flatSegs = buckets.map(b => b.segments[0]);
+      const cleaned  = await tcCleanHebrewSource(flatSegs, 'gpt-5.4', apiKey, (m) => { txt.textContent = '🧹 ' + m; });
+      buckets.forEach((b, i) => { b.segments[0].text = cleaned[i]?.text || b.segments[0].text; });
+      bar.style.width = '30%';
+    }
+
+    // 3) Translate each chunk
+    txt.textContent = `Translating ${chunks.length} chunk(s) with ${engine}…`;
+    const flatSegs = buckets.map(b => b.segments[0]);
+    const translated = await tcTranslateSegmentsGPT(flatSegs, engine, apiKey, (m) => { txt.textContent = m; });
+    buckets.forEach((b, i) => {
+      b.segments[0].text    = translated[i]?.text || b.segments[0].text;
+      b.segments[0].text_en = translated[i]?.text_en || '';
+    });
+    bar.style.width = '70%';
+
+    // 4) Optional summary
+    let summary = '';
+    if (wantSummary) {
+      txt.textContent = '📝 Generating 100–150 word summary…';
+      try {
+        const fullEnglish = buckets.map(b => b.segments[0].text_en).filter(Boolean).join(' ');
+        summary = await tcGenerateSummary(fullEnglish || input, apiKey, (m) => { txt.textContent = '📝 ' + m; });
+      } catch (e) { console.warn('summary failed:', e.message); }
+    }
+    bar.style.width = '85%';
+
+    // 5) Optional per-minute notes
+    let notes = null;
+    if (wantNotes && buckets.length) {
+      txt.textContent = `🚨 Generating Notes for ${buckets.length} minute(s)…`;
+      try {
+        notes = await tcGenerateMinuteNotes(buckets, apiKey, (m) => { txt.textContent = '🚨 ' + m; });
+      } catch (e) { console.warn('notes failed:', e.message); }
+    }
+    bar.style.width = '100%'; txt.textContent = '✅ Done!';
+    setTimeout(() => prog.classList.remove('show'), 1500);
+
+    htLastResult = { buckets, summary, notes, title };
+    htRenderResults(htLastResult);
+
+  } catch (e) {
+    prog.classList.remove('show');
+    htShowError(e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function htShowError(msg) {
+  const err = document.getElementById('ht-error');
+  err.style.display = 'block';
+  err.textContent = '❌ ' + msg;
+}
+
+function htRenderResults({ buckets, summary, notes, title }) {
+  const res = document.getElementById('ht-results');
+  res.style.display = 'block';
+
+  // Badges
+  document.getElementById('ht-badges').innerHTML = `
+    <span class="tres-badge tb-seg">📑 ${buckets.length} minute box${buckets.length===1?'':'es'}</span>
+    <span class="tres-badge tb-lang">📝 Hebrew → English</span>
+    ${notes ? '<span class="tres-badge tb-lang">🚨 Notes generated</span>' : ''}
+    ${summary ? '<span class="tres-badge tb-lang">📝 Summary generated</span>' : ''}`;
+
+  // Summary box
+  const sumBox = document.getElementById('ht-summary-box');
+  if (summary) {
+    sumBox.style.display = 'block';
+    sumBox.innerHTML = `<strong style="color:#a5b4fc">📝 Summary</strong><br>${esc(summary)}`;
+  } else {
+    sumBox.style.display = 'none';
+  }
+
+  // Table
+  document.getElementById('ht-tbody').innerHTML = buckets.map((b, i) => {
+    const heb = b.segments[0].text || '';
+    const eng = b.segments[0].text_en || '';
+    const note = notes && notes[i] ? notes[i] : '';
+    return `<tr style="border-top:1px solid #1f2937">
+      <td style="padding:.5rem .6rem;text-align:center;font-family:monospace;color:#a5b4fc;vertical-align:top">${tcFormatTime(b.start)}–${tcFormatTime(b.end)}</td>
+      <td style="padding:.5rem .6rem;direction:rtl;text-align:right;vertical-align:top;line-height:1.5">${esc(heb)}</td>
+      <td style="padding:.5rem .6rem;vertical-align:top;line-height:1.5">${esc(eng)}</td>
+    </tr>
+    ${note ? `<tr><td></td><td colspan="2" style="padding:.4rem .6rem;background:rgba(254,243,199,.06);font-size:.74rem;color:#fcd34d"><strong>🚨 Notes:</strong> ${esc(note)}</td></tr>` : ''}`;
+  }).join('');
+
+  // Build VerboLabs-style Word doc using the existing helper
+  const html = tcBuildVerboLabsHTML({
+    title: title || 'Hebrew Text Translation',
+    pair: 'Hebrew → English',
+    thumb: '',
+    description: '',
+    comments: '',
+    summary,
+    buckets,
+    notes,
+    mode: 'both',
+  });
+  const blob = new Blob(['﻿' + html], { type: 'application/msword' });
+  const url  = URL.createObjectURL(blob);
+  const dl   = document.getElementById('ht-dl');
+  dl.href = url;
+  const slug = (title || 'Hebrew_translation').replace(/[^a-z0-9]+/gi, '_').slice(0, 40);
+  dl.download = `${slug}.doc`;
+}
+
+function htCopyEnglish() {
+  if (!htLastResult) return;
+  const englishOnly = htLastResult.buckets.map((b, i) =>
+    `MINUTE ${i+1} (${tcFormatTime(b.start)}–${tcFormatTime(b.end)})\n${b.segments[0].text_en || ''}\n`
+  ).join('\n');
+  navigator.clipboard.writeText(englishOnly).then(
+    () => showAdminToast('📋 English copied to clipboard'),
+    () => showAdminToast('❌ Copy failed — select & copy manually')
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════
