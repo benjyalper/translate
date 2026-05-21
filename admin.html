@@ -576,6 +576,60 @@
           </div>
         </details>
 
+        <!-- VerboLabs deliverable format -->
+        <details style="margin-top:.5rem;background:#0f0f17;border:1px solid var(--border);border-radius:8px;padding:.5rem .8rem">
+          <summary style="cursor:pointer;font-size:.78rem;color:#a5b4fc;font-weight:600;list-style:none">
+            📑 VerboLabs deliverable format (per-minute boxes + auto summary + notes)
+          </summary>
+          <div style="margin-top:.5rem">
+            <label style="display:flex;align-items:center;gap:.5rem;font-size:.76rem;color:#cbd5e1;cursor:pointer;margin-bottom:.6rem">
+              <input type="checkbox" id="tc-vl-enabled" style="width:1rem;height:1rem;cursor:pointer"/>
+              <span>Format output as <strong>VerboLabs per-minute boxes</strong> (overrides default segment-row layout)</span>
+            </label>
+
+            <div id="tc-vl-fields" style="display:none;padding-top:.4rem;border-top:1px dashed #1f2937">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-bottom:.5rem">
+                <div>
+                  <label style="font-size:.7rem;color:#94a3b8;display:block;margin-bottom:.2rem">Video title (translated)</label>
+                  <input type="text" id="tc-vl-title" placeholder="e.g. Trump marks Diwali at White House"
+                    style="width:100%;padding:.4rem .6rem;background:#0a0a14;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.75rem"/>
+                </div>
+                <div>
+                  <label style="font-size:.7rem;color:#94a3b8;display:block;margin-bottom:.2rem">Language pair</label>
+                  <input type="text" id="tc-vl-pair" placeholder="e.g. Hebrew → English" value="Hebrew → English"
+                    style="width:100%;padding:.4rem .6rem;background:#0a0a14;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.75rem"/>
+                </div>
+              </div>
+              <label style="font-size:.7rem;color:#94a3b8;display:block;margin-bottom:.2rem">Video thumbnail text (translated)</label>
+              <input type="text" id="tc-vl-thumb" placeholder="Text shown on the YouTube thumbnail"
+                style="width:100%;padding:.4rem .6rem;background:#0a0a14;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.75rem;margin-bottom:.5rem"/>
+              <label style="font-size:.7rem;color:#94a3b8;display:block;margin-bottom:.2rem">Video description (paste from YouTube — will be translated if not English)</label>
+              <textarea id="tc-vl-desc" rows="2"
+                placeholder="The description that appears under the YouTube video"
+                style="width:100%;padding:.4rem .6rem;background:#0a0a14;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-family:'Inter',sans-serif;font-size:.74rem;resize:vertical;margin-bottom:.5rem"></textarea>
+              <label style="font-size:.7rem;color:#94a3b8;display:block;margin-bottom:.2rem">Additional comments (optional)</label>
+              <textarea id="tc-vl-comments" rows="2"
+                placeholder="Anything else the client should know"
+                style="width:100%;padding:.4rem .6rem;background:#0a0a14;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-family:'Inter',sans-serif;font-size:.74rem;resize:vertical;margin-bottom:.6rem"></textarea>
+
+              <div style="display:flex;flex-direction:column;gap:.35rem;font-size:.74rem;color:#cbd5e1">
+                <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
+                  <input type="checkbox" id="tc-vl-summary" checked style="width:.95rem;height:.95rem;cursor:pointer"/>
+                  <span>Auto-generate 100–150 word video summary (gpt-5.4)</span>
+                </label>
+                <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
+                  <input type="checkbox" id="tc-vl-notes" checked style="width:.95rem;height:.95rem;cursor:pointer"/>
+                  <span>Auto-generate per-minute Notes — flag slurs / offensive / demeaning content (gpt-5.4)</span>
+                </label>
+              </div>
+              <div style="font-size:.66rem;color:#64748b;margin-top:.4rem">
+                Speaker tags are <em>not</em> auto-generated yet (Whisper doesn't do diarization). Add them by listening when you review.
+                Adds ~$0.05–$0.10 per video for summary + notes (one GPT-5.4 call each).
+              </div>
+            </div>
+          </div>
+        </details>
+
         <button class="tbtn" id="tc-btn" onclick="tcTranscribe()" disabled>✨ Transcribe</button>
 
         <!-- Progress -->
@@ -1743,6 +1797,226 @@ Each element: { "text": "...", "text_en": "...", "language": "he|en|other|none" 
 
 // 5) Merge OCR results with audio segments, deduplicating identical adjacent
 // screen-text events (the same title shown across multiple consecutive frames).
+// ═══════════════════════════════════════════════════════════════
+//  📑 VerboLabs deliverable format (per-minute boxes)
+// ═══════════════════════════════════════════════════════════════
+(function tcWireVerboLabsToggle(){
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', tcWireVerboLabsToggle);
+    return;
+  }
+  const cb = document.getElementById('tc-vl-enabled');
+  const fields = document.getElementById('tc-vl-fields');
+  if (cb && fields) {
+    cb.addEventListener('change', () => { fields.style.display = cb.checked ? 'block' : 'none'; });
+  }
+})();
+
+// Group audio segments + OCR results by minute. Returns
+// [{ minute: 0, start: 0, end: 60, segments: [...], ocr: [...] }, ...]
+function tcGroupByMinute(audioSegments, ocrEvents, durationSec) {
+  const totalMin = Math.max(1, Math.ceil((durationSec || 0) / 60));
+  const buckets = [];
+  for (let m = 0; m < totalMin; m++) {
+    buckets.push({ minute: m, start: m * 60, end: (m + 1) * 60, segments: [], ocr: [] });
+  }
+  // Place each audio segment into the bucket containing its start time
+  for (const seg of (audioSegments || [])) {
+    const idx = Math.min(buckets.length - 1, Math.max(0, Math.floor(seg.start / 60)));
+    buckets[idx].segments.push(seg);
+  }
+  for (const e of (ocrEvents || [])) {
+    const idx = Math.min(buckets.length - 1, Math.max(0, Math.floor(e.timestamp / 60)));
+    buckets[idx].ocr.push(e);
+  }
+  return buckets;
+}
+
+// One GPT-5.4 call → 100-150 word summary
+async function tcGenerateSummary(transcriptText, apiKey, onProgress) {
+  if (onProgress) onProgress('Generating 100–150 word video summary…');
+  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gpt-5.4',
+      temperature: 0.3,
+      messages: [
+        { role: 'system', content: 'You write 100–150 word factual summaries of video transcripts. Output ONLY the summary paragraph — no headings, no commentary, no markdown.' },
+        { role: 'user',   content: 'Summarize this video transcript in 100–150 words:\n\n' + transcriptText.slice(0, 12000) }
+      ]
+    })
+  });
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error?.message || 'Summary generation failed');
+  return (data.choices?.[0]?.message?.content || '').trim();
+}
+
+// One GPT-5.4 call → per-minute notes array.
+// For each minute we send the English translation + any OCR text in that minute,
+// and ask for short Notes flagging slurs, offensive content, and key context.
+async function tcGenerateMinuteNotes(buckets, apiKey, onProgress) {
+  if (onProgress) onProgress(`Generating per-minute Notes for ${buckets.length} minute(s)…`);
+  const lines = buckets.map((b, i) => {
+    const spoken = b.segments.map(s => (s.text_en || s.text || '').trim()).filter(Boolean).join(' ');
+    const onscreen = b.ocr.map(o => (o.text_en || o.text || '').trim()).filter(Boolean).join(' | ');
+    return `MINUTE ${i+1} (${tcFormatTime(b.start)}–${tcFormatTime(b.end)}):
+SPOKEN: ${spoken || '(silence)'}
+ON-SCREEN: ${onscreen || '(none)'}`;
+  }).join('\n\n');
+
+  const sys =
+`You generate concise per-minute Notes for a YouTube content-moderation review.
+
+For EACH minute, output a short Notes paragraph (1–3 sentences). The notes must:
+- Flag any slurs, offensive language, demeaning remarks, harassment, hate speech, or racially insensitive content explicitly. Quote the offending word/phrase if present.
+- Briefly explain the contextual meaning if cultural reference, idiom, or background knowledge is needed.
+- Note significant on-screen text (titles, lower-thirds, watermarks) when relevant.
+- Be neutral and factual. Do NOT moralize.
+- If the minute is unremarkable, write a brief 1-sentence summary of what was discussed.
+
+OUTPUT FORMAT: a JSON array with exactly ${buckets.length} strings — one Notes paragraph per minute, in order. No markdown, no code fences.`;
+
+  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gpt-5.4',
+      temperature: 0.2,
+      messages: [
+        { role: 'system', content: sys },
+        { role: 'user',   content: lines }
+      ]
+    })
+  });
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error?.message || 'Notes generation failed');
+  let raw = (data.choices?.[0]?.message?.content || '').trim();
+  raw = raw.replace(/^```[a-z]*\n?/i, '').replace(/```$/, '').trim();
+  let arr;
+  try { arr = JSON.parse(raw); } catch { throw new Error('Notes returned non-JSON: ' + raw.slice(0, 200)); }
+  if (!Array.isArray(arr)) throw new Error('Notes: expected JSON array');
+  // Pad with empty strings if model returned fewer
+  while (arr.length < buckets.length) arr.push('');
+  return arr.map(s => String(s || '').trim());
+}
+
+// Build the VerboLabs-formatted HTML/DOCX from the merged data
+function tcBuildVerboLabsHTML(opts) {
+  const { title, pair, thumb, description, comments, summary, buckets, notes, mode } = opts;
+  const esch = (t) => (t || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const isTranslate = (mode === 'translate');
+  const isBoth = (mode === 'both');
+
+  const boilerplate = `Detailed instructions:
+• Translate every word — word-for-word, no skips
+• Identify each speaker per timestamp (add speaker tags when reviewing)
+• Capture all on-screen text (OSTs) — titles, lower-thirds, watermarks, captions, bulletins
+• Flag any slurs, offensive language, demeaning content in the Notes section
+• Provide brief context where cultural meaning is needed`;
+
+  let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head><meta charset="utf-8"><title>VerboLabs Deliverable — ${esch(title) || 'Untitled'}</title><style>
+body{font-family:Arial,sans-serif;font-size:11pt;line-height:1.45;color:#111}
+h1{color:#1e3a8a;font-size:18pt;margin:0 0 6pt 0}
+h2{color:#1e3a8a;font-size:13pt;margin:14pt 0 4pt 0;border-bottom:2px solid #1e3a8a;padding-bottom:2pt}
+h3{color:#312e81;font-size:11pt;margin:10pt 0 4pt 0}
+.box{border:1px solid #8FAADC;background:#F4F7FB;padding:8pt 10pt;margin:6pt 0 10pt 0;border-radius:4pt}
+.box .label{font-weight:bold;color:#1e3a8a;font-size:10pt;text-transform:uppercase;letter-spacing:.04em}
+.box .body{font-size:10.5pt;margin-top:3pt;white-space:pre-wrap}
+.meta-row{font-size:10pt;margin:2pt 0}
+.meta-row .k{font-weight:bold;color:#374151}
+table{border-collapse:collapse;width:100%;margin-top:4pt}
+td{border:1px solid #ccc;padding:5pt 8pt;font-size:10pt;vertical-align:top}
+.ts{font-family:Consolas,monospace;color:#374151;white-space:nowrap;width:80pt}
+.minute-header{background:#1e3a8a;color:#fff;font-weight:bold;font-size:11pt;padding:5pt 10pt;border-radius:4pt 4pt 0 0}
+.minute-box{border:1px solid #1e3a8a;border-radius:4pt;margin:10pt 0;page-break-inside:avoid}
+.minute-section{padding:6pt 10pt;border-top:1px solid #d1d5db}
+.minute-section:first-of-type{border-top:0}
+.minute-section .lbl{font-weight:bold;color:#1e3a8a;font-size:9.5pt;text-transform:uppercase;letter-spacing:.04em;margin-bottom:2pt}
+.notes-section{background:#FEF3C7}
+.notes-section .lbl{color:#92400E}
+.ost-section{background:#EEF2FF}
+.ost-section .lbl{color:#3730A3}
+.empty{color:#9ca3af;font-style:italic;font-size:9.5pt}
+hr{border:0;border-top:1px solid #d1d5db;margin:10pt 0}
+</style></head>
+<body>
+<h1>🎙 VerboLabs Deliverable</h1>
+<p class="meta-row"><span class="k">Generated:</span> ${new Date().toLocaleString()}</p>
+
+<h2>📋 Header</h2>
+<div class="meta-row"><span class="k">Video Title:</span> ${esch(title) || '<span class="empty">— not provided —</span>'}</div>
+<div class="meta-row"><span class="k">Language Pair:</span> ${esch(pair) || '<span class="empty">—</span>'}</div>
+<div class="meta-row"><span class="k">Working Direction:</span> Source → English</div>
+
+${thumb ? `<h3>Video Thumbnail (translated)</h3><div class="box"><div class="body">${esch(thumb)}</div></div>` : ''}
+
+${description ? `<h3>Video Description (translated)</h3><div class="box"><div class="body">${esch(description)}</div></div>` : ''}
+
+<h3>Detailed Instructions</h3>
+<div class="box"><div class="body">${esch(boilerplate)}</div></div>
+
+${comments ? `<h3>Additional Comments</h3><div class="box"><div class="body">${esch(comments)}</div></div>` : ''}
+
+${summary ? `<h2>📝 Video Summary (100–150 words)</h2><div class="box"><div class="body">${esch(summary)}</div></div>` : ''}
+
+<h2>📦 Timestamps &amp; Per-Minute Boxes</h2>
+`;
+
+  buckets.forEach((b, i) => {
+    const minLabel = `MINUTE ${i+1} · ${tcFormatTime(b.start)} – ${tcFormatTime(b.end)}`;
+    // Translation: prefer text_en if available (Both/Translate mode), else text
+    const translationRows = b.segments.map(s => {
+      const eng = (s.text_en || s.text || '').trim();
+      const speaker = '[Speaker ?]'; // placeholder for manual filling
+      const tsLabel = `${tcFormatTime(s.start)}`;
+      return `<tr><td class="ts">${tsLabel}</td><td><strong>${speaker}</strong> ${esch(eng)}</td></tr>`;
+    }).join('');
+    const transOriginalRows = isBoth ? b.segments.map(s => {
+      const src = (s.text || '').trim();
+      return src ? `<tr><td class="ts">${tcFormatTime(s.start)}</td><td>${esch(src)}</td></tr>` : '';
+    }).join('') : '';
+
+    const ostRows = b.ocr.length
+      ? b.ocr.map(o => {
+          const en = o.text_en || o.text;
+          const src = (o.language === 'he' && o.text !== o.text_en) ? ` <span style="color:#6b7280;font-size:9pt">(orig: ${esch(o.text)})</span>` : '';
+          return `<tr><td class="ts">${tcFormatTime(o.timestamp)}</td><td>${esch(en)}${src}</td></tr>`;
+        }).join('')
+      : '';
+
+    html += `<div class="minute-box">
+<div class="minute-header">${minLabel}</div>
+<div class="minute-section">
+  <div class="lbl">Translation (word-for-word, English)</div>
+  ${translationRows
+    ? `<table>${translationRows}</table>`
+    : '<p class="empty">— no spoken audio in this minute —</p>'}
+</div>
+${isBoth && transOriginalRows ? `<div class="minute-section">
+  <div class="lbl">Original (source language)</div>
+  <table>${transOriginalRows}</table>
+</div>` : ''}
+<div class="minute-section ost-section">
+  <div class="lbl">📺 On-Screen Text (OSTs)</div>
+  ${ostRows
+    ? `<table>${ostRows}</table>`
+    : '<p class="empty">— no on-screen text detected in this minute —</p>'}
+</div>
+<div class="minute-section notes-section">
+  <div class="lbl">🚨 Notes (slurs / offensive / context)</div>
+  ${notes && notes[i]
+    ? `<div style="font-size:10.5pt;white-space:pre-wrap">${esch(notes[i])}</div>`
+    : '<p class="empty">— no notes generated (enable in VerboLabs format settings) —</p>'}
+</div>
+</div>`;
+  });
+
+  html += `<hr><p style="font-size:9pt;color:#6b7280;text-align:center">— End of Deliverable — ${buckets.length} minute box${buckets.length===1?'':'es'} ·  Generated with the Benjy Alper translation toolkit —</p></body></html>`;
+  return html;
+}
+
 function tcDedupeScreenText(items) {
   if (!items.length) return [];
   const out = [];
@@ -1978,6 +2252,45 @@ async function tcTranscribe() {
       }
     }
 
+    // ── VerboLabs deliverable format (optional) ──
+    const vlEnabled = document.getElementById('tc-vl-enabled')?.checked;
+    if (vlEnabled) {
+      const wantSummary = document.getElementById('tc-vl-summary')?.checked;
+      const wantNotes   = document.getElementById('tc-vl-notes')?.checked;
+      // Use the user's selected time range as the doc duration
+      const startSec = tcParseTime(document.getElementById('tc-range-start').value) || 0;
+      const endSec   = tcParseTime(document.getElementById('tc-range-end').value)   || (data.duration || 0);
+      const docDur   = Math.max(0, endSec - startSec);
+      // Shift segment times so minute boundaries match the chosen range
+      // (Whisper returns times relative to the slice, which starts at 0)
+      const buckets = tcGroupByMinute(data.segments || [], data.screen_texts || [], docDur);
+
+      const transcriptForSummary = (data.segments || []).map(s => (s.text_en || s.text || '').trim()).filter(Boolean).join(' ');
+      let summary = '';
+      let notes = null;
+      try {
+        if (wantSummary && transcriptForSummary) {
+          txt.textContent = '📑 Generating 100–150 word summary…';
+          summary = await tcGenerateSummary(transcriptForSummary, apiKey, (m) => { txt.textContent = '📑 ' + m; });
+        }
+        if (wantNotes && buckets.length) {
+          txt.textContent = `📑 Generating Notes for ${buckets.length} minute(s)…`;
+          notes = await tcGenerateMinuteNotes(buckets, apiKey, (m) => { txt.textContent = '📑 ' + m; });
+        }
+      } catch (e) {
+        console.warn('VerboLabs summary/notes failed:', e.message);
+        showAdminToast('⚠️ VerboLabs summary/notes failed: ' + e.message + ' (transcript still saved)');
+      }
+      data.verbolabs = {
+        title:       document.getElementById('tc-vl-title').value.trim(),
+        pair:        document.getElementById('tc-vl-pair').value.trim(),
+        thumb:       document.getElementById('tc-vl-thumb').value.trim(),
+        description: document.getElementById('tc-vl-desc').value.trim(),
+        comments:    document.getElementById('tc-vl-comments').value.trim(),
+        summary, notes, buckets,
+      };
+    }
+
     clearInterval(fake);
     bar.style.width = '100%'; txt.textContent = '✅ Done!';
     setTimeout(() => prog.classList.remove('show'), 1500);
@@ -2110,11 +2423,47 @@ function tcShowResults(data) {
   const title = isBoth ? 'Transcript + Translation' : isTranslate ? 'Translation (English)' : 'Transcription';
   const metaLine = `Mode: ${mode} &nbsp;|&nbsp; Source language: ${language||'auto'} &nbsp;|&nbsp; Duration: ${tcFmt(duration)} &nbsp;|&nbsp; Audio segments: ${segments.length}${hasOcr ? ' &nbsp;|&nbsp; On-screen texts: ' + screenRows.length : ''} &nbsp;|&nbsp; Date: ${dateStr}`;
   const htmlDoc = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${title}</title><style>body{font-family:Arial,sans-serif;font-size:11pt}h2{color:#1e3a8a}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:6px 10px;font-size:10pt;vertical-align:top}.ts{text-align:center;white-space:nowrap;color:#374151}.meta{color:#6b7280;font-size:9.5pt;margin-bottom:12px}</style></head><body><h2>&#127897; ${title}</h2><p class="meta">${metaLine}</p><table><thead>${headerHTML}</thead><tbody>${rows}</tbody></table><hr><p style="color:#6b7280;font-size:9pt;text-align:center">&#8212; End &#8212;</p></body></html>`;
-  const blob = new Blob(['\ufeff' + htmlDoc], { type: 'application/msword' });
-  const url  = URL.createObjectURL(blob);
   const dl   = document.getElementById('tc-dl');
-  dl.href = url;
-  dl.download = (isBoth ? 'Transcript_plus_Translation' : isTranslate ? 'Translation_EN' : 'Transcription') + (hasOcr ? '_with_OCR' : '') + '.doc';
+
+  // If VerboLabs format was enabled, override download with the per-minute deliverable
+  if (data.verbolabs) {
+    const vl = data.verbolabs;
+    const vlHTML = tcBuildVerboLabsHTML({
+      title: vl.title, pair: vl.pair, thumb: vl.thumb, description: vl.description,
+      comments: vl.comments, summary: vl.summary, notes: vl.notes, buckets: vl.buckets,
+      mode,
+    });
+    const vlBlob = new Blob(['\ufeff' + vlHTML], { type: 'application/msword' });
+    const vlUrl  = URL.createObjectURL(vlBlob);
+    // Replace the default DL with VerboLabs
+    dl.href = vlUrl;
+    const titleSlug = (vl.title || 'untitled').replace(/[^a-z0-9]+/gi, '_').slice(0, 40);
+    dl.download = `VerboLabs_${titleSlug}.doc`;
+    dl.textContent = '\u2b07 Download VerboLabs deliverable (.doc)';
+    // Also provide a secondary link for the plain transcript
+    const altBlob = new Blob(['\ufeff' + htmlDoc], { type: 'application/msword' });
+    const altUrl  = URL.createObjectURL(altBlob);
+    let altLink = document.getElementById('tc-dl-alt');
+    if (!altLink) {
+      altLink = document.createElement('a');
+      altLink.id = 'tc-dl-alt';
+      altLink.className = 'tbtn';
+      altLink.style.cssText = 'margin-left:.5rem;display:inline-flex;align-items:center;justify-content:center;gap:.4rem;text-decoration:none;padding:.7rem 1.5rem;width:auto;background:#1e1b4b;color:#a5b4fc';
+      dl.parentNode.appendChild(altLink);
+    }
+    altLink.href = altUrl;
+    altLink.download = ((isBoth ? 'Transcript_plus_Translation' : isTranslate ? 'Translation_EN' : 'Transcription') + (hasOcr ? '_with_OCR' : '') + '.doc');
+    altLink.textContent = '\u2b07 Plain transcript (.doc)';
+  } else {
+    const blob = new Blob(['\ufeff' + htmlDoc], { type: 'application/msword' });
+    const url  = URL.createObjectURL(blob);
+    dl.href = url;
+    dl.download = (isBoth ? 'Transcript_plus_Translation' : isTranslate ? 'Translation_EN' : 'Transcription') + (hasOcr ? '_with_OCR' : '') + '.doc';
+    dl.textContent = '\u2b07 Download Word Doc';
+    // Remove the alt link if it exists from a previous VerboLabs run
+    const altLink = document.getElementById('tc-dl-alt');
+    if (altLink) altLink.remove();
+  }
   document.getElementById('tc-results').style.display = 'block';
 }
 
