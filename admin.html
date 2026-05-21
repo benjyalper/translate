@@ -782,15 +782,36 @@
           <!-- Post-translate actions: TM save + suggest terms -->
           <div id="tr-postactions" style="display:none;margin-top:1rem;padding:.8rem;background:#0a0a14;border:1px solid #1f2937;border-radius:8px">
             <div style="font-size:.78rem;color:#a5b4fc;font-weight:600;margin-bottom:.6rem">📈 Improve future translations</div>
-            <div style="display:flex;gap:.5rem;flex-wrap:wrap">
-              <button class="tbtn" id="tr-save-tm-btn" style="width:auto;padding:.5rem 1rem;font-size:.75rem;background:#1e1b4b;color:#a5b4fc" onclick="trPromptSaveTM()">
-                💾 Save segments to TM (<span id="tr-pairs-count">0</span>)
+
+            <!-- Variant A: shown when NO saved glossary is active. Lets user create one
+                 from this translation, then unlocks the regular post-actions. -->
+            <div id="tr-pa-create" style="display:none">
+              <div style="font-size:.74rem;color:#94a3b8;margin-bottom:.55rem;line-height:1.45">
+                No glossary is currently selected. Create one now to <strong>save these translations to a reusable TM</strong> and let GPT-5.4 <strong>suggest vocabulary</strong> based on what you just translated. Each subsequent job for this client will be primed by the growing TM.
+              </div>
+              <button class="tbtn gold" id="tr-create-gloss-btn" style="width:auto;padding:.55rem 1.1rem;font-size:.78rem" onclick="trCreateGlossaryFromTranslation()">
+                ✨ Create new glossary from this translation (<span id="tr-create-pairs-count">0</span> pairs)
               </button>
-              <button class="tbtn" style="width:auto;padding:.5rem 1rem;font-size:.75rem;background:#1e1b4b;color:#a5b4fc" onclick="trSuggestTerms()">
-                🔍 Suggest glossary additions
-              </button>
+              <div style="font-size:.68rem;color:#64748b;margin-top:.4rem">
+                Tip: name it after the client or domain — e.g. "Dreame Robot Vacuum", "Maxsun Renewable Energy", "Legal — Cohen &amp; Co."
+              </div>
             </div>
-            <div id="tr-suggest-out" style="display:none;margin-top:.7rem;max-height:300px;overflow-y:auto;background:#0f0f17;border:1px solid var(--border);border-radius:6px;padding:.5rem"></div>
+
+            <!-- Variant B: shown when a saved glossary IS active. Save to TM + suggest terms. -->
+            <div id="tr-pa-active" style="display:none">
+              <div style="font-size:.74rem;color:#94a3b8;margin-bottom:.55rem">
+                Active glossary: <strong id="tr-pa-active-name" style="color:#a5b4fc"></strong>
+              </div>
+              <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+                <button class="tbtn" id="tr-save-tm-btn" style="width:auto;padding:.5rem 1rem;font-size:.75rem;background:#1e1b4b;color:#a5b4fc" onclick="trPromptSaveTM()">
+                  💾 Save segments to TM (<span id="tr-pairs-count">0</span>)
+                </button>
+                <button class="tbtn" style="width:auto;padding:.5rem 1rem;font-size:.75rem;background:#1e1b4b;color:#a5b4fc" onclick="trSuggestTerms()">
+                  🔍 Suggest glossary additions
+                </button>
+              </div>
+              <div id="tr-suggest-out" style="display:none;margin-top:.7rem;max-height:300px;overflow-y:auto;background:#0f0f17;border:1px solid var(--border);border-radius:6px;padding:.5rem"></div>
+            </div>
           </div>
         </div>
 
@@ -3166,6 +3187,60 @@ function trCurrentTM() {
   const g = gmFind(trSel.value);
   return (g && Array.isArray(g.tm)) ? g.tm : [];
 }
+// Spawned when the user clicks "Create new glossary from this translation"
+// in the post-actions panel after a Trados run with no active glossary.
+// Creates a new empty glossary, populates its TM with the just-translated
+// pairs, makes it the active selection, and re-renders the post-actions
+// panel into "active" mode so the suggestions + save-to-TM workflow opens.
+function trCreateGlossaryFromTranslation() {
+  const pairs = window.__trLastPairs || [];
+  if (!pairs.length) { showAdminToast('❌ No segments to save'); return; }
+
+  const name = prompt(
+    'Name this glossary (e.g. "Dreame Robot Vacuum", "Medical — Pharma Ltd."):',
+    ''
+  );
+  if (!name || !name.trim()) return;
+
+  // Create the glossary in the same shape gmNew() uses
+  const store = gmLoadStore();
+  const now = new Date().toISOString();
+  const newG = {
+    id: gmId(),
+    name: name.trim(),
+    terms: [],
+    tm: pairs.map(p => ({ source: p.source, target: p.target })),
+    createdAt: now,
+    updatedAt: now,
+  };
+  store.glossaries.push(newG);
+  store.activeId = newG.id;
+  gmSaveStore(store);
+  gmRefreshDropdowns();
+
+  // Make the new glossary the active selection in the Trados card
+  const trSel = document.getElementById('tr-gloss-saved');
+  if (trSel) trSel.value = newG.id;
+  trGlossary = newG.terms.slice();
+  trUpdateGlossUI();
+
+  // Flip the post-actions panel into "active glossary" mode
+  document.getElementById('tr-pa-create').style.display = 'none';
+  const paActive = document.getElementById('tr-pa-active');
+  paActive.style.display = 'block';
+  document.getElementById('tr-pa-active-name').textContent = newG.name;
+  document.getElementById('tr-pairs-count').textContent = pairs.length;
+
+  // Already-saved TM signal: disable the Save-to-TM button (TM was populated above)
+  const stBtn = document.getElementById('tr-save-tm-btn');
+  if (stBtn) {
+    stBtn.disabled = true;
+    stBtn.innerHTML = `✓ ${pairs.length} pairs already saved to TM`;
+  }
+
+  showAdminToast(`✅ Created "${name}" with ${pairs.length} TM entries — now click 🔍 Suggest glossary additions to mine for terms`);
+}
+
 function trPromptSaveTM() {
   const pairs = window.__trLastPairs || [];
   if (!pairs.length) { showAdminToast('❌ No segments to save'); return; }
@@ -3992,15 +4067,37 @@ async function trTranslate() {
     dl.download = trFile.name.replace(/\.sdlppx$/i,'') + '_TRANSLATED.sdlrpx';
     document.getElementById('tr-results').style.display = 'block';
 
-    // Post-actions: show only if a saved glossary is selected AND priming isn't disabled
-    const trSel = document.getElementById('tr-gloss-saved');
-    const hasActiveGloss = trSel && trSel.value && !trPrimingDisabled();
+    // Post-actions panel: appears whenever there are translated pairs AND priming
+    // isn't disabled. If no glossary is active, show the "create new glossary"
+    // variant so the user can start building one from this translation.
     const pa = document.getElementById('tr-postactions');
-    if (hasActiveGloss && allPairs.length > 0) {
-      document.getElementById('tr-pairs-count').textContent = allPairs.length;
+    const paCreate = document.getElementById('tr-pa-create');
+    const paActive = document.getElementById('tr-pa-active');
+    const trSel = document.getElementById('tr-gloss-saved');
+    const activeGloss = (trSel && trSel.value && !trPrimingDisabled()) ? gmFind(trSel.value) : null;
+
+    if (allPairs.length > 0 && !trPrimingDisabled()) {
       pa.style.display = 'block';
-      document.getElementById('tr-suggest-out').style.display = 'none';
-      document.getElementById('tr-suggest-out').innerHTML = '';
+      // Reset any previous suggestion output
+      const sugOut = document.getElementById('tr-suggest-out');
+      if (sugOut) { sugOut.style.display = 'none'; sugOut.innerHTML = ''; }
+
+      if (activeGloss) {
+        paCreate.style.display = 'none';
+        paActive.style.display = 'block';
+        document.getElementById('tr-pa-active-name').textContent = activeGloss.name;
+        document.getElementById('tr-pairs-count').textContent = allPairs.length;
+        // Re-enable Save-to-TM button if it was disabled from a previous run
+        const stBtn = document.getElementById('tr-save-tm-btn');
+        if (stBtn) {
+          stBtn.disabled = false;
+          stBtn.innerHTML = `💾 Save segments to TM (<span id="tr-pairs-count">${allPairs.length}</span>)`;
+        }
+      } else {
+        paActive.style.display = 'none';
+        paCreate.style.display = 'block';
+        document.getElementById('tr-create-pairs-count').textContent = allPairs.length;
+      }
     } else {
       pa.style.display = 'none';
     }
