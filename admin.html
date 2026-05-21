@@ -1928,20 +1928,24 @@ async function tcTranscribe() {
       }
     }
 
+    // Diagnostic — show what's actually about to be uploaded
+    const uploadSizeMB = (uploadBlob.size / 1024 / 1024).toFixed(2);
+    console.log(`[transcriber] Uploading ${uploadSizeMB} MB (${uploadName}) — mode=${tcMode}`);
+
     let data;
     if (tcMode === 'transcribe') {
-      txt.textContent = 'Transcribing with Whisper…';
+      txt.textContent = `Uploading ${uploadSizeMB} MB to Whisper…`;
       data = await tcCallWhisper(uploadBlob, uploadName, 'transcriptions', apiKey, tcLang);
       data.__mode = 'transcribe';
     } else if (tcMode === 'translate') {
-      txt.textContent = 'Translating audio to English with Whisper…';
+      txt.textContent = `Uploading ${uploadSizeMB} MB to Whisper (translate mode)…`;
       data = await tcCallWhisper(uploadBlob, uploadName, 'translations', apiKey, null);
       data.__mode = 'translate';
       data.language = 'en'; // /translations always outputs English
     } else { // 'both'
-      txt.textContent = 'Pass 1/2: Transcribing source language…';
+      txt.textContent = `Pass 1/2: Transcribing source language (${uploadSizeMB} MB)…`;
       const transcribed = await tcCallWhisper(uploadBlob, uploadName, 'transcriptions', apiKey, tcLang);
-      txt.textContent = 'Pass 2/2: Translating to English…';
+      txt.textContent = `Pass 2/2: Translating to English (${uploadSizeMB} MB)…`;
       const translated  = await tcCallWhisper(uploadBlob, uploadName, 'translations',   apiKey, null);
       data = tcAlignBoth(transcribed, translated);
       data.__mode = 'both';
