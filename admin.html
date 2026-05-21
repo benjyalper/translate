@@ -7,10 +7,14 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <!-- ffmpeg.wasm — lazy-loaded only when the user actually slices audio.
-       Single-threaded build avoids COOP/COEP requirements. -->
-  <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
-  <script src="https://unpkg.com/@ffmpeg/util@0.12.1/dist/umd/util.js"></script>
+  <!-- ffmpeg.wasm — used for in-browser audio slicing. Single-threaded UMD
+       build avoids COOP/COEP requirements. jsDelivr serves these with the
+       headers browsers need for Worker construction.
+       Diagnostic onerror handlers help if the CDN ever blocks/fails. -->
+  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"
+    onerror="window.__ffmpegLoadError='Failed to load @ffmpeg/ffmpeg from jsDelivr CDN'"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/umd/index.js"
+    onerror="window.__ffmpegUtilLoadError='Failed to load @ffmpeg/util from jsDelivr CDN'"></script>
   <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
     :root{
@@ -1448,15 +1452,23 @@ async function tcLoadFFmpeg() {
   if (tcFFmpegInstance) return tcFFmpegInstance;
   if (tcFFmpegLoading) return tcFFmpegLoading;
   tcFFmpegLoading = (async () => {
-    if (typeof FFmpegWASM === 'undefined' || typeof FFmpegUtil === 'undefined') {
-      throw new Error('ffmpeg.wasm not available — refresh the page and try again');
+    // Verbose diagnostics — the previous opaque "not available" hid the real cause
+    const haveWasm = typeof FFmpegWASM !== 'undefined' && FFmpegWASM && FFmpegWASM.FFmpeg;
+    const haveUtil = typeof FFmpegUtil !== 'undefined' && FFmpegUtil && FFmpegUtil.toBlobURL;
+    if (!haveWasm || !haveUtil) {
+      const details = [];
+      if (window.__ffmpegLoadError)     details.push(window.__ffmpegLoadError);
+      if (window.__ffmpegUtilLoadError) details.push(window.__ffmpegUtilLoadError);
+      if (!haveWasm) details.push('FFmpegWASM global missing (script may be blocked by an ad-blocker or corporate proxy)');
+      if (!haveUtil) details.push('FFmpegUtil global missing');
+      throw new Error('ffmpeg.wasm failed to load. ' + (details.join(' · ') || 'Open browser DevTools → Network tab and refresh — look for failed requests to cdn.jsdelivr.net'));
     }
     // Browsers refuse to construct a Web Worker from a cross-origin URL even
-    // when the host (unpkg) sets CORS headers. Workaround: fetch each script
-    // as text, wrap it in a Blob (same-origin by definition), then let
-    // ffmpeg.wasm construct the Worker from that blob: URL.
-    const ffmpegBase = 'https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd';
-    const coreBase   = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
+    // when the host CDN sets CORS headers. Workaround: fetch each script as
+    // text via toBlobURL, wrap it in a Blob (same-origin), and load the
+    // Worker from that blob: URL.
+    const ffmpegBase = 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd';
+    const coreBase   = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd';
     const inst = new FFmpegWASM.FFmpeg();
     await inst.load({
       classWorkerURL: await FFmpegUtil.toBlobURL(`${ffmpegBase}/814.ffmpeg.js`, 'text/javascript'),
