@@ -214,7 +214,7 @@ Rules:
   const res = await axios.post(
     'https://api.openai.com/v1/chat/completions',
     {
-      model: process.env.OPENAI_MODEL || 'gpt-4o',
+      model: process.env.OPENAI_MODEL || 'gpt-5.4-mini',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user',   content: numbered }
@@ -442,7 +442,7 @@ Focus on Hebrew-English pairs: document translation, legal/medical, subtitling, 
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
       const res = await axios.post('https://api.openai.com/v1/chat/completions', {
-        model: 'gpt-4o',
+        model: 'gpt-5.4-mini',
         temperature: 0.3,
         messages: [
           { role: 'system', content: 'You output only raw JSON arrays, never markdown or code fences.' },
@@ -572,7 +572,7 @@ Sign off with just the name, email, and phone. No subject line. No placeholders.
   try {
     const { data } = await axios.post(
       'https://api.openai.com/v1/chat/completions',
-      { model: 'gpt-4o', messages: [{ role: 'user', content: prompt }], temperature: 0.6, max_tokens: 400 },
+      { model: 'gpt-5.4-mini', messages: [{ role: 'user', content: prompt }], temperature: 0.6, max_tokens: 400 },
       { headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' }, timeout: 30000 }
     );
     return (data.choices?.[0]?.message?.content || '').trim();

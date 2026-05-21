@@ -526,7 +526,7 @@
           <div class="tool-icon">🔄</div>
           <div>
             <div class="tool-title">Trados SDLPPX Auto-Translator</div>
-            <div class="tool-sub">Upload .sdlppx → GPT-4o translates → download .sdlrpx return package</div>
+            <div class="tool-sub">Upload .sdlppx → GPT translates → download .sdlrpx return package · choose quality tier below</div>
           </div>
         </div>
         <div class="tool-divider"></div>
@@ -547,7 +547,18 @@
           <button class="tlang-btn"        onclick="trSetLang('iw-IL',this)">iw-IL</button>
         </div>
 
-        <button class="tbtn gold" id="tr-btn" onclick="trTranslate()" disabled>🚀 Translate with GPT-4o</button>
+        <!-- Quality tier -->
+        <div class="tlang-row" style="margin-top:.5rem">
+          <span class="tlang-lbl">Quality:</span>
+          <select id="tr-model" style="flex:1;padding:.45rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.8rem">
+            <option value="gpt-5.4-mini" selected>Standard · gpt-5.4-mini (~$0.01 / 1K words · daily workhorse)</option>
+            <option value="gpt-5.4-nano">Draft · gpt-5.4-nano (~$0.003 / 1K words · bulk pre-translation)</option>
+            <option value="gpt-5.4">Professional · gpt-5.4 (~$0.03 / 1K words · medical/legal/technical)</option>
+            <option value="gpt-5.5">Premium · gpt-5.5 (~$0.06 / 1K words · agency tests, final review)</option>
+          </select>
+        </div>
+
+        <button class="tbtn gold" id="tr-btn" onclick="trTranslate()" disabled>🚀 Translate</button>
 
         <!-- Progress -->
         <div class="tprog" id="tr-prog">
@@ -643,7 +654,7 @@
           <div class="tool-icon">✉️</div>
           <div>
             <div class="tool-title">Email Response Generator</div>
-            <div class="tool-sub">Paste a job posting / client email → drafts a tailored reply in Benjy's voice · gpt-4o-mini default (~$0.0003/email)</div>
+            <div class="tool-sub">Paste a job posting / client email → drafts a tailored reply in Benjy's voice · gpt-5.4-nano default (~$0.0002/email)</div>
           </div>
         </div>
         <div class="tool-divider"></div>
@@ -685,8 +696,9 @@
               <label style="font-size:.78rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem">
                 <span style="min-width:80px">Model:</span>
                 <select id="er-model" style="flex:1;padding:.5rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.8rem">
-                  <option value="gpt-4o-mini">gpt-4o-mini (~$0.0003 / email)</option>
-                  <option value="gpt-4o">gpt-4o (~$0.008 / email · higher quality)</option>
+                  <option value="gpt-5.4-nano">gpt-5.4-nano (~$0.0002 / email · cheapest)</option>
+                  <option value="gpt-5.4-mini">gpt-5.4-mini (~$0.0008 / email · sharper for important leads)</option>
+                  <option value="gpt-5.4">gpt-5.4 (~$0.003 / email · top quality)</option>
                 </select>
               </label>
               <label style="font-size:.78rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem">
@@ -1337,13 +1349,14 @@ function trInsertTranslation(content, seg, hebrewText) {
   );
 }
 
-async function trTranslateBatch(texts, apiKey) {
+async function trTranslateBatch(texts, apiKey, model) {
+  const chosen = model || (document.getElementById('tr-model') && document.getElementById('tr-model').value) || 'gpt-5.4-mini';
   const numbered = texts.map((t, i) => `${i+1}. ${t}`).join('\n');
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: 'gpt-4o', temperature: 0.2,
+      model: chosen, temperature: 0.2,
       messages: [
         { role: 'system', content: 'You are a professional translator. Translate each numbered item into Hebrew (he-IL).\nRules:\n- Preserve ALL placeholders exactly: {{TAG_0}}, {{TAG_1}}, etc.\n- Output ONLY the numbered translations, one per line, same order\n- Use formal Hebrew suitable for professional documents\n- No explanations or notes' },
         { role: 'user',   content: numbered }
@@ -1359,7 +1372,7 @@ async function trTranslateBatch(texts, apiKey) {
   return out;
 }
 
-async function trProcessXliff(content, apiKey, onProgress) {
+async function trProcessXliff(content, apiKey, onProgress, model) {
   const segs  = trExtractSegments(content);
   const empty = segs.filter(s => !s.targetText && trIsTranslatable(s.sourceText));
   if (empty.length === 0) return { translated: 0, total: segs.length, content };
@@ -1368,7 +1381,7 @@ async function trProcessXliff(content, apiKey, onProgress) {
   for (let i = 0; i < empty.length; i += BATCH) {
     const batch = empty.slice(i, i + BATCH);
     if (onProgress) onProgress(i, empty.length);
-    const translations = await trTranslateBatch(batch.map(s => s.sourceText), apiKey);
+    const translations = await trTranslateBatch(batch.map(s => s.sourceText), apiKey, model);
     for (let j = 0; j < batch.length; j++) {
       if (translations[j]) { content = trInsertTranslation(content, batch[j], translations[j]); translated++; }
     }
@@ -1382,6 +1395,7 @@ async function trTranslate() {
   if (!apiKey) { promptApiKey(); return; }
   if (!trFile) return;
 
+  const trModel = (document.getElementById('tr-model') && document.getElementById('tr-model').value) || 'gpt-5.4-mini';
   const btn  = document.getElementById('tr-btn');
   const prog = document.getElementById('tr-prog');
   const bar  = document.getElementById('tr-prog-bar');
@@ -1433,8 +1447,8 @@ async function trTranslate() {
         const base = 20 + (fi / xliffEntries.length) * 70;
         const inc  = (done / all) * (70 / xliffEntries.length);
         bar.style.width = (base + inc) + '%';
-        txt.textContent = `File ${fi+1}/${xliffEntries.length}: segments ${done}–${Math.min(done+20,all)} of ${all}…`;
-      });
+        txt.textContent = `File ${fi+1}/${xliffEntries.length} (${trModel}): segments ${done}–${Math.min(done+20,all)} of ${all}…`;
+      }, trModel);
       totalTranslated += translated; totalSegments += total;
       outZip.file(relPath, newContent);
     }
@@ -1759,7 +1773,7 @@ async function qaApplyFixes() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey },
           body: JSON.stringify({
-            model: 'gpt-4o', temperature: 0.1,
+            model: 'gpt-5.4', temperature: 0.1,
             messages: [
               { role: 'system', content:
 `You are a Hebrew translator for a robot vacuum cleaner user manual.
@@ -1941,7 +1955,7 @@ async function erGenerate() {
 
   const style       = document.getElementById('er-style').value;
   const length      = document.getElementById('er-length').value;
-  const model       = document.getElementById('er-model').value || 'gpt-4o-mini';
+  const model       = document.getElementById('er-model').value || 'gpt-5.4-nano';
   const includeRate = document.getElementById('er-rate').checked;
   const includeCV   = document.getElementById('er-cv').checked;
   const includeLink = document.getElementById('er-link').checked;
