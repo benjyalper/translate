@@ -545,6 +545,17 @@
             📋 Optional: Glossary / Term Base <span id="tr-gloss-count" style="color:#64748b;font-weight:400">(none loaded)</span>
           </summary>
           <div style="margin-top:.6rem">
+            <!-- Saved glossary picker -->
+            <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.6rem">
+              <label style="font-size:.72rem;color:#94a3b8">Saved glossary:</label>
+              <select id="tr-gloss-saved" onchange="trUseSavedGloss(this.value)"
+                style="flex:1;min-width:180px;padding:.4rem .6rem;background:#0a0a14;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.75rem">
+                <option value="">— None (no priming) —</option>
+              </select>
+              <button class="tbtn" style="width:auto;padding:.35rem .7rem;font-size:.68rem;background:#1e1b4b;color:#a5b4fc" onclick="trSaveCurrentAsGloss()" title="Save current loaded terms as a named glossary">💾 Save as…</button>
+              <a href="#glossary-manager" style="font-size:.7rem;color:#a5b4fc;text-decoration:underline" onclick="document.getElementById('glossary-manager').scrollIntoView({behavior:'smooth'});return false">↓ Manage</a>
+            </div>
+
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:.6rem">
               <div>
                 <label style="font-size:.7rem;color:#94a3b8;display:block;margin-bottom:.3rem">Upload .tsv / .csv / .txt</label>
@@ -612,6 +623,95 @@
         <!-- Error -->
         <div id="tr-error" style="display:none;padding:.7rem 1rem;background:#1a0000;border:1px solid #7f1d1d;border-radius:8px;font-size:.82rem;color:#fca5a5"></div>
       </div><!-- /trados card -->
+
+      <!-- ── 📚 GLOSSARY MANAGER ──────────────────────────── -->
+      <div class="tool-card" id="glossary-manager" style="grid-column:1/-1">
+        <div class="tool-header">
+          <div class="tool-icon">📚</div>
+          <div>
+            <div class="tool-title">Glossary Manager</div>
+            <div class="tool-sub">Save and reuse per-client term bases · stored locally in your browser · auto-loaded into the Trados translator</div>
+          </div>
+        </div>
+        <div class="tool-divider"></div>
+
+        <!-- Top bar -->
+        <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.8rem">
+          <select id="gm-select" onchange="gmOnSelect(this.value)"
+            style="flex:1;min-width:240px;padding:.5rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.8rem">
+            <option value="">— Pick a glossary to view/edit —</option>
+          </select>
+          <button class="tbtn" style="width:auto;padding:.5rem .9rem;font-size:.75rem" onclick="gmNew()">➕ New</button>
+          <button class="tbtn" id="gm-rename" style="width:auto;padding:.5rem .9rem;font-size:.75rem;background:#1e1b4b;color:#a5b4fc;display:none" onclick="gmRename()">✏️ Rename</button>
+          <button class="tbtn" id="gm-duplicate" style="width:auto;padding:.5rem .9rem;font-size:.75rem;background:#1e1b4b;color:#a5b4fc;display:none" onclick="gmDuplicate()">📑 Duplicate</button>
+          <button class="tbtn" id="gm-export" style="width:auto;padding:.5rem .9rem;font-size:.75rem;background:#1e1b4b;color:#a5b4fc;display:none" onclick="gmExport()">⬇ Export .tsv</button>
+          <button class="tbtn" id="gm-delete" style="width:auto;padding:.5rem .9rem;font-size:.75rem;background:#1a0000;color:#fca5a5;border:1px solid #7f1d1d;display:none" onclick="gmDelete()">🗑 Delete</button>
+        </div>
+
+        <!-- Empty state -->
+        <div id="gm-empty" style="text-align:center;padding:2rem 1rem;color:#64748b;font-size:.85rem">
+          No saved glossaries yet. Click <strong style="color:#a5b4fc">➕ New</strong> to create one, or use the <strong style="color:#a5b4fc">💾 Save as…</strong> button in the Trados card after loading terms.
+        </div>
+
+        <!-- Editor -->
+        <div id="gm-editor" style="display:none">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem;flex-wrap:wrap;gap:.5rem">
+            <div style="font-size:.78rem;color:#94a3b8">
+              <span id="gm-meta-name" style="color:#e2e8f0;font-weight:600"></span>
+              · <span id="gm-meta-count">0</span> terms
+              · updated <span id="gm-meta-updated"></span>
+            </div>
+            <div style="display:flex;gap:.4rem">
+              <input type="text" id="gm-search" placeholder="🔍 Filter terms…"
+                style="padding:.4rem .7rem;background:#0a0a14;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.75rem;width:200px"
+                oninput="gmRenderTerms()"/>
+              <button class="tbtn" style="width:auto;padding:.4rem .8rem;font-size:.72rem;background:#1e1b4b;color:#a5b4fc" onclick="gmShowImport()">📥 Bulk import</button>
+            </div>
+          </div>
+
+          <!-- Bulk import drawer -->
+          <div id="gm-import-drawer" style="display:none;background:#0a0a14;border:1px solid var(--border);border-radius:8px;padding:.7rem;margin-bottom:.6rem">
+            <label style="font-size:.72rem;color:#94a3b8;display:block;margin-bottom:.3rem">Paste term pairs to add to "<span id="gm-import-target"></span>" (TSV/CSV/arrow format)</label>
+            <textarea id="gm-import-text" rows="4"
+              placeholder="charging dock&#9;תחנת טעינה&#10;robot vacuum&#9;שואב רובוטי"
+              style="width:100%;padding:.5rem .6rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-family:'Inter',sans-serif;font-size:.74rem;resize:vertical;outline:none"></textarea>
+            <div style="display:flex;gap:.4rem;margin-top:.4rem;align-items:center;flex-wrap:wrap">
+              <button class="tbtn" style="width:auto;padding:.4rem .8rem;font-size:.72rem" onclick="gmImportPasted()">✓ Append terms</button>
+              <button class="tbtn" style="width:auto;padding:.4rem .8rem;font-size:.72rem;background:#1e1b4b;color:#a5b4fc" onclick="document.getElementById('gm-import-drawer').style.display='none'">Cancel</button>
+              <label class="tbtn" style="cursor:pointer;width:auto;padding:.4rem .8rem;font-size:.72rem;background:#1e1b4b;color:#a5b4fc">
+                📂 …or import a file
+                <input type="file" accept=".tsv,.csv,.txt" style="display:none" onchange="gmImportFile(this)"/>
+              </label>
+            </div>
+          </div>
+
+          <!-- Terms table -->
+          <div style="max-height:380px;overflow-y:auto;border:1px solid var(--border);border-radius:8px">
+            <table style="width:100%;border-collapse:collapse;font-size:.78rem">
+              <thead>
+                <tr style="background:#1e1b4b;position:sticky;top:0;z-index:1">
+                  <th style="padding:.5rem .6rem;text-align:left;color:#a5b4fc;width:45%">Source (English)</th>
+                  <th style="padding:.5rem .6rem;text-align:left;color:#a5b4fc;width:45%">Target (Hebrew)</th>
+                  <th style="padding:.5rem .6rem;text-align:center;color:#a5b4fc;width:10%">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="gm-tbody"></tbody>
+            </table>
+          </div>
+
+          <!-- Add term row -->
+          <div style="display:flex;gap:.4rem;margin-top:.6rem;align-items:center;flex-wrap:wrap">
+            <input type="text" id="gm-new-source" placeholder="English term"
+              style="flex:1;min-width:180px;padding:.5rem .7rem;background:#0a0a14;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.78rem"
+              onkeydown="if(event.key==='Enter')gmAddTerm()"/>
+            <span style="color:#64748b">→</span>
+            <input type="text" id="gm-new-target" placeholder="Hebrew translation" dir="rtl"
+              style="flex:1;min-width:180px;padding:.5rem .7rem;background:#0a0a14;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.78rem"
+              onkeydown="if(event.key==='Enter')gmAddTerm()"/>
+            <button class="tbtn" style="width:auto;padding:.5rem 1rem;font-size:.78rem" onclick="gmAddTerm()">➕ Add term</button>
+          </div>
+        </div>
+      </div><!-- /glossary manager card -->
 
       <!-- ── 📋 QA REVISOR ─────────────────────────────────── -->
       <div class="tool-card" style="grid-column:1/-1">
@@ -1496,6 +1596,401 @@ function trFindRelevantTerms(batchTexts) {
   }
   return relevant;
 }
+
+// ─── Glossary Manager: persistent storage in localStorage ──
+// Schema:
+//   tradosGlossaries_v1 → { glossaries: [{ id, name, terms, createdAt, updatedAt }], activeId }
+const GM_KEY = 'tradosGlossaries_v1';
+let gmCurrentId = null;
+
+function gmLoadStore() {
+  try {
+    const raw = localStorage.getItem(GM_KEY);
+    if (!raw) return { glossaries: [], activeId: null };
+    const parsed = JSON.parse(raw);
+    if (!parsed.glossaries) parsed.glossaries = [];
+    return parsed;
+  } catch { return { glossaries: [], activeId: null }; }
+}
+function gmSaveStore(store) {
+  localStorage.setItem(GM_KEY, JSON.stringify(store));
+}
+function gmId() {
+  return 'g_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
+}
+function gmFind(id) {
+  return gmLoadStore().glossaries.find(g => g.id === id);
+}
+
+function gmRefreshDropdowns() {
+  // Update both: the Trados card's saved-glossary picker, and the manager's selector
+  const store = gmLoadStore();
+  const opts = ['<option value="">— None (no priming) —</option>']
+    .concat(store.glossaries.map(g =>
+      `<option value="${g.id}">${g.name.replace(/</g,'&lt;')} (${g.terms.length})</option>`
+    )).join('');
+  const trSel = document.getElementById('tr-gloss-saved');
+  if (trSel) {
+    const prev = trSel.value;
+    trSel.innerHTML = opts;
+    trSel.value = prev || '';
+  }
+  const gmSel = document.getElementById('gm-select');
+  if (gmSel) {
+    const prev = gmSel.value;
+    gmSel.innerHTML = ['<option value="">— Pick a glossary to view/edit —</option>']
+      .concat(store.glossaries.map(g =>
+        `<option value="${g.id}">${g.name.replace(/</g,'&lt;')} (${g.terms.length} terms)</option>`
+      )).join('');
+    gmSel.value = prev || '';
+  }
+}
+
+function trUseSavedGloss(id) {
+  if (!id) {
+    trGlossary = [];
+    trUpdateGlossUI();
+    return;
+  }
+  const g = gmFind(id);
+  if (!g) return;
+  trGlossary = g.terms.slice();
+  trUpdateGlossUI();
+  // Persist as active
+  const store = gmLoadStore();
+  store.activeId = id;
+  gmSaveStore(store);
+  showAdminToast(`✅ Loaded "${g.name}" (${g.terms.length} terms)`);
+}
+
+function trSaveCurrentAsGloss() {
+  if (!trGlossary.length) {
+    document.getElementById('tr-gloss-status').textContent = '❌ Nothing to save — load some terms first.';
+    document.getElementById('tr-gloss-status').style.color = '#fca5a5';
+    return;
+  }
+  const name = prompt('Name this glossary (e.g. "Robot Vacuum (Dreame)", "Medical — Pharma Ltd.")');
+  if (!name || !name.trim()) return;
+  const store = gmLoadStore();
+  const now = new Date().toISOString();
+  const newG = {
+    id: gmId(),
+    name: name.trim(),
+    terms: trGlossary.slice(),
+    createdAt: now,
+    updatedAt: now,
+  };
+  store.glossaries.push(newG);
+  store.activeId = newG.id;
+  gmSaveStore(store);
+  gmRefreshDropdowns();
+  document.getElementById('tr-gloss-saved').value = newG.id;
+  showAdminToast(`✅ Saved "${name}" — ${trGlossary.length} terms`);
+}
+
+// ─── Glossary Manager card ─────────────────────────────────
+function gmOnSelect(id) {
+  gmCurrentId = id || null;
+  gmRenderEditor();
+}
+
+function gmRenderEditor() {
+  const empty   = document.getElementById('gm-empty');
+  const editor  = document.getElementById('gm-editor');
+  const renameB = document.getElementById('gm-rename');
+  const dupB    = document.getElementById('gm-duplicate');
+  const expB    = document.getElementById('gm-export');
+  const delB    = document.getElementById('gm-delete');
+
+  const store = gmLoadStore();
+  const anyExist = store.glossaries.length > 0;
+  const g = gmCurrentId ? gmFind(gmCurrentId) : null;
+
+  if (!g) {
+    editor.style.display = 'none';
+    empty.style.display = anyExist ? 'none' : 'block';
+    if (anyExist) {
+      // Show a "pick one" hint when glossaries exist but none picked
+      empty.style.display = 'block';
+      empty.innerHTML = `You have <strong style="color:#a5b4fc">${store.glossaries.length}</strong> saved glossar${store.glossaries.length===1?'y':'ies'}. Pick one from the dropdown above to view or edit.`;
+    } else {
+      empty.innerHTML = 'No saved glossaries yet. Click <strong style="color:#a5b4fc">➕ New</strong> to create one, or use the <strong style="color:#a5b4fc">💾 Save as…</strong> button in the Trados card after loading terms.';
+    }
+    renameB.style.display = dupB.style.display = expB.style.display = delB.style.display = 'none';
+    return;
+  }
+
+  empty.style.display = 'none';
+  editor.style.display = 'block';
+  renameB.style.display = dupB.style.display = expB.style.display = delB.style.display = 'inline-flex';
+
+  document.getElementById('gm-meta-name').textContent = g.name;
+  document.getElementById('gm-meta-count').textContent = g.terms.length;
+  const updated = new Date(g.updatedAt);
+  document.getElementById('gm-meta-updated').textContent = updated.toLocaleString();
+  document.getElementById('gm-import-target').textContent = g.name;
+
+  gmRenderTerms();
+}
+
+function gmRenderTerms() {
+  const g = gmCurrentId ? gmFind(gmCurrentId) : null;
+  if (!g) return;
+  const tbody = document.getElementById('gm-tbody');
+  const filter = (document.getElementById('gm-search').value || '').toLowerCase().trim();
+  const filtered = filter
+    ? g.terms.filter(t => t.source.toLowerCase().includes(filter) || t.target.toLowerCase().includes(filter))
+    : g.terms;
+  if (filtered.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="3" style="padding:1rem;text-align:center;color:#64748b">No matching terms.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = filtered.map((t, displayIdx) => {
+    const realIdx = g.terms.indexOf(t);
+    return `
+      <tr style="border-top:1px solid #1f2937">
+        <td style="padding:.4rem .6rem">
+          <input type="text" value="${(t.source || '').replace(/"/g,'&quot;')}" onchange="gmEditTerm(${realIdx},'source',this.value)"
+            style="width:100%;padding:.3rem .5rem;background:transparent;border:1px solid transparent;border-radius:4px;color:#e2e8f0;font-size:.78rem"
+            onfocus="this.style.border='1px solid #4f46e5';this.style.background='#0a0a14'"
+            onblur="this.style.border='1px solid transparent';this.style.background='transparent'"/>
+        </td>
+        <td style="padding:.4rem .6rem">
+          <input type="text" dir="rtl" value="${(t.target || '').replace(/"/g,'&quot;')}" onchange="gmEditTerm(${realIdx},'target',this.value)"
+            style="width:100%;padding:.3rem .5rem;background:transparent;border:1px solid transparent;border-radius:4px;color:#e2e8f0;font-size:.78rem"
+            onfocus="this.style.border='1px solid #4f46e5';this.style.background='#0a0a14'"
+            onblur="this.style.border='1px solid transparent';this.style.background='transparent'"/>
+        </td>
+        <td style="padding:.4rem .6rem;text-align:center">
+          <button onclick="gmDeleteTerm(${realIdx})" title="Delete term"
+            style="background:transparent;border:none;color:#f87171;cursor:pointer;font-size:.95rem;padding:.2rem .4rem">🗑</button>
+        </td>
+      </tr>`;
+  }).join('');
+}
+
+function gmTouch() {
+  const store = gmLoadStore();
+  const g = store.glossaries.find(x => x.id === gmCurrentId);
+  if (!g) return;
+  g.updatedAt = new Date().toISOString();
+  gmSaveStore(store);
+  document.getElementById('gm-meta-updated').textContent = new Date().toLocaleString();
+  document.getElementById('gm-meta-count').textContent = g.terms.length;
+  gmRefreshDropdowns();
+  // If this glossary is currently active in the Trados card, refresh trGlossary
+  const trSel = document.getElementById('tr-gloss-saved');
+  if (trSel && trSel.value === gmCurrentId) {
+    trGlossary = g.terms.slice();
+    trUpdateGlossUI();
+  }
+}
+
+function gmEditTerm(idx, field, value) {
+  const store = gmLoadStore();
+  const g = store.glossaries.find(x => x.id === gmCurrentId);
+  if (!g || !g.terms[idx]) return;
+  g.terms[idx][field] = value.trim();
+  gmSaveStore(store);
+  gmTouch();
+}
+
+function gmDeleteTerm(idx) {
+  const store = gmLoadStore();
+  const g = store.glossaries.find(x => x.id === gmCurrentId);
+  if (!g || !g.terms[idx]) return;
+  if (!confirm(`Delete term "${g.terms[idx].source}" → "${g.terms[idx].target}"?`)) return;
+  g.terms.splice(idx, 1);
+  gmSaveStore(store);
+  gmTouch();
+  gmRenderTerms();
+}
+
+function gmAddTerm() {
+  const src = document.getElementById('gm-new-source').value.trim();
+  const tgt = document.getElementById('gm-new-target').value.trim();
+  if (!src || !tgt) {
+    showAdminToast('❌ Both source and target are required');
+    return;
+  }
+  const store = gmLoadStore();
+  const g = store.glossaries.find(x => x.id === gmCurrentId);
+  if (!g) return;
+  // Skip duplicates (case-insensitive source match)
+  if (g.terms.some(t => t.source.toLowerCase() === src.toLowerCase())) {
+    if (!confirm(`"${src}" already exists. Add anyway?`)) return;
+  }
+  g.terms.push({ source: src, target: tgt });
+  gmSaveStore(store);
+  gmTouch();
+  gmRenderTerms();
+  document.getElementById('gm-new-source').value = '';
+  document.getElementById('gm-new-target').value = '';
+  document.getElementById('gm-new-source').focus();
+}
+
+function gmNew() {
+  const name = prompt('Name the new glossary (e.g. "Robot Vacuum (Dreame)", "Legal — Cohen & Co.")');
+  if (!name || !name.trim()) return;
+  const store = gmLoadStore();
+  const now = new Date().toISOString();
+  const newG = {
+    id: gmId(),
+    name: name.trim(),
+    terms: [],
+    createdAt: now,
+    updatedAt: now,
+  };
+  store.glossaries.push(newG);
+  gmSaveStore(store);
+  gmRefreshDropdowns();
+  document.getElementById('gm-select').value = newG.id;
+  gmOnSelect(newG.id);
+  showAdminToast(`✅ Created "${name}"`);
+}
+
+function gmRename() {
+  const g = gmCurrentId ? gmFind(gmCurrentId) : null;
+  if (!g) return;
+  const name = prompt('New name:', g.name);
+  if (!name || !name.trim() || name === g.name) return;
+  const store = gmLoadStore();
+  const target = store.glossaries.find(x => x.id === gmCurrentId);
+  target.name = name.trim();
+  target.updatedAt = new Date().toISOString();
+  gmSaveStore(store);
+  gmRefreshDropdowns();
+  document.getElementById('gm-select').value = gmCurrentId;
+  gmRenderEditor();
+  showAdminToast(`✅ Renamed to "${name}"`);
+}
+
+function gmDuplicate() {
+  const g = gmCurrentId ? gmFind(gmCurrentId) : null;
+  if (!g) return;
+  const store = gmLoadStore();
+  const now = new Date().toISOString();
+  const copy = {
+    id: gmId(),
+    name: g.name + ' (copy)',
+    terms: g.terms.map(t => ({ ...t })),
+    createdAt: now,
+    updatedAt: now,
+  };
+  store.glossaries.push(copy);
+  gmSaveStore(store);
+  gmRefreshDropdowns();
+  document.getElementById('gm-select').value = copy.id;
+  gmOnSelect(copy.id);
+  showAdminToast(`✅ Duplicated as "${copy.name}"`);
+}
+
+function gmExport() {
+  const g = gmCurrentId ? gmFind(gmCurrentId) : null;
+  if (!g) return;
+  const tsv = g.terms.map(t => `${t.source}\t${t.target}`).join('\n');
+  const blob = new Blob([tsv], { type: 'text/tab-separated-values;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = g.name.replace(/[^a-z0-9֐-׿]+/gi, '_') + '.tsv';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  showAdminToast(`⬇ Exported ${g.terms.length} terms`);
+}
+
+function gmDelete() {
+  const g = gmCurrentId ? gmFind(gmCurrentId) : null;
+  if (!g) return;
+  if (!confirm(`Delete glossary "${g.name}" with ${g.terms.length} terms?\n\nThis cannot be undone.`)) return;
+  const store = gmLoadStore();
+  store.glossaries = store.glossaries.filter(x => x.id !== gmCurrentId);
+  if (store.activeId === gmCurrentId) store.activeId = null;
+  gmSaveStore(store);
+  // If the deleted one was loaded in Trados, clear it
+  const trSel = document.getElementById('tr-gloss-saved');
+  if (trSel && trSel.value === gmCurrentId) {
+    trGlossary = [];
+    trUpdateGlossUI();
+    trSel.value = '';
+  }
+  gmCurrentId = null;
+  gmRefreshDropdowns();
+  gmRenderEditor();
+  showAdminToast(`🗑 Deleted "${g.name}"`);
+}
+
+function gmShowImport() {
+  const d = document.getElementById('gm-import-drawer');
+  d.style.display = d.style.display === 'none' ? 'block' : 'none';
+}
+
+function gmImportPasted() {
+  const text = document.getElementById('gm-import-text').value;
+  const parsed = trParseGlossText(text);
+  if (parsed.length === 0) {
+    showAdminToast('❌ No valid term pairs found');
+    return;
+  }
+  gmMergeIntoCurrent(parsed);
+  document.getElementById('gm-import-text').value = '';
+  document.getElementById('gm-import-drawer').style.display = 'none';
+}
+
+async function gmImportFile(input) {
+  const file = input.files?.[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const parsed = trParseGlossText(text);
+    if (parsed.length === 0) {
+      showAdminToast('❌ No valid term pairs found in file');
+      return;
+    }
+    gmMergeIntoCurrent(parsed);
+    document.getElementById('gm-import-drawer').style.display = 'none';
+  } catch (e) {
+    showAdminToast('❌ ' + e.message);
+  }
+  input.value = '';
+}
+
+function gmMergeIntoCurrent(newTerms) {
+  const store = gmLoadStore();
+  const g = store.glossaries.find(x => x.id === gmCurrentId);
+  if (!g) return;
+  // De-dupe: keep existing translation if source already exists
+  const existing = new Map(g.terms.map(t => [t.source.toLowerCase(), t]));
+  let added = 0, skipped = 0;
+  for (const t of newTerms) {
+    const key = t.source.toLowerCase();
+    if (existing.has(key)) { skipped++; continue; }
+    g.terms.push({ source: t.source, target: t.target });
+    existing.set(key, t);
+    added++;
+  }
+  gmSaveStore(store);
+  gmTouch();
+  gmRenderTerms();
+  showAdminToast(`✅ Added ${added} new terms${skipped ? ` · ${skipped} duplicates skipped` : ''}`);
+}
+
+// Initialize on page load — populate dropdowns and auto-load last-active glossary
+(function gmInit() {
+  // Wait until DOM is fully parsed
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', gmInit);
+    return;
+  }
+  gmRefreshDropdowns();
+  const store = gmLoadStore();
+  if (store.activeId && gmFind(store.activeId)) {
+    const trSel = document.getElementById('tr-gloss-saved');
+    if (trSel) {
+      trSel.value = store.activeId;
+      trUseSavedGloss(store.activeId);
+    }
+  }
+})();
 // ─── /Glossary helpers ──────────────────────────────────────
 
 async function trTranslateBatch(texts, apiKey, model) {
