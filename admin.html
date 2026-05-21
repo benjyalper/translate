@@ -525,6 +525,27 @@
           <button class="tlang-btn"        onclick="tcSetLang('he',this)">🇮🇱 Hebrew</button>
           <button class="tlang-btn"        onclick="tcSetLang('en',this)">🇺🇸 English</button>
         </div>
+
+        <!-- Whisper prompt hints (code-switching + custom vocab) -->
+        <details style="margin-top:.6rem;background:#0f0f17;border:1px solid var(--border);border-radius:8px;padding:.5rem .8rem">
+          <summary style="cursor:pointer;font-size:.78rem;color:#a5b4fc;font-weight:600;list-style:none">
+            🔤 Vocabulary hints (optional, but recommended for mixed-language speech)
+          </summary>
+          <div style="margin-top:.5rem">
+            <label style="display:flex;align-items:center;gap:.5rem;font-size:.76rem;color:#cbd5e1;cursor:pointer;margin-bottom:.5rem">
+              <input type="checkbox" id="tc-hint-codeswitch" checked style="width:1rem;height:1rem;cursor:pointer"/>
+              <span>Keep English words &amp; brand names in <strong>Latin script</strong> (fixes "mission" → "מישן" transliterations)</span>
+            </label>
+            <label style="font-size:.7rem;color:#94a3b8;display:block;margin-top:.5rem;margin-bottom:.25rem">Custom vocabulary hints — proper nouns, technical terms, product names (comma-separated, max ~50 words)</label>
+            <textarea id="tc-hint-vocab" rows="2"
+              placeholder="e.g. Dreame, robot vacuum, charging dock, Wi-Fi, mission control, dashboard, NLP, GitHub"
+              style="width:100%;padding:.5rem .7rem;background:#0a0a14;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-family:'Inter',sans-serif;font-size:.74rem;resize:vertical;outline:none"></textarea>
+            <div style="font-size:.66rem;color:#64748b;margin-top:.35rem">
+              These get sent to Whisper as a context "prompt" — biases recognition toward your domain vocabulary &amp; how words should be spelled.
+            </div>
+          </div>
+        </details>
+
         <button class="tbtn" id="tc-btn" onclick="tcTranscribe()" disabled>✨ Transcribe</button>
 
         <!-- Progress -->
@@ -1591,6 +1612,26 @@ function tcUpdateBtn() {
   document.getElementById('tc-btn').disabled = !(tcActiveTab==='record' ? tcBlob : tcFile);
 }
 
+function tcBuildWhisperPrompt(endpoint, languageHint) {
+  // Whisper's `prompt` parameter biases recognition style + vocabulary.
+  // Hard limit: ~224 tokens (~150-180 English words). We stay well under.
+  const codeswitch = document.getElementById('tc-hint-codeswitch');
+  const vocabBox   = document.getElementById('tc-hint-vocab');
+  const wantCS = codeswitch && codeswitch.checked;
+  const vocab  = (vocabBox && vocabBox.value || '').trim();
+  // Code-switching hint only meaningful when source is or might be Hebrew
+  const heLikely = languageHint === 'he' || languageHint === 'auto' || !languageHint;
+  let parts = [];
+  if (wantCS && heLikely && endpoint === 'transcriptions') {
+    parts.push('Hebrew speech with English code-switching. Preserve English words, brand names, and technical terms in Latin script: app, dashboard, software, online, mission, Microsoft, Google, GitHub, JavaScript, Wi-Fi, API.');
+  }
+  if (vocab) {
+    // For translate mode, phrase the hint in English; for transcribe, allow as-is
+    parts.push((endpoint === 'translations' ? 'Vocabulary that may appear: ' : 'Relevant vocabulary: ') + vocab.replace(/\s+/g, ' ').slice(0, 600));
+  }
+  return parts.join(' ');
+}
+
 async function tcCallWhisper(src, name, endpoint, apiKey, languageHint) {
   // endpoint: 'transcriptions' (source-language out) or 'translations' (English out, no language param)
   const fd = new FormData();
@@ -1602,6 +1643,10 @@ async function tcCallWhisper(src, name, endpoint, apiKey, languageHint) {
   if (endpoint === 'transcriptions' && languageHint && languageHint !== 'auto') {
     fd.append('language', languageHint);
   }
+  // Optional context prompt — fixes code-switching and biases vocabulary
+  const prompt = tcBuildWhisperPrompt(endpoint, languageHint);
+  if (prompt) fd.append('prompt', prompt);
+
   const res = await fetch('https://api.openai.com/v1/audio/' + endpoint, {
     method: 'POST',
     headers: { Authorization: 'Bearer ' + apiKey },
