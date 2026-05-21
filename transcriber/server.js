@@ -269,6 +269,72 @@ function addDirToZip(zip, baseDir, currentDir) {
 //  ROUTES
 // ─────────────────────────────────────────────────────────────
 
+// ── POST /api/whisper ─────────────────────────────────────────
+// Thin proxy to OpenAI's audio endpoints. Browsers can't call them
+// directly anymore (OpenAI tightened CORS), so the admin tools route
+// through here. Forwards multipart upload + accepts the user's API
+// key via the x-openai-key header (or falls back to OPENAI_API_KEY).
+//
+// Body fields:
+//   file       - audio blob (multer "file" field)
+//   mode       - 'transcribe' (default) | 'translate'
+//   language   - source-language hint (transcribe only, ISO code like 'he')
+//   prompt     - optional Whisper context prompt (vocab / code-switching hints)
+//
+// Uses memory storage so we don't write to disk for every proxy call.
+const uploadAudioMem = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB — generous; Whisper rejects > 25 MB anyway
+  fileFilter: (req, file, cb) => {
+    const ok = /audio|video|octet-stream/.test(file.mimetype) ||
+               /\.(mp3|mp4|m4a|wav|webm|ogg|mpeg|mpga|flac)$/i.test(file.originalname);
+    cb(null, ok);
+  }
+});
+
+app.post('/api/whisper', uploadAudioMem.single('file'), async (req, res) => {
+  const userKey = req.headers['x-openai-key'] || OPENAI_API_KEY;
+  if (!userKey) return res.status(400).json({ error: { message: 'No API key — set one in the admin panel or configure OPENAI_API_KEY on the server.' } });
+  if (!req.file) return res.status(400).json({ error: { message: 'No file uploaded' } });
+
+  const mode = req.body.mode === 'translate' ? 'translate' : 'transcribe';
+  const endpoint = mode === 'translate' ? 'translations' : 'transcriptions';
+
+  const form = new FormData();
+  form.append('file', req.file.buffer, {
+    filename: req.file.originalname || 'audio.wav',
+    contentType: req.file.mimetype || 'audio/wav',
+  });
+  form.append('model', 'whisper-1');
+  form.append('response_format', 'verbose_json');
+  form.append('timestamp_granularities[]', 'segment');
+  // /translations does NOT accept the language parameter
+  if (mode === 'transcribe' && req.body.language && req.body.language !== 'auto') {
+    form.append('language', req.body.language);
+  }
+  if (req.body.prompt) form.append('prompt', req.body.prompt);
+
+  try {
+    console.log(`[whisper-proxy] ${mode} · ${req.file.size/1024/1024 | 0} MB · prompt: ${(req.body.prompt || '').slice(0,40)}…`);
+    const response = await axios.post(
+      `https://api.openai.com/v1/audio/${endpoint}`,
+      form,
+      {
+        headers: { ...form.getHeaders(), Authorization: `Bearer ${userKey}` },
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity,
+        timeout: 180_000,
+      }
+    );
+    res.json(response.data);
+  } catch (e) {
+    const status = e.response?.status || 500;
+    const body   = e.response?.data || { error: { message: e.message || 'whisper proxy failed' } };
+    console.error('[whisper-proxy] error', status, body);
+    res.status(status).json(body);
+  }
+});
+
 // ── POST /api/transcribe ──────────────────────────────────────
 app.post('/api/transcribe', uploadAudio.single('audio'), async (req, res) => {
   const audioPath = req.file?.path;

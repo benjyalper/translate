@@ -1832,23 +1832,24 @@ function tcBuildWhisperPrompt(endpoint, languageHint) {
 }
 
 async function tcCallWhisper(src, name, endpoint, apiKey, languageHint) {
-  // endpoint: 'transcriptions' (source-language out) or 'translations' (English out, no language param)
+  // OpenAI tightened CORS on their audio endpoints — direct browser calls
+  // are now blocked. We route through our Railway server's /api/whisper
+  // proxy (same origin → no CORS). The proxy forwards multipart to OpenAI
+  // and returns the JSON response unchanged.
+  //
+  // endpoint: 'transcriptions' (source-language out) or 'translations' (English out)
   const fd = new FormData();
   fd.append('file', src, name);
-  fd.append('model', 'whisper-1');
-  fd.append('response_format', 'verbose_json');
-  fd.append('timestamp_granularities[]', 'segment');
-  // The /translations endpoint does NOT accept the `language` parameter
+  fd.append('mode', endpoint === 'translations' ? 'translate' : 'transcribe');
   if (endpoint === 'transcriptions' && languageHint && languageHint !== 'auto') {
     fd.append('language', languageHint);
   }
-  // Optional context prompt — fixes code-switching and biases vocabulary
   const prompt = tcBuildWhisperPrompt(endpoint, languageHint);
   if (prompt) fd.append('prompt', prompt);
 
-  const res = await fetch('https://api.openai.com/v1/audio/' + endpoint, {
+  const res = await fetch('/api/whisper', {
     method: 'POST',
-    headers: { Authorization: 'Bearer ' + apiKey },
+    headers: { 'x-openai-key': apiKey },
     body: fd,
   });
   const data = await res.json();
