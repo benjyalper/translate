@@ -545,6 +545,15 @@
             📋 Optional: Glossary / Term Base <span id="tr-gloss-count" style="color:#64748b;font-weight:400">(none loaded)</span>
           </summary>
           <div style="margin-top:.6rem">
+            <!-- 🛡 Master kill switch: revert to pre-glossary behavior -->
+            <div id="tr-priming-banner" style="background:#0a0a14;border:1px solid var(--border);border-radius:6px;padding:.5rem .8rem;margin-bottom:.6rem;display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
+              <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;font-size:.75rem;color:#cbd5e1;flex:1">
+                <input type="checkbox" id="tr-priming-disabled" onchange="trTogglePriming(this.checked)" style="width:1rem;height:1rem;cursor:pointer"/>
+                <span>🛡 <strong>Disable all priming</strong> — revert to pre-glossary behavior (ignores glossary &amp; TM completely)</span>
+              </label>
+              <span id="tr-priming-status" style="font-size:.7rem;font-weight:600;padding:.2rem .6rem;border-radius:50px;background:rgba(52,211,153,.15);color:#34d399">ACTIVE</span>
+            </div>
+
             <!-- Saved glossary picker -->
             <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.6rem">
               <label style="font-size:.72rem;color:#94a3b8">Saved glossary:</label>
@@ -618,6 +627,20 @@
           <div style="margin-top:.7rem;font-size:.75rem;color:#64748b">
             In Trados Studio: <strong style="color:#a5b4fc">Project → Return Package</strong> to import translations.
           </div>
+
+          <!-- Post-translate actions: TM save + suggest terms -->
+          <div id="tr-postactions" style="display:none;margin-top:1rem;padding:.8rem;background:#0a0a14;border:1px solid #1f2937;border-radius:8px">
+            <div style="font-size:.78rem;color:#a5b4fc;font-weight:600;margin-bottom:.6rem">📈 Improve future translations</div>
+            <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+              <button class="tbtn" id="tr-save-tm-btn" style="width:auto;padding:.5rem 1rem;font-size:.75rem;background:#1e1b4b;color:#a5b4fc" onclick="trPromptSaveTM()">
+                💾 Save segments to TM (<span id="tr-pairs-count">0</span>)
+              </button>
+              <button class="tbtn" style="width:auto;padding:.5rem 1rem;font-size:.75rem;background:#1e1b4b;color:#a5b4fc" onclick="trSuggestTerms()">
+                🔍 Suggest glossary additions
+              </button>
+            </div>
+            <div id="tr-suggest-out" style="display:none;margin-top:.7rem;max-height:300px;overflow-y:auto;background:#0f0f17;border:1px solid var(--border);border-radius:6px;padding:.5rem"></div>
+          </div>
         </div>
 
         <!-- Error -->
@@ -659,7 +682,9 @@
             <div style="font-size:.78rem;color:#94a3b8">
               <span id="gm-meta-name" style="color:#e2e8f0;font-weight:600"></span>
               · <span id="gm-meta-count">0</span> terms
+              · <span id="gm-meta-tm" style="color:#a5b4fc">0 TM entries</span>
               · updated <span id="gm-meta-updated"></span>
+              <button class="tbtn" id="gm-clear-tm" style="display:none;width:auto;padding:.2rem .5rem;font-size:.65rem;margin-left:.5rem;background:#1a0000;color:#fca5a5;border:1px solid #7f1d1d" onclick="gmClearTM()">Clear TM</button>
             </div>
             <div style="display:flex;gap:.4rem">
               <input type="text" id="gm-search" placeholder="🔍 Filter terms…"
@@ -1579,6 +1604,7 @@ function trClearGloss() {
 }
 
 function trFindRelevantTerms(batchTexts) {
+  if (trPrimingDisabled()) return [];
   if (!trGlossary.length) return [];
   // Concatenate batch sources, lowercase, find any glossary term whose
   // source appears as a substring. Word-boundary-aware for multi-word terms.
@@ -1595,6 +1621,239 @@ function trFindRelevantTerms(batchTexts) {
     }
   }
   return relevant;
+}
+
+// ─── Kill switch ────────────────────────────────────────────
+function trPrimingDisabled() {
+  return localStorage.getItem('tradosPrimingDisabled') === '1';
+}
+function trTogglePriming(disabled) {
+  localStorage.setItem('tradosPrimingDisabled', disabled ? '1' : '0');
+  trRefreshPrimingBanner();
+}
+function trRefreshPrimingBanner() {
+  const cb = document.getElementById('tr-priming-disabled');
+  const banner = document.getElementById('tr-priming-banner');
+  const status = document.getElementById('tr-priming-status');
+  if (!cb || !banner || !status) return;
+  const disabled = trPrimingDisabled();
+  cb.checked = disabled;
+  if (disabled) {
+    banner.style.background = '#1a0000';
+    banner.style.border = '1px solid #7f1d1d';
+    status.style.background = 'rgba(248,113,113,.2)';
+    status.style.color = '#fca5a5';
+    status.textContent = 'PRE-GLOSSARY MODE';
+  } else {
+    banner.style.background = '#0a0a14';
+    banner.style.border = '1px solid var(--border)';
+    status.style.background = 'rgba(52,211,153,.15)';
+    status.style.color = '#34d399';
+    status.textContent = 'PRIMING ACTIVE';
+  }
+}
+
+// ─── TM (Translation Memory) — fuzzy match priming ─────────
+// Per-glossary TM lives inside the glossary object as `tm: [{source,target}]`.
+// Token-set similarity is fast and good enough for sentence-level matching.
+function tmTokenize(text) {
+  return (text || '').toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+}
+function tmSimilarity(a, b) {
+  // Jaccard-like with bias toward overlap size — fast, no embeddings needed.
+  const A = new Set(tmTokenize(a));
+  const B = new Set(tmTokenize(b));
+  if (A.size === 0 || B.size === 0) return 0;
+  let inter = 0;
+  for (const t of A) if (B.has(t)) inter++;
+  const union = A.size + B.size - inter;
+  // Jaccard with size-penalty for very short sentences:
+  return inter / union;
+}
+function tmFindMatches(source, tm, threshold = 0.55, topN = 3) {
+  if (!tm || !tm.length) return [];
+  const scored = [];
+  for (const entry of tm) {
+    const s = tmSimilarity(source, entry.source);
+    if (s >= threshold) scored.push({ ...entry, score: s });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, topN);
+}
+function trCurrentTM() {
+  // Returns TM array of the currently-loaded saved glossary, or [].
+  if (trPrimingDisabled()) return [];
+  const trSel = document.getElementById('tr-gloss-saved');
+  if (!trSel || !trSel.value) return [];
+  const g = gmFind(trSel.value);
+  return (g && Array.isArray(g.tm)) ? g.tm : [];
+}
+function trPromptSaveTM() {
+  const pairs = window.__trLastPairs || [];
+  if (!pairs.length) { showAdminToast('❌ No segments to save'); return; }
+  const trSel = document.getElementById('tr-gloss-saved');
+  if (!trSel || !trSel.value) { showAdminToast('❌ No glossary selected'); return; }
+  const g = gmFind(trSel.value);
+  if (!g) return;
+  const tmSize = (g.tm || []).length;
+  if (!confirm(`Save ${pairs.length} source/target pairs to "${g.name}" TM?\n\nCurrent TM size: ${tmSize}\nAfter save: up to ${tmSize + pairs.length} (duplicates skipped)\n\nThese will be used as few-shot examples to guide future translations.`)) return;
+  const added = trAppendToTM(pairs);
+  showAdminToast(`✅ Saved ${added} new pairs to TM${added < pairs.length ? ` (${pairs.length - added} duplicates skipped)` : ''}`);
+  // Disable the button so user doesn't double-save
+  const btn = document.getElementById('tr-save-tm-btn');
+  if (btn) { btn.disabled = true; btn.innerHTML = `✓ Saved ${added} pairs to TM`; }
+}
+
+async function trSuggestTerms() {
+  const apiKey = window.__trLastApiKey || getApiKey();
+  if (!apiKey) { showAdminToast('❌ API key required'); return; }
+  const pairs = window.__trLastPairs || [];
+  if (!pairs.length) { showAdminToast('❌ No translated segments to analyze'); return; }
+  const trSel = document.getElementById('tr-gloss-saved');
+  if (!trSel || !trSel.value) { showAdminToast('❌ Select a saved glossary first'); return; }
+  const g = gmFind(trSel.value);
+  if (!g) return;
+
+  const out = document.getElementById('tr-suggest-out');
+  out.style.display = 'block';
+  out.innerHTML = `<div style="color:#94a3b8;font-size:.75rem;padding:.5rem">⏳ Analyzing ${pairs.length} translated segments for recurring terminology…</div>`;
+
+  // Cap sample: 60 random segments is plenty for a suggestion pass
+  const sample = pairs.length <= 60 ? pairs : (() => {
+    const shuffled = pairs.slice().sort(() => Math.random() - 0.5);
+    return shuffled.slice(0, 60);
+  })();
+  const existingTerms = (g.terms || []).map(t => t.source.toLowerCase());
+  const existingList = existingTerms.slice(0, 100).join(', ');
+
+  const sysPrompt = `You are a translation terminology expert analyzing English→Hebrew translation segments.
+
+Your job: identify RECURRING terminology candidates that would be valuable to add to a translator's glossary.
+
+Rules:
+- Look for technical, domain-specific, or product-specific terms that appear MORE THAN ONCE in the segments
+- Skip common everyday words ("the", "and", "use", "is", etc.)
+- Skip terms already in the existing glossary (listed below)
+- Multi-word terms (e.g. "charging dock", "low battery") are preferred over single words when they form a unit
+- Output STRICT JSON only — an array of objects: {"source":"english","target":"hebrew","occurrences":N}
+- Maximum 20 suggestions
+- If no good candidates found, output: []
+
+Existing glossary terms (do NOT suggest these): ${existingList || '(none)'}`;
+
+  const userPrompt = `Analyze these translation pairs:\n\n` +
+    sample.map((p, i) => `[${i+1}]\nEN: ${p.source}\nHE: ${p.target}`).join('\n\n');
+
+  try {
+    const r = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-5.4',
+        temperature: 0.2,
+        messages: [
+          { role: 'system', content: sysPrompt },
+          { role: 'user',   content: userPrompt }
+        ]
+      })
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error?.message || ('GPT error ' + r.status));
+    let raw = (data.choices?.[0]?.message?.content || '').trim();
+    // Strip code fences if any
+    raw = raw.replace(/^```[a-z]*\n?/i, '').replace(/```$/, '').trim();
+    let suggestions;
+    try { suggestions = JSON.parse(raw); } catch { throw new Error('GPT returned non-JSON: ' + raw.slice(0, 200)); }
+    if (!Array.isArray(suggestions)) throw new Error('Expected JSON array');
+
+    if (suggestions.length === 0) {
+      out.innerHTML = `<div style="color:#94a3b8;font-size:.78rem;padding:.5rem">No new terminology candidates found. The glossary already covers the recurring terms in this batch.</div>`;
+      return;
+    }
+
+    out.innerHTML = `
+      <div style="font-size:.78rem;color:#cbd5e1;margin-bottom:.5rem">
+        ✨ <strong style="color:#a5b4fc">${suggestions.length}</strong> candidate term${suggestions.length===1?'':'s'} found. Check ones to add to "<strong style="color:#e2e8f0">${g.name}</strong>":
+      </div>
+      <div style="display:flex;flex-direction:column;gap:.3rem">
+        ${suggestions.map((s, i) => `
+          <label style="display:flex;align-items:center;gap:.5rem;padding:.4rem .5rem;background:#0a0a14;border:1px solid #1f2937;border-radius:6px;cursor:pointer;font-size:.76rem">
+            <input type="checkbox" class="tr-sugg-cb" data-idx="${i}" checked style="cursor:pointer"/>
+            <span style="flex:1;color:#e2e8f0">${(s.source||'').replace(/</g,'&lt;')}</span>
+            <span style="color:#64748b">→</span>
+            <span style="flex:1;color:#a5b4fc" dir="rtl">${(s.target||'').replace(/</g,'&lt;')}</span>
+            <span style="color:#64748b;font-size:.7rem">×${s.occurrences || '?'}</span>
+          </label>
+        `).join('')}
+      </div>
+      <div style="display:flex;gap:.4rem;margin-top:.6rem;flex-wrap:wrap">
+        <button class="tbtn" style="width:auto;padding:.4rem .9rem;font-size:.75rem" onclick="trApplySuggestions(${JSON.stringify(suggestions).replace(/"/g,'&quot;')})">✓ Add checked terms</button>
+        <button class="tbtn" style="width:auto;padding:.4rem .9rem;font-size:.75rem;background:#1e1b4b;color:#a5b4fc" onclick="document.querySelectorAll('.tr-sugg-cb').forEach(cb=>cb.checked=!cb.checked)">↔ Invert selection</button>
+        <button class="tbtn" style="width:auto;padding:.4rem .9rem;font-size:.75rem;background:#1a0000;color:#fca5a5;border:1px solid #7f1d1d" onclick="document.getElementById('tr-suggest-out').style.display='none'">✕ Discard</button>
+      </div>`;
+  } catch (e) {
+    out.innerHTML = `<div style="color:#fca5a5;font-size:.78rem;padding:.5rem">❌ ${e.message}</div>`;
+  }
+}
+
+function trApplySuggestions(suggestions) {
+  const trSel = document.getElementById('tr-gloss-saved');
+  if (!trSel || !trSel.value) return;
+  const checkboxes = document.querySelectorAll('.tr-sugg-cb');
+  const accepted = [];
+  checkboxes.forEach(cb => {
+    if (cb.checked) {
+      const idx = parseInt(cb.dataset.idx, 10);
+      if (suggestions[idx]) accepted.push({ source: suggestions[idx].source, target: suggestions[idx].target });
+    }
+  });
+  if (accepted.length === 0) { showAdminToast('No terms selected'); return; }
+  const store = gmLoadStore();
+  const g = store.glossaries.find(x => x.id === trSel.value);
+  if (!g) return;
+  const existing = new Set(g.terms.map(t => t.source.toLowerCase()));
+  let added = 0;
+  for (const t of accepted) {
+    if (!existing.has(t.source.toLowerCase())) {
+      g.terms.push(t);
+      existing.add(t.source.toLowerCase());
+      added++;
+    }
+  }
+  g.updatedAt = new Date().toISOString();
+  gmSaveStore(store);
+  gmRefreshDropdowns();
+  // Refresh the live trGlossary if this is the active one
+  trGlossary = g.terms.slice();
+  trUpdateGlossUI();
+  showAdminToast(`✅ Added ${added} new terms to "${g.name}"`);
+  document.getElementById('tr-suggest-out').style.display = 'none';
+}
+
+function trAppendToTM(pairs) {
+  // pairs: [{source, target}] - typically the segments that were just translated.
+  const trSel = document.getElementById('tr-gloss-saved');
+  if (!trSel || !trSel.value) return false;
+  const store = gmLoadStore();
+  const g = store.glossaries.find(x => x.id === trSel.value);
+  if (!g) return false;
+  if (!Array.isArray(g.tm)) g.tm = [];
+  // De-dupe by exact source match
+  const existing = new Set(g.tm.map(t => t.source));
+  let added = 0;
+  for (const p of pairs) {
+    if (!p.source || !p.target || existing.has(p.source)) continue;
+    g.tm.push({ source: p.source, target: p.target });
+    existing.add(p.source);
+    added++;
+  }
+  g.updatedAt = new Date().toISOString();
+  gmSaveStore(store);
+  gmRefreshDropdowns();
+  return added;
 }
 
 // ─── Glossary Manager: persistent storage in localStorage ──
@@ -1726,6 +1985,9 @@ function gmRenderEditor() {
 
   document.getElementById('gm-meta-name').textContent = g.name;
   document.getElementById('gm-meta-count').textContent = g.terms.length;
+  const tmSize = (g.tm || []).length;
+  document.getElementById('gm-meta-tm').textContent = tmSize + ' TM entries';
+  document.getElementById('gm-clear-tm').style.display = tmSize > 0 ? 'inline-flex' : 'none';
   const updated = new Date(g.updatedAt);
   document.getElementById('gm-meta-updated').textContent = updated.toLocaleString();
   document.getElementById('gm-import-target').textContent = g.name;
@@ -1974,7 +2236,23 @@ function gmMergeIntoCurrent(newTerms) {
   showAdminToast(`✅ Added ${added} new terms${skipped ? ` · ${skipped} duplicates skipped` : ''}`);
 }
 
-// Initialize on page load — populate dropdowns and auto-load last-active glossary
+function gmClearTM() {
+  const g = gmCurrentId ? gmFind(gmCurrentId) : null;
+  if (!g) return;
+  const size = (g.tm || []).length;
+  if (size === 0) return;
+  if (!confirm(`Clear all ${size} TM entries from "${g.name}"?\n\nGlossary terms will be kept. Only the sentence-level translation memory will be erased. This cannot be undone.`)) return;
+  const store = gmLoadStore();
+  const target = store.glossaries.find(x => x.id === gmCurrentId);
+  target.tm = [];
+  target.updatedAt = new Date().toISOString();
+  gmSaveStore(store);
+  gmRenderEditor();
+  showAdminToast(`🗑 Cleared ${size} TM entries`);
+}
+
+// Initialize on page load — populate dropdowns, refresh kill-switch banner,
+// and auto-load last-active glossary
 (function gmInit() {
   // Wait until DOM is fully parsed
   if (document.readyState === 'loading') {
@@ -1982,6 +2260,7 @@ function gmMergeIntoCurrent(newTerms) {
     return;
   }
   gmRefreshDropdowns();
+  trRefreshPrimingBanner();
   const store = gmLoadStore();
   if (store.activeId && gmFind(store.activeId)) {
     const trSel = document.getElementById('tr-gloss-saved');
@@ -1997,12 +2276,37 @@ async function trTranslateBatch(texts, apiKey, model) {
   const chosen = model || (document.getElementById('tr-model') && document.getElementById('tr-model').value) || 'gpt-5.4-mini';
   const numbered = texts.map((t, i) => `${i+1}. ${t}`).join('\n');
 
-  // Build base system prompt + optional glossary block
+  // Build base system prompt + optional glossary + optional TM examples
+  // If priming is disabled, this prompt stays IDENTICAL to the pre-glossary version.
   let systemPrompt = 'You are a professional translator. Translate each numbered item into Hebrew (he-IL).\nRules:\n- Preserve ALL placeholders exactly: {{TAG_0}}, {{TAG_1}}, etc.\n- Output ONLY the numbered translations, one per line, same order\n- Use formal Hebrew suitable for professional documents\n- No explanations or notes';
+
+  // 1) Glossary terms — only those that actually appear in this batch
   const relevant = trFindRelevantTerms(texts);
   if (relevant.length > 0) {
     systemPrompt += '\n\nGLOSSARY — these terms MUST be translated exactly as shown when they appear in the source:\n' +
       relevant.map(t => `- "${t.source}" → "${t.target}"`).join('\n');
+  }
+
+  // 2) TM fuzzy matches — up to 3 closest past translations per segment.
+  // Combined across the whole batch, deduped, capped to keep token cost sane.
+  const tm = trCurrentTM();
+  if (tm.length > 0) {
+    const seenSrc = new Set();
+    const examples = [];
+    for (const txt of texts) {
+      const matches = tmFindMatches(txt, tm, 0.55, 3);
+      for (const m of matches) {
+        if (seenSrc.has(m.source)) continue;
+        seenSrc.add(m.source);
+        examples.push(m);
+        if (examples.length >= 12) break; // cap total examples per batch
+      }
+      if (examples.length >= 12) break;
+    }
+    if (examples.length > 0) {
+      systemPrompt += '\n\nTRANSLATION MEMORY — examples of how similar past sentences were translated (use the same style, register, and terminology):\n' +
+        examples.map(e => `EN: ${e.source}\nHE: ${e.target}`).join('\n\n');
+    }
   }
 
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -2028,19 +2332,24 @@ async function trTranslateBatch(texts, apiKey, model) {
 async function trProcessXliff(content, apiKey, onProgress, model) {
   const segs  = trExtractSegments(content);
   const empty = segs.filter(s => !s.targetText && trIsTranslatable(s.sourceText));
-  if (empty.length === 0) return { translated: 0, total: segs.length, content };
+  if (empty.length === 0) return { translated: 0, total: segs.length, content, pairs: [] };
   const BATCH = 20;
   let translated = 0;
+  const pairs = []; // captured source/target pairs for optional TM save
   for (let i = 0; i < empty.length; i += BATCH) {
     const batch = empty.slice(i, i + BATCH);
     if (onProgress) onProgress(i, empty.length);
     const translations = await trTranslateBatch(batch.map(s => s.sourceText), apiKey, model);
     for (let j = 0; j < batch.length; j++) {
-      if (translations[j]) { content = trInsertTranslation(content, batch[j], translations[j]); translated++; }
+      if (translations[j]) {
+        content = trInsertTranslation(content, batch[j], translations[j]);
+        pairs.push({ source: batch[j].sourceText, target: translations[j] });
+        translated++;
+      }
     }
     if (i + BATCH < empty.length) await new Promise(r => setTimeout(r, 500));
   }
-  return { translated, total: segs.length, content };
+  return { translated, total: segs.length, content, pairs };
 }
 
 async function trTranslate() {
@@ -2093,18 +2402,23 @@ async function trTranslate() {
     await Promise.all(copyPromises);
 
     let totalTranslated = 0, totalSegments = 0;
+    const allPairs = []; // collected source/target pairs across all files (for TM save)
     for (let fi = 0; fi < xliffEntries.length; fi++) {
       const { path: relPath, entry } = xliffEntries[fi];
       const rawContent = await entry.async('string');
-      const { translated, total, content: newContent } = await trProcessXliff(rawContent, apiKey, (done, all) => {
+      const { translated, total, content: newContent, pairs } = await trProcessXliff(rawContent, apiKey, (done, all) => {
         const base = 20 + (fi / xliffEntries.length) * 70;
         const inc  = (done / all) * (70 / xliffEntries.length);
         bar.style.width = (base + inc) + '%';
         txt.textContent = `File ${fi+1}/${xliffEntries.length} (${trModel}): segments ${done}–${Math.min(done+20,all)} of ${all}…`;
       }, trModel);
       totalTranslated += translated; totalSegments += total;
+      if (pairs && pairs.length) allPairs.push(...pairs);
       outZip.file(relPath, newContent);
     }
+    // Stash for post-actions (TM save, term suggestions)
+    window.__trLastPairs = allPairs;
+    window.__trLastApiKey = apiKey;
 
     bar.style.width = '95%'; txt.textContent = 'Building return package…';
     const outBlob = await outZip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
@@ -2128,6 +2442,19 @@ async function trTranslate() {
     dl.href = outUrl;
     dl.download = trFile.name.replace(/\.sdlppx$/i,'') + '_TRANSLATED.sdlrpx';
     document.getElementById('tr-results').style.display = 'block';
+
+    // Post-actions: show only if a saved glossary is selected AND priming isn't disabled
+    const trSel = document.getElementById('tr-gloss-saved');
+    const hasActiveGloss = trSel && trSel.value && !trPrimingDisabled();
+    const pa = document.getElementById('tr-postactions');
+    if (hasActiveGloss && allPairs.length > 0) {
+      document.getElementById('tr-pairs-count').textContent = allPairs.length;
+      pa.style.display = 'block';
+      document.getElementById('tr-suggest-out').style.display = 'none';
+      document.getElementById('tr-suggest-out').innerHTML = '';
+    } else {
+      pa.style.display = 'none';
+    }
 
   } catch(e) {
     prog.classList.remove('show');
