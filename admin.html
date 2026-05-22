@@ -807,9 +807,11 @@
           </div>
         </details>
 
-        <!-- Target lang (auto-detected from package after upload) -->
+        <!-- Translate-to: user picks the language GPT outputs. Persists in
+             localStorage; defaults to he-IL. Independent of the package's
+             internal target folder (shown separately below). -->
         <div class="tlang-row" style="margin-top:.6rem;align-items:center;flex-wrap:wrap">
-          <span class="tlang-lbl">Target&nbsp;lang:</span>
+          <span class="tlang-lbl">Translate&nbsp;to:</span>
           <select id="tr-lang-select" onchange="trSetLang(this.value)"
             style="flex:1;min-width:200px;padding:.45rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.8rem">
             <option value="he-IL" selected>🇮🇱 he-IL (Hebrew)</option>
@@ -829,8 +831,9 @@
             <option value="he">he (Hebrew, generic)</option>
             <option value="iw-IL">iw-IL (Hebrew, legacy code)</option>
           </select>
-          <span id="tr-lang-detected" style="font-size:.7rem;color:#34d399;margin-left:.4rem"></span>
         </div>
+        <!-- Info row: shows what's in the package vs what you'll translate to -->
+        <div id="tr-lang-info" style="display:none;margin-top:.4rem;padding:.45rem .6rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;font-size:.72rem;color:#94a3b8;line-height:1.45"></div>
 
         <!-- Quality tier -->
         <div class="tlang-row" style="margin-top:.5rem">
@@ -3254,7 +3257,15 @@ function tcFmt(sec) {
 // ═══════════════════════════════════════════════════════════════
 //  🔄 TRADOS — in-browser via JSZip + GPT. No server needed.
 // ═══════════════════════════════════════════════════════════════
-let trFile = null, trLang = 'he-IL';
+let trFile = null;
+// trLang = the language GPT translates INTO (user choice, persisted)
+let trLang = (typeof localStorage !== 'undefined' && localStorage.getItem('tradosTargetLang')) || 'he-IL';
+// trDetectedFolder = the folder INSIDE the package that holds .sdlxliff
+// files (auto-detected from the zip). Independent of trLang — e.g. a
+// package whose target folder is "fr-FR" can still be translated TO
+// Hebrew if the user picks he-IL.
+let trDetectedFolder = null;
+let trDetectedAllLangs = [];
 
 // ISO language codes → human-readable names used in GPT prompts and UI.
 // Extend freely; codes not in this map fall back to the raw code.
@@ -3281,11 +3292,29 @@ function trLangName(code) {
   return TR_LANG_NAMES[code] || TR_LANG_NAMES[code.split('-')[0]] || code;
 }
 
-// Called by the <select onchange="">. Updates the in-memory target lang
-// and refreshes any UI cues that depend on it.
+// Called by the <select onchange="">. Persists user's choice so it
+// becomes the default on future sessions, then refreshes the info row.
 function trSetLang(lang) {
   if (!lang) return;
   trLang = lang;
+  try { localStorage.setItem('tradosTargetLang', lang); } catch {}
+  trRefreshLangInfo();
+}
+
+// Render the "Package folder: X • Translate to: Y" info row.
+function trRefreshLangInfo() {
+  const info = document.getElementById('tr-lang-info');
+  if (!info) return;
+  if (!trDetectedFolder) { info.style.display = 'none'; info.innerHTML = ''; return; }
+  const folderName = trLangName(trDetectedFolder);
+  const targetName = trLangName(trLang);
+  const others = trDetectedAllLangs.filter(l => l !== trDetectedFolder);
+  const mismatch = trDetectedFolder !== trLang;
+  info.style.display = 'block';
+  info.innerHTML = `
+    <div><span style="color:#a5b4fc">📁 Package target folder:</span> <strong style="color:#e2e8f0">${trDetectedFolder}</strong> <span style="color:#64748b">(${folderName})</span>${others.length ? ' · other folders: ' + others.join(', ') : ''}</div>
+    <div style="margin-top:.25rem"><span style="color:#a5b4fc">🌐 GPT will translate to:</span> <strong style="color:#34d399">${trLang}</strong> <span style="color:#64748b">(${targetName})</span></div>
+    ${mismatch ? `<div style="margin-top:.35rem;padding:.35rem .5rem;background:#1a1306;border-left:3px solid #f59e0b;color:#fcd34d;font-size:.68rem;border-radius:4px">⚠️ The package is set up for <strong>${trDetectedFolder}</strong> but you've chosen to translate to <strong>${trLang}</strong>. Output will be ${targetName} text saved into the ${trDetectedFolder} folder, with the SDLXLIFF target-language attribute updated to <code style="background:#0a0a14;padding:0 3px;border-radius:2px">${trLang}</code>.</div>` : ''}`;
 }
 
 // Look inside an .sdlppx (zip) for top-level target-language folders
@@ -3328,26 +3357,13 @@ function trPickTargetLang(langs) {
   return (notEn[0] || langs[0]);
 }
 
-// Highlight the autodetected language in the dropdown + show a "✓ detected" hint.
-function trApplyDetectedLang(picked, allLangs) {
-  const sel  = document.getElementById('tr-lang-select');
-  const hint = document.getElementById('tr-lang-detected');
-  if (!picked) { if (hint) hint.textContent = ''; return; }
-  trLang = picked;
-  if (sel) {
-    // If the detected lang isn't in the dropdown, add it on the fly
-    const found = [...sel.options].some(o => o.value === picked);
-    if (!found) {
-      const opt = document.createElement('option');
-      opt.value = picked;
-      opt.textContent = `${picked} (${trLangName(picked)}) — detected`;
-      sel.insertBefore(opt, sel.firstChild);
-    }
-    sel.value = picked;
-  }
-  if (hint) {
-    hint.textContent = `✓ Auto-detected ${picked} (${trLangName(picked)})${allLangs && allLangs.length > 1 ? ' from ' + allLangs.join(', ') : ''}`;
-  }
+// Record the auto-detected folder name. Does NOT change the user's
+// translation target — that stays whatever they've configured (default
+// he-IL). Refreshes the info row so the user sees the relationship.
+function trApplyDetectedFolder(picked, allLangs) {
+  trDetectedFolder = picked || null;
+  trDetectedAllLangs = allLangs || [];
+  trRefreshLangInfo();
 }
 
 async function trOnFile(input) {
@@ -3355,14 +3371,25 @@ async function trOnFile(input) {
   const lbl = document.getElementById('tr-file-label');
   if (!trFile) return;
   lbl.style.display = 'block';
-  lbl.textContent   = `📦 ${trFile.name} (${(trFile.size/1024/1024).toFixed(2)} MB) — scanning for target language…`;
+  lbl.textContent   = `📦 ${trFile.name} (${(trFile.size/1024/1024).toFixed(2)} MB) — scanning for target folder…`;
   document.getElementById('tr-btn').disabled = false;
-  // Auto-detect target language by inspecting the .sdlppx zip structure
+  // Auto-detect target folder by inspecting the .sdlppx zip structure.
+  // Note: we DON'T change trLang here — that's the user's persistent choice.
   const detected = await trDetectTargetLangs(trFile);
   const picked   = trPickTargetLang(detected);
-  if (picked) trApplyDetectedLang(picked, detected);
+  trApplyDetectedFolder(picked, detected);
   lbl.textContent = `📦 ${trFile.name} (${(trFile.size/1024/1024).toFixed(2)} MB)`;
 }
+
+// Restore the user's last-used target language into the dropdown on page load.
+(function trRestoreLangFromStorage(){
+  const apply = () => {
+    const sel = document.getElementById('tr-lang-select');
+    if (sel && trLang) sel.value = trLang;
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', apply);
+  else apply();
+})();
 
 (function(){
   const dz = document.getElementById('tr-drop');
@@ -3479,6 +3506,18 @@ function trValidateXml(xml) {
   } catch (e) {
     return { ok: false, message: e.message };
   }
+}
+
+// Replace the target-language attribute in <file …> elements so the
+// SDLXLIFF header advertises the language we actually translated INTO.
+// Without this, a French-set-up file containing Hebrew text would still
+// claim to be French — Trados (and the PM's TM) would treat the Hebrew
+// content as French.
+function trRewriteTargetLangAttr(xml, newLang) {
+  if (!newLang || !xml) return xml;
+  // Match: target-language="…" or target-language='…' (within the file header)
+  return xml.replace(/(<file\b[^>]*\btarget-language=)(["'])([^"']*)\2/gi,
+    (m, pre, q) => pre + q + newLang + q);
 }
 
 // ─── Glossary helpers ────────────────────────────────────────
@@ -4448,25 +4487,42 @@ async function trTranslate() {
     const zip = await JSZip.loadAsync(arrayBuf);
     bar.style.width = '15%';
 
-    // Find SDLXLIFF files in target lang folder
+    // Find SDLXLIFF files. PRIORITY:
+    //   1. Files inside the auto-detected target folder (trDetectedFolder)
+    //   2. Files inside a folder matching trLang (the user's translation target)
+    //   3. Any .sdlxliff in the zip (fallback)
+    // This way a French package translated TO Hebrew still finds its files
+    // (they live in fr-FR/) and writes the Hebrew output back to the same
+    // location.
     const langPrefix = trLang.split('-')[0];
-    const xliffEntries = [];
+    const candidates = [];
     zip.forEach((relPath, entry) => {
       if (!entry.dir && relPath.endsWith('.sdlxliff')) {
-        const topDir = relPath.split('/')[0];
-        if (topDir === trLang || topDir === langPrefix || topDir.toLowerCase().startsWith(langPrefix)) {
-          xliffEntries.push({ path: relPath, entry });
-        }
+        candidates.push({ path: relPath, entry, topDir: relPath.split('/')[0] });
       }
     });
+
+    let xliffEntries = [];
+    if (trDetectedFolder) {
+      xliffEntries = candidates.filter(c => c.topDir === trDetectedFolder);
+    }
+    if (xliffEntries.length === 0) {
+      xliffEntries = candidates.filter(c =>
+        c.topDir === trLang || c.topDir === langPrefix || c.topDir.toLowerCase().startsWith(langPrefix)
+      );
+    }
+    if (xliffEntries.length === 0 && candidates.length > 0) {
+      // Last resort: any .sdlxliff. Better than failing.
+      xliffEntries = candidates;
+    }
 
     if (xliffEntries.length === 0) {
       const dirs = new Set();
       zip.forEach((p) => dirs.add(p.split('/')[0]));
-      throw new Error(`No .sdlxliff files found for "${trLang}". Available: ${[...dirs].join(', ')}`);
+      throw new Error(`No .sdlxliff files found in the package. Available folders: ${[...dirs].join(', ')}`);
     }
 
-    txt.textContent = `Found ${xliffEntries.length} SDLXLIFF file(s). Translating with GPT-4o…`;
+    txt.textContent = `Found ${xliffEntries.length} SDLXLIFF file(s) in "${xliffEntries[0].topDir}". Translating to ${trLangName(trLang)}…`;
     bar.style.width = '20%';
 
     // Copy all original files into output zip
@@ -4502,7 +4558,12 @@ async function trTranslate() {
       toTranslateWordsAll += toTranslateWords    || 0;
       translatedWordsAll  += translatedWords     || 0;
       if (pairs && pairs.length) allPairs.push(...pairs);
-      outZip.file(relPath, newContent);
+      // Rewrite the SDLXLIFF target-language attribute to match what we
+      // actually translated INTO. Otherwise Trados sees "fr-FR" in the
+      // file header but the segments contain Hebrew (or vice versa) and
+      // either complains or polls TM matches against the wrong language.
+      const finalContent = trRewriteTargetLangAttr(newContent, trLang);
+      outZip.file(relPath, finalContent);
     }
     // Stash for post-actions (TM save, term suggestions)
     window.__trLastPairs = allPairs;
