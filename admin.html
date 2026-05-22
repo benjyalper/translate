@@ -807,12 +807,29 @@
           </div>
         </details>
 
-        <!-- Target lang -->
-        <div class="tlang-row" style="margin-top:.6rem">
+        <!-- Target lang (auto-detected from package after upload) -->
+        <div class="tlang-row" style="margin-top:.6rem;align-items:center;flex-wrap:wrap">
           <span class="tlang-lbl">Target&nbsp;lang:</span>
-          <button class="tlang-btn active" onclick="trSetLang('he-IL',this)">🇮🇱 he-IL</button>
-          <button class="tlang-btn"        onclick="trSetLang('he',this)">he</button>
-          <button class="tlang-btn"        onclick="trSetLang('iw-IL',this)">iw-IL</button>
+          <select id="tr-lang-select" onchange="trSetLang(this.value)"
+            style="flex:1;min-width:200px;padding:.45rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.8rem">
+            <option value="he-IL" selected>🇮🇱 he-IL (Hebrew)</option>
+            <option value="fr-FR">🇫🇷 fr-FR (French)</option>
+            <option value="es-ES">🇪🇸 es-ES (Spanish)</option>
+            <option value="de-DE">🇩🇪 de-DE (German)</option>
+            <option value="it-IT">🇮🇹 it-IT (Italian)</option>
+            <option value="pt-BR">🇧🇷 pt-BR (Portuguese, Brazil)</option>
+            <option value="pt-PT">🇵🇹 pt-PT (Portuguese, Portugal)</option>
+            <option value="ru-RU">🇷🇺 ru-RU (Russian)</option>
+            <option value="ja-JP">🇯🇵 ja-JP (Japanese)</option>
+            <option value="zh-CN">🇨🇳 zh-CN (Chinese, Simplified)</option>
+            <option value="zh-TW">🇹🇼 zh-TW (Chinese, Traditional)</option>
+            <option value="ko-KR">🇰🇷 ko-KR (Korean)</option>
+            <option value="ar-SA">🇸🇦 ar-SA (Arabic)</option>
+            <option value="en-US">🇺🇸 en-US (English)</option>
+            <option value="he">he (Hebrew, generic)</option>
+            <option value="iw-IL">iw-IL (Hebrew, legacy code)</option>
+          </select>
+          <span id="tr-lang-detected" style="font-size:.7rem;color:#34d399;margin-left:.4rem"></span>
         </div>
 
         <!-- Quality tier -->
@@ -3235,24 +3252,116 @@ function tcFmt(sec) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  🔄 TRADOS — in-browser via JSZip + GPT-4o. No server needed.
+//  🔄 TRADOS — in-browser via JSZip + GPT. No server needed.
 // ═══════════════════════════════════════════════════════════════
 let trFile = null, trLang = 'he-IL';
 
-function trSetLang(lang, el) {
-  trLang = lang;
-  el.closest('.tlang-row').querySelectorAll('.tlang-btn').forEach(b => b.classList.remove('active'));
-  el.classList.add('active');
+// ISO language codes → human-readable names used in GPT prompts and UI.
+// Extend freely; codes not in this map fall back to the raw code.
+const TR_LANG_NAMES = {
+  'he-IL': 'Hebrew', 'he': 'Hebrew', 'iw-IL': 'Hebrew',
+  'en-US': 'English', 'en-GB': 'English', 'en': 'English',
+  'fr-FR': 'French', 'fr-CA': 'French (Canadian)', 'fr': 'French',
+  'es-ES': 'Spanish', 'es-MX': 'Spanish (Mexican)', 'es': 'Spanish',
+  'de-DE': 'German', 'de-AT': 'German', 'de': 'German',
+  'it-IT': 'Italian', 'it': 'Italian',
+  'pt-BR': 'Brazilian Portuguese', 'pt-PT': 'European Portuguese', 'pt': 'Portuguese',
+  'ru-RU': 'Russian', 'ru': 'Russian',
+  'ja-JP': 'Japanese', 'ja': 'Japanese',
+  'zh-CN': 'Simplified Chinese', 'zh-TW': 'Traditional Chinese', 'zh-Hans': 'Simplified Chinese', 'zh-Hant': 'Traditional Chinese', 'zh': 'Chinese',
+  'ko-KR': 'Korean', 'ko': 'Korean',
+  'ar-SA': 'Arabic', 'ar': 'Arabic',
+  'tr-TR': 'Turkish', 'pl-PL': 'Polish', 'nl-NL': 'Dutch', 'sv-SE': 'Swedish',
+  'cs-CZ': 'Czech', 'hu-HU': 'Hungarian', 'ro-RO': 'Romanian', 'uk-UA': 'Ukrainian',
+  'el-GR': 'Greek', 'fi-FI': 'Finnish', 'da-DK': 'Danish', 'no-NO': 'Norwegian',
+  'th-TH': 'Thai', 'vi-VN': 'Vietnamese', 'id-ID': 'Indonesian', 'hi-IN': 'Hindi',
+};
+function trLangName(code) {
+  if (!code) return 'the target language';
+  return TR_LANG_NAMES[code] || TR_LANG_NAMES[code.split('-')[0]] || code;
 }
 
-function trOnFile(input) {
+// Called by the <select onchange="">. Updates the in-memory target lang
+// and refreshes any UI cues that depend on it.
+function trSetLang(lang) {
+  if (!lang) return;
+  trLang = lang;
+}
+
+// Look inside an .sdlppx (zip) for top-level target-language folders
+// containing .sdlxliff files. Returns the list of locale-looking codes,
+// e.g. ['fr-FR'] or ['he-IL', 'iw-IL'].
+async function trDetectTargetLangs(file) {
+  try {
+    const buf = await file.arrayBuffer();
+    const zip = await JSZip.loadAsync(buf);
+    const langDirs = new Map(); // code → count of .sdlxliff in it
+    zip.forEach((relPath, entry) => {
+      if (entry.dir) return;
+      if (!/\.sdlxliff$/i.test(relPath)) return;
+      const parts = relPath.split('/');
+      if (parts.length < 2) return;
+      const top = parts[0];
+      // Locale folder pattern: xx, xx-XX, xx-Yyyy (e.g. he-IL, fr-FR, zh-Hans).
+      // Always allow "en-US" style. Ignore non-locale dirs like Reports, Tm, Termbases.
+      if (!/^[a-z]{2,3}(-[A-Za-z]{2,4})?$/.test(top)) return;
+      // Exclude "en-US" (source) only if there's another candidate — done below.
+      langDirs.set(top, (langDirs.get(top) || 0) + 1);
+    });
+    return [...langDirs.keys()];
+  } catch (e) {
+    console.warn('trDetectTargetLangs failed:', e.message);
+    return [];
+  }
+}
+
+// Score the candidate languages, pick the best guess (i.e. not the source).
+// Heuristic: if exactly two are present, the source is typically en-US;
+// the OTHER is the target.
+function trPickTargetLang(langs) {
+  if (!langs || !langs.length) return null;
+  if (langs.length === 1) return langs[0];
+  // Prefer anything that isn't English when English is one of them
+  const notEn = langs.filter(l => !/^en(-|$)/i.test(l));
+  if (notEn.length === 1) return notEn[0];
+  // Otherwise the lexicographically-first non-en candidate
+  return (notEn[0] || langs[0]);
+}
+
+// Highlight the autodetected language in the dropdown + show a "✓ detected" hint.
+function trApplyDetectedLang(picked, allLangs) {
+  const sel  = document.getElementById('tr-lang-select');
+  const hint = document.getElementById('tr-lang-detected');
+  if (!picked) { if (hint) hint.textContent = ''; return; }
+  trLang = picked;
+  if (sel) {
+    // If the detected lang isn't in the dropdown, add it on the fly
+    const found = [...sel.options].some(o => o.value === picked);
+    if (!found) {
+      const opt = document.createElement('option');
+      opt.value = picked;
+      opt.textContent = `${picked} (${trLangName(picked)}) — detected`;
+      sel.insertBefore(opt, sel.firstChild);
+    }
+    sel.value = picked;
+  }
+  if (hint) {
+    hint.textContent = `✓ Auto-detected ${picked} (${trLangName(picked)})${allLangs && allLangs.length > 1 ? ' from ' + allLangs.join(', ') : ''}`;
+  }
+}
+
+async function trOnFile(input) {
   trFile = input.files[0];
   const lbl = document.getElementById('tr-file-label');
-  if (trFile) {
-    lbl.style.display = 'block';
-    lbl.textContent   = `📦 ${trFile.name} (${(trFile.size/1024/1024).toFixed(2)} MB)`;
-    document.getElementById('tr-btn').disabled = false;
-  }
+  if (!trFile) return;
+  lbl.style.display = 'block';
+  lbl.textContent   = `📦 ${trFile.name} (${(trFile.size/1024/1024).toFixed(2)} MB) — scanning for target language…`;
+  document.getElementById('tr-btn').disabled = false;
+  // Auto-detect target language by inspecting the .sdlppx zip structure
+  const detected = await trDetectTargetLangs(trFile);
+  const picked   = trPickTargetLang(detected);
+  if (picked) trApplyDetectedLang(picked, detected);
+  lbl.textContent = `📦 ${trFile.name} (${(trFile.size/1024/1024).toFixed(2)} MB)`;
 }
 
 (function(){
@@ -3264,10 +3373,8 @@ function trOnFile(input) {
     e.preventDefault(); dz.classList.remove('drag-over');
     const f = e.dataTransfer.files[0];
     if (f) {
-      trFile = f;
-      document.getElementById('tr-file-label').style.display = 'block';
-      document.getElementById('tr-file-label').textContent   = `📦 ${f.name} (${(f.size/1024/1024).toFixed(2)} MB)`;
-      document.getElementById('tr-btn').disabled = false;
+      // Route through trOnFile so detection runs
+      trOnFile({ files: [f] });
     }
   });
 })();
@@ -4201,9 +4308,17 @@ async function trTranslateBatch(texts, apiKey, model) {
   const chosen = model || (document.getElementById('tr-model') && document.getElementById('tr-model').value) || 'gpt-5.4-mini';
   const numbered = texts.map((t, i) => `${i+1}. ${t}`).join('\n');
 
-  // Build base system prompt + optional glossary + optional TM examples
-  // If priming is disabled, this prompt stays IDENTICAL to the pre-glossary version.
-  let systemPrompt = 'You are a professional translator. Translate each numbered item into Hebrew (he-IL).\nRules:\n- Preserve ALL placeholders exactly: {{TAG_0}}, {{TAG_1}}, etc.\n- Output ONLY the numbered translations, one per line, same order\n- Use formal Hebrew suitable for professional documents\n- No explanations or notes';
+  // Build base system prompt — uses the current target language (auto-detected
+  // from the .sdlppx if possible, else whatever the user picked).
+  const targetCode = trLang || 'he-IL';
+  const targetName = trLangName(targetCode);
+  let systemPrompt =
+    `You are a professional translator. Translate each numbered item into ${targetName} (${targetCode}).
+Rules:
+- Preserve ALL placeholders exactly: {{TAG_0}}, {{TAG_1}}, etc.
+- Output ONLY the numbered translations, one per line, same order
+- Use formal ${targetName} suitable for professional documents
+- No explanations or notes`;
 
   // 1) Glossary terms — only those that actually appear in this batch
   const relevant = trFindRelevantTerms(texts);
