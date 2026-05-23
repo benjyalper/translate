@@ -846,20 +846,6 @@
           </select>
         </div>
 
-        <!-- Save folder (File System Access API; Chrome/Edge/Brave) -->
-        <div class="tlang-row" style="margin-top:.5rem;align-items:center;flex-wrap:wrap">
-          <span class="tlang-lbl">Save&nbsp;to:</span>
-          <button class="tbtn" id="tr-pick-folder" onclick="trPickSaveFolder()"
-            style="width:auto;padding:.4rem .8rem;font-size:.75rem;background:#1e1b4b;color:#a5b4fc">
-            📁 Pick folder…
-          </button>
-          <span id="tr-folder-display" style="font-size:.72rem;color:#64748b;flex:1;min-width:200px">Default Downloads folder (browser-chosen)</span>
-          <button class="tbtn" id="tr-clear-folder" onclick="trClearSaveFolder()"
-            style="display:none;width:auto;padding:.3rem .6rem;font-size:.68rem;background:#1a0000;color:#fca5a5;border:1px solid #7f1d1d">
-            ✕ Use Downloads
-          </button>
-        </div>
-
         <button class="tbtn gold" id="tr-btn" onclick="trTranslate()" disabled>🚀 Translate</button>
 
         <!-- Progress -->
@@ -3271,80 +3257,6 @@ function tcFmt(sec) {
 // ═══════════════════════════════════════════════════════════════
 //  🔄 TRADOS — in-browser via JSZip + GPT. No server needed.
 // ═══════════════════════════════════════════════════════════════
-
-// ─── Save-to-folder helpers (File System Access API) ─────────
-// Chrome / Edge / Brave support window.showDirectoryPicker(). Firefox
-// and Safari don't yet — we fall back to the regular browser download
-// in that case.
-let trSaveFolderHandle = null;
-let trSaveFolderName   = '';
-
-async function trPickSaveFolder() {
-  if (typeof window.showDirectoryPicker !== 'function') {
-    showAdminToast('❌ Your browser doesn\'t support folder picking — use Chrome, Edge, or Brave (or change Chrome\'s default Downloads folder in Settings).');
-    return;
-  }
-  try {
-    // startIn: 'documents' opens the picker in Documents on first call
-    const handle = await window.showDirectoryPicker({ mode: 'readwrite', startIn: 'documents' });
-    // Ask for persistent write permission (per session — browsers won't keep
-    // this across page reloads)
-    const perm = await handle.requestPermission?.({ mode: 'readwrite' });
-    if (perm === 'denied') {
-      showAdminToast('❌ Folder permission denied');
-      return;
-    }
-    trSaveFolderHandle = handle;
-    trSaveFolderName   = handle.name || '(picked folder)';
-    document.getElementById('tr-folder-display').innerHTML =
-      `📁 <strong style="color:#34d399">${esc(trSaveFolderName)}</strong> <span style="color:#64748b">— files save here automatically</span>`;
-    document.getElementById('tr-clear-folder').style.display = 'inline-flex';
-    showAdminToast(`✅ Files will save to "${trSaveFolderName}"`);
-  } catch (e) {
-    if (e.name === 'AbortError') return; // user cancelled, no toast needed
-    showAdminToast('❌ ' + e.message);
-  }
-}
-
-function trClearSaveFolder() {
-  trSaveFolderHandle = null;
-  trSaveFolderName   = '';
-  document.getElementById('tr-folder-display').textContent = 'Default Downloads folder (browser-chosen)';
-  document.getElementById('tr-clear-folder').style.display = 'none';
-}
-
-// Write a Blob directly into the user-picked folder using FSA API.
-// Returns the actual filename used (with any (1), (2) suffix if a file with
-// the same name already exists, so old runs don't get overwritten silently).
-async function trSaveBlobToFolder(folderHandle, suggestedName, blob) {
-  // Avoid overwriting an existing file by appending a numeric suffix
-  let name = suggestedName;
-  let attempt = 0;
-  while (attempt < 50) {
-    try {
-      // Check if it already exists
-      try {
-        await folderHandle.getFileHandle(name, { create: false });
-        // Exists → bump the suffix
-        attempt++;
-        const dot = suggestedName.lastIndexOf('.');
-        const base = dot === -1 ? suggestedName : suggestedName.slice(0, dot);
-        const ext  = dot === -1 ? ''            : suggestedName.slice(dot);
-        name = `${base} (${attempt})${ext}`;
-        continue;
-      } catch { /* doesn't exist → ok to create */ }
-      const fh = await folderHandle.getFileHandle(name, { create: true });
-      const writable = await fh.createWritable();
-      await writable.write(blob);
-      await writable.close();
-      return name;
-    } catch (e) {
-      throw new Error('Could not save to folder: ' + e.message);
-    }
-  }
-  throw new Error('Too many existing copies of this filename');
-}
-
 let trFile = null;
 // trLang = the language GPT translates INTO (user choice, persisted)
 let trLang = (typeof localStorage !== 'undefined' && localStorage.getItem('tradosTargetLang')) || 'he-IL';
@@ -4702,23 +4614,9 @@ async function trTranslate() {
       </div>`;
 
     const dl = document.getElementById('tr-dl');
-    const finalFilename = trFile.name.replace(/\.sdlppx$/i,'') + '.sdlrpx';
     dl.href = outUrl;
-    dl.download = finalFilename;
+    dl.download = trFile.name.replace(/\.sdlppx$/i,'') + '.sdlrpx';
     document.getElementById('tr-results').style.display = 'block';
-
-    // If the user picked a custom save folder, write directly there.
-    // Otherwise the dl button (browser download) is the only path.
-    if (trSaveFolderHandle) {
-      try {
-        const savedAs = await trSaveBlobToFolder(trSaveFolderHandle, finalFilename, outBlob);
-        showAdminToast(`✅ Saved "${savedAs}" to ${trSaveFolderName}`);
-        // Update the download button label so it's clear the save already happened
-        dl.textContent = `✓ Saved to ${trSaveFolderName} · click to re-download as ${savedAs}`;
-      } catch (e) {
-        showAdminToast('⚠️ Auto-save to folder failed (' + e.message + ') — use the download button.');
-      }
-    }
 
     // Post-actions panel: appears whenever there are translated pairs AND priming
     // isn't disabled. If no glossary is active, show the "create new glossary"
