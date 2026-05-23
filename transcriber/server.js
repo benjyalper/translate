@@ -552,11 +552,15 @@ app.post('/api/scrape', async (req, res) => {
     return res.json({ ok: false, error: 'Scrape already running — please wait and try again in a moment.' });
   }
   scrapeInProgress = true;
-  console.log('🔍 /api/scrape — running scraper + AI discovery…');
+  console.log('🔍 /api/scrape — running real scrapers (AI discovery disabled)…');
   const log = [];
 
   try {
-    // 1. Run the regular scraper
+    // Run the real scraper (free public APIs + translation marketplaces).
+    // AI Discovery was removed — it hallucinated jobs from before its training
+    // cutoff (2024 placeholder URLs) and provided no value beyond the real
+    // scrapers, which now include ProZ pair-specific feeds + TranslatorsCafe
+    // + TM-Town + TranslatorsBase + Smartcat.
     let scraperJobs = [];
     try {
       const out = await runScraperProcess();
@@ -575,21 +579,9 @@ app.post('/api/scrape', async (req, res) => {
       }
     }
 
-    // 2. AI-discovered jobs via GPT-4o
-    let aiJobs = [];
-    try {
-      aiJobs = await getAIJobs();
-      log.push(`✓ GPT-4o returned ${aiJobs.length} AI-discovered jobs`);
-      console.log(`  AI jobs: ${aiJobs.length}`);
-    } catch (e) {
-      log.push('⚠ AI discovery error: ' + e.message);
-      console.warn('AI jobs error:', e.message);
-    }
-
-    // 3. Merge — AI jobs first, then scraper jobs; deduplicate by id
     const seen = new Set();
-    const scrapeDate = new Date().toISOString().slice(0, 10); // stamp the day this scrape ran
-    const merged = [...aiJobs, ...scraperJobs].filter(j => {
+    const scrapeDate = new Date().toISOString().slice(0, 10);
+    const merged = scraperJobs.filter(j => {
       if (!j || !j.id) return false;
       if (seen.has(j.id)) return false;
       seen.add(j.id);
@@ -607,7 +599,7 @@ app.post('/api/scrape', async (req, res) => {
       console.warn('jobs-data.json write failed:', e.message);
     }
 
-    res.json({ ok: true, total: merged.length, scraper: scraperJobs.length, ai: aiJobs.length, jobs: merged, log });
+    res.json({ ok: true, total: merged.length, scraper: scraperJobs.length, ai: 0, jobs: merged, log });
   } finally {
     scrapeInProgress = false;
   }

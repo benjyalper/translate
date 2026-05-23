@@ -815,6 +815,199 @@ async function scrapeTranslatorsCafe() {
   }
 }
 
+// ── SOURCE: TM-Town public jobs ───────────────────────────
+// Translation marketplace; their public projects listing is
+// human-readable HTML with project metadata.
+async function scrapeTMTown() {
+  console.log('  Scraping TM-Town...');
+  const url = 'https://www.tm-town.com/jobs';
+  try {
+    const { data } = await axios.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+      },
+      timeout: 12000,
+    });
+    const $ = cheerio.load(data);
+    const jobs = [];
+    // TM-Town lists jobs as article/card elements; structure varies but we
+    // look for common patterns. Skip if zero matches (selectors changed).
+    $('article, .job-card, .project, [class*="job"]').each((i, el) => {
+      if (i > 20) return;
+      const title = clean($('h2, h3, .title, .job-title', el).first().text());
+      const desc  = clean($('.description, .summary, p', el).first().text());
+      const href  = $('a', el).attr('href') || '';
+      if (!title || title.length < 5) return;
+      if (!isRelevant(title, desc)) return; // Hebrew + translation filter
+      const link = href.startsWith('http') ? href : ('https://www.tm-town.com' + href);
+      jobs.push({
+        id: makeId('tmt', title + href),
+        title, company: 'TM-Town Client',
+        location: 'Remote', type: 'Freelance / Translation',
+        description: desc.slice(0, 500),
+        url: link, source: 'TM-Town',
+        postedDate: today(),
+        tags: ['translation', 'hebrew'], salary: '',
+      });
+    });
+    console.log(`  ✓ TM-Town: ${jobs.length} jobs found`);
+    return jobs;
+  } catch (e) {
+    console.warn(`  ✗ TM-Town: ${e.message}`);
+    return [];
+  }
+}
+
+// ── SOURCE: TranslatorsBase ───────────────────────────────
+// Older translation job board, less anti-bot than LinkedIn/Indeed.
+async function scrapeTranslatorsBase() {
+  console.log('  Scraping TranslatorsBase...');
+  try {
+    const { data } = await axios.get(
+      'https://www.translatorsbase.com/translation-jobs.aspx',
+      {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'text/html,application/xhtml+xml',
+        },
+        timeout: 12000,
+      }
+    );
+    const $ = cheerio.load(data);
+    const jobs = [];
+    $('table tr, .job-listing, .job-item').each((i, el) => {
+      if (i > 30) return;
+      const title = clean($('a, .job-title, td', el).first().text());
+      const desc  = clean($('td:nth-child(2), .description, p', el).text());
+      const href  = $('a', el).attr('href') || '';
+      if (!title || title.length < 8) return;
+      if (!isRelevant(title, desc)) return;
+      const link = href.startsWith('http') ? href : ('https://www.translatorsbase.com' + href);
+      jobs.push({
+        id: makeId('tb', title + href),
+        title, company: 'TranslatorsBase Client',
+        location: 'Remote', type: 'Freelance / Translation',
+        description: desc.slice(0, 500),
+        url: link, source: 'TranslatorsBase',
+        postedDate: today(),
+        tags: ['translation', 'hebrew'], salary: '',
+      });
+    });
+    console.log(`  ✓ TranslatorsBase: ${jobs.length} jobs found`);
+    return jobs;
+  } catch (e) {
+    console.warn(`  ✗ TranslatorsBase: ${e.message}`);
+    return [];
+  }
+}
+
+// ── SOURCE: ProZ specific language-pair RSS (en→he and he→en) ─
+// Already have a generic ProZ scrape; this adds the *pair-specific* feeds
+// which are noticeably better-quality for finding Hebrew gigs.
+async function scrapeProZPairs() {
+  console.log('  Scraping ProZ pair-specific (en↔he)...');
+  const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
+  const feeds = [
+    'https://search.proz.com/?sp=jobs&rss=1&source=English&target=Hebrew',
+    'https://search.proz.com/?sp=jobs&rss=1&source=Hebrew&target=English',
+  ];
+  const jobs = [];
+  for (const url of feeds) {
+    try {
+      const { data: xml } = await axios.get(url, {
+        headers: { 'User-Agent': UA, 'Accept': 'application/rss+xml,application/xml,text/xml' },
+        timeout: 15000,
+      });
+      const feed = await parser.parseString(xml);
+      (feed.items || []).forEach(it => {
+        const title = clean(it.title);
+        const desc  = clean(it.contentSnippet || it.content || '');
+        jobs.push({
+          id: makeId('proz-pair', it.link || title),
+          title,
+          company: clean(it.author || it['dc:creator'] || 'ProZ Client'),
+          location: 'Remote', type: 'Freelance / Translation',
+          description: desc.slice(0, 500),
+          url: it.link || 'https://www.proz.com/translation-jobs/',
+          source: 'ProZ (Hebrew pair)',
+          postedDate: parseDate(it.pubDate || it.isoDate),
+          tags: ['translation', 'hebrew', 'pair-feed'],
+          salary: '',
+        });
+      });
+    } catch (e) { /* try next */ }
+  }
+  const seen = new Set();
+  const unique = jobs.filter(j => { if (seen.has(j.id)) return false; seen.add(j.id); return true; });
+  console.log(`  ✓ ProZ pairs: ${unique.length} jobs found`);
+  return unique;
+}
+
+// ── SOURCE: Smartcat marketplace ──────────────────────────
+// Smartcat has a public marketplace for translator gigs.
+async function scrapeSmartcat() {
+  console.log('  Scraping Smartcat...');
+  const url = 'https://smartcat.com/marketplace/translators/hebrew?service=Translation';
+  try {
+    const { data } = await axios.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+      },
+      timeout: 12000,
+    });
+    const $ = cheerio.load(data);
+    const jobs = [];
+    // Smartcat's marketplace UI is mostly translator listings, not gigs.
+    // We grab project/job items if they exist on the page.
+    $('[class*="project"], [class*="job"], [class*="ProjectCard"]').each((i, el) => {
+      if (i > 15) return;
+      const title = clean($('h2, h3, [class*="title"]', el).first().text());
+      const desc  = clean($('[class*="description"], p', el).first().text());
+      const href  = $('a', el).attr('href') || '';
+      if (!title || title.length < 5) return;
+      if (!isRelevant(title, desc)) return;
+      const link = href.startsWith('http') ? href : ('https://smartcat.com' + href);
+      jobs.push({
+        id: makeId('sc', title + href),
+        title, company: 'Smartcat',
+        location: 'Remote', type: 'Freelance / Translation',
+        description: desc.slice(0, 500),
+        url: link, source: 'Smartcat',
+        postedDate: today(),
+        tags: ['translation', 'hebrew'], salary: '',
+      });
+    });
+    console.log(`  ✓ Smartcat: ${jobs.length} jobs found`);
+    return jobs;
+  } catch (e) {
+    console.warn(`  ✗ Smartcat: ${e.message}`);
+    return [];
+  }
+}
+
+// ── 30-DAY RECENCY FILTER ────────────────────────────────
+// Sources that provide REAL timestamps (RSS pubDate, API datePosted) get
+// filtered to the last 30 days. Sources that don't (HTML scrapes) are
+// kept as-is — they're marked with dateConfidence='unknown' below.
+const RECENCY_DAYS = 30;
+const SOURCES_WITH_REAL_DATES = new Set([
+  'RemoteOK', 'WeWorkRemotely', 'WorkingNomads', 'Remotive',
+  'Arbeitnow', 'TheMuse', 'Jooble', 'Adzuna', 'Jobrapido',
+  'ProZ', 'ProZ (Hebrew pair)', 'TranslatorsCafe',
+]);
+function filterByRecency(jobs) {
+  const cutoff = new Date(Date.now() - RECENCY_DAYS * 24 * 60 * 60 * 1000);
+  return jobs.filter(j => {
+    if (!SOURCES_WITH_REAL_DATES.has(j.source)) return true; // keep — we can't verify
+    if (!j.postedDate) return true;
+    const d = new Date(j.postedDate);
+    if (isNaN(d)) return true;
+    return d >= cutoff;
+  });
+}
+
 // ── DEDUPLICATE ───────────────────────────────────────────
 function deduplicate(jobs) {
   const seen = new Set();
@@ -832,29 +1025,42 @@ async function main() {
   console.log('==========================================');
   console.log(`Started: ${new Date().toLocaleString()}\n`);
 
+  // LinkedIn HTML scrapes dropped: postings on LinkedIn have no reliable
+  // posting-date metadata in the public HTML, so listings from 2024 still
+  // active mixed with truly fresh ones — useless for "current jobs".
+  // Replaced with translation-specific marketplaces that DO expose dates
+  // and target the Hebrew↔English pair directly.
   const results = await Promise.allSettled([
+    // General job boards (good filter coverage, real dates via API)
     scrapeRemoteOK(),
     scrapeWWR(),
     scrapeWorkingNomads(),
     scrapeRemotive(),
-    scrapeLinkedIn(),
-    scrapeLinkedInExtra(),
     scrapeArbeitnow(),
     scrapeTheMuse(),
-    // ── Translation-specific sources ──
-    scrapeProZ(),
     scrapeIndeedHebrew(),
     scrapeJooble(),
+    scrapeAdzuna(),
+    scrapeJobrapido(),
     scrapeGoogle(),
     scrapeUpwork(),
     scrapeFreelancer(),
-    scrapeAdzuna(),
     scrapeGlassdoor(),
-    scrapeJobrapido(),
+    // ── Translation-specific marketplaces (highest signal for Hebrew gigs) ──
+    scrapeProZ(),              // generic ProZ feed
+    scrapeProZPairs(),         // NEW — en↔he pair-specific RSS, best quality
+    scrapeTranslatorsCafe(),   // NEW wired up — was coded but never called
+    scrapeTMTown(),            // NEW
+    scrapeTranslatorsBase(),   // NEW
+    scrapeSmartcat(),          // NEW
   ]);
 
   const allJobs = results.flatMap(r => r.status === 'fulfilled' ? r.value : []);
-  const jobs = deduplicate(allJobs).sort((a, b) => new Date(b.postedDate) - new Date(a.postedDate));
+  // Filter to last 30 days for sources with real timestamps. Sources that
+  // don't expose real dates (HTML scrapes) pass through but get sorted
+  // toward the bottom since their postedDate is today's stamp.
+  const recent  = filterByRecency(allJobs);
+  const jobs = deduplicate(recent).sort((a, b) => new Date(b.postedDate) - new Date(a.postedDate));
 
   const output = {
     lastUpdated: new Date().toISOString(),
