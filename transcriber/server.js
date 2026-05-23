@@ -557,15 +557,19 @@ app.post('/api/scrape', async (req, res) => {
 
   try {
     // Run the real scraper (free public APIs + translation marketplaces).
-    // AI Discovery was removed — it hallucinated jobs from before its training
-    // cutoff (2024 placeholder URLs) and provided no value beyond the real
-    // scrapers, which now include ProZ pair-specific feeds + TranslatorsCafe
-    // + TM-Town + TranslatorsBase + Smartcat.
+    // AI Discovery removed — it hallucinated jobs with placeholder URLs.
+    // On failure we DON'T fall back to the existing jobs-data.json
+    // (which could be a stale snapshot baked into the docker image).
+    // Instead we surface the failure and any captured subprocess output so
+    // the admin UI can show the real status.
     let scraperJobs = [];
+    let scraperOk = false;
+    let scraperRaw = '';
     try {
-      const out = await runScraperProcess();
+      scraperRaw = await runScraperProcess();
+      scraperOk = true;
       log.push('✓ scraper.js finished');
-      console.log(out);
+      console.log(scraperRaw);
       if (fs.existsSync(JOBS_FILE)) {
         const d = JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8'));
         scraperJobs = d.jobs || [];
@@ -573,11 +577,17 @@ app.post('/api/scrape', async (req, res) => {
     } catch (e) {
       log.push('⚠ scraper.js error: ' + e.message);
       console.warn(e.message);
-      if (fs.existsSync(JOBS_FILE)) {
-        const d = JSON.parse(fs.readFileSync(JOBS_FILE, 'utf8'));
-        scraperJobs = d.jobs || [];
-      }
+      // Capture output for debugging but do NOT fall back to old jobs-data.json
+      scraperRaw = e.message;
     }
+
+    // Extract per-source counts from the scraper output for the response log
+    const sourceHits = [];
+    scraperRaw.split('\n').forEach(line => {
+      const m = line.match(/^\s*[✓✗]\s+([^:]+):\s*(\d+)?/);
+      if (m) sourceHits.push(line.trim());
+    });
+    if (sourceHits.length) log.push('Source breakdown:', ...sourceHits.slice(0, 25));
 
     const seen = new Set();
     const scrapeDate = new Date().toISOString().slice(0, 10);

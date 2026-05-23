@@ -991,7 +991,11 @@ async function scrapeSmartcat() {
 // Sources that provide REAL timestamps (RSS pubDate, API datePosted) get
 // filtered to the last 30 days. Sources that don't (HTML scrapes) are
 // kept as-is — they're marked with dateConfidence='unknown' below.
-const RECENCY_DAYS = 30;
+// Real Hebrew translation listings are rare (5-20 fresh ones per week
+// across all sources combined). 30 days was too aggressive — too many
+// otherwise-relevant gigs got filtered out. 60 gives more breathing
+// room without including obviously stale 2024 entries.
+const RECENCY_DAYS = 60;
 const SOURCES_WITH_REAL_DATES = new Set([
   'RemoteOK', 'WeWorkRemotely', 'WorkingNomads', 'Remotive',
   'Arbeitnow', 'TheMuse', 'Jooble', 'Adzuna', 'Jobrapido',
@@ -1049,10 +1053,10 @@ async function main() {
     // ── Translation-specific marketplaces (highest signal for Hebrew gigs) ──
     scrapeProZ(),              // generic ProZ feed
     scrapeProZPairs(),         // NEW — en↔he pair-specific RSS, best quality
-    scrapeTranslatorsCafe(),   // NEW wired up — was coded but never called
-    scrapeTMTown(),            // NEW
-    scrapeTranslatorsBase(),   // NEW
-    scrapeSmartcat(),          // NEW
+    scrapeTranslatorsCafe(),   // wired up — was coded but never called
+    scrapeTMTown(),
+    // scrapeTranslatorsBase removed — www.translatorsbase.com no longer resolves (DNS dead)
+    scrapeSmartcat(),
   ]);
 
   const allJobs = results.flatMap(r => r.status === 'fulfilled' ? r.value : []);
