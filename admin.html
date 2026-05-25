@@ -3486,9 +3486,27 @@ function trInsertTranslation(content, seg, hebrewText) {
   if (out === content) {
     out = content.replace(new RegExp(`<mrk\\s+mtype="seg"\\s+mid="${seg.mid}"\\s*>\\s*<\\/mrk>`), filled);
   }
+  // Update the <sdl:seg id="N" .../> confirmation element so Trados Studio's
+  // status column shows the segment as Translated (green check). SDL XLIFF 1.0
+  // requires THREE attributes for a segment to register as actually translated:
+  //   - conf="Translated"          (segment confirmation level)
+  //   - origin="nmt"                (origin of the translation — nmt = neural
+  //                                  machine translation; tells Trados this is
+  //                                  not just pre-populated source text)
+  //   - origin-system="GPT-5.x"    (identifies the engine for audit logs)
+  // Without `origin`, Trados Studio leaves the status indicator as
+  // "untranslated" even though the target text is present.
   return out.replace(
-    new RegExp(`(<sdl:seg\\s+id="${seg.mid}")(\\s*\\/?>)`),
-    (m, open, close) => m.includes('conf=') ? m : `${open} conf="Translated"${close}`
+    new RegExp(`(<sdl:seg\\s+id="${seg.mid}")([^/>]*)(\\s*\\/?>)`),
+    (whole, open, existingAttrs, close) => {
+      // Preserve any pre-existing attributes already set on this <sdl:seg>
+      // (e.g. percent for TM matches) — just add the missing ones.
+      let attrs = existingAttrs;
+      if (!/conf=/.test(attrs))          attrs += ' conf="Translated"';
+      if (!/\borigin=/.test(attrs))      attrs += ' origin="nmt"';
+      if (!/origin-system=/.test(attrs)) attrs += ' origin-system="GPT-5.x Translator"';
+      return `${open}${attrs}${close}`;
+    }
   );
 }
 
