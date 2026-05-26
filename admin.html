@@ -5529,12 +5529,14 @@ function prInsertWithTrackChanges(content, seg, newHebrewText, revId) {
 }
 
 // Add <sdl:rev-defs> to the file header so Studio recognises the revids
-// used in the body. Creates the section if absent, appends if present.
+// used in the body. The SDL XLIFF schema for <sdl:rev-def> only allows the
+// `id` attribute — Trados Studio rejects unknown attributes like `user`,
+// `type`, or `date` with "The 'X' attribute is not declared" validation
+// errors. Author / date metadata lives elsewhere (in the inline mrks or
+// not at all). So we keep this element minimal.
 function prAddRevDefs(content, revs) {
   if (!revs || revs.length === 0) return content;
-  const defs = revs.map(r =>
-    `<sdl:rev-def id="${r.id}" type="change" date="${r.date}" user="${(r.user||'Proofreader').replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&apos;'}[c]))}"/>`
-  ).join('');
+  const defs = revs.map(r => `<sdl:rev-def id="${r.id}"/>`).join('');
 
   // Existing <sdl:rev-defs>? Append our defs into it.
   if (/<sdl:rev-defs[^>]*>/.test(content)) {
