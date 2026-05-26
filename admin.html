@@ -1299,17 +1299,19 @@
             <span>Only review segments already translated</span>
           </label>
         </div>
-        <!-- Output format toggles -->
-        <div class="tlang-row" style="margin-top:.4rem;flex-direction:column;align-items:flex-start;gap:.3rem">
-          <label style="font-size:.74rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem">
-            <input type="checkbox" id="pr-track-changes" checked style="width:.95rem;height:.95rem;cursor:pointer"/>
-            <span>🔴🔵 <strong>Trados track changes</strong> — old translation shown with red strikethrough, new shown in blue (uses SDLXLIFF <code style="background:#0a0a14;padding:0 3px;border-radius:2px;font-size:.7rem">x-sdl-deleted</code> / <code style="background:#0a0a14;padding:0 3px;border-radius:2px;font-size:.7rem">x-sdl-added</code>)</span>
-          </label>
+        <!-- Output format toggle. Track-changes markup was removed because
+             multiple Trados versions reject it with schema validation
+             errors and null-ref crashes during package import — see git
+             history. Falling back to the proven "silent replace + Draft
+             status" path. -->
+        <div class="tlang-row" style="margin-top:.4rem">
           <label style="font-size:.74rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem">
             <input type="checkbox" id="pr-mark-draft" checked style="width:.95rem;height:.95rem;cursor:pointer"/>
-            <span>📌 <strong>Mark approved segments as Draft</strong> in Trados (so they show as "needs review" alongside the change)</span>
+            <span>📌 <strong>Mark approved segments as Draft</strong> so Trados shows them as "needs review" — filter by Draft status in the Editor to see exactly which segments were modified</span>
           </label>
         </div>
+        <!-- Hidden but kept in the DOM so prDownloadRevised can read .checked safely -->
+        <input type="checkbox" id="pr-track-changes" style="display:none"/>
 
         <button class="tbtn gold" id="pr-btn" onclick="prAnalyze()" disabled>🔍 Analyze Translations (suggestions only — nothing modified)</button>
 
