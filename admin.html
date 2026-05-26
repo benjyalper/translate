@@ -1299,10 +1299,12 @@
             <span>Only review segments already translated</span>
           </label>
         </div>
-        <!-- Track-changes flag: mark approved segments as Draft so Trados shows
-             them as "needs review" — closest safe approximation to true
-             change tracking without risking SDLXLIFF corruption. -->
-        <div class="tlang-row" style="margin-top:.4rem">
+        <!-- Output format toggles -->
+        <div class="tlang-row" style="margin-top:.4rem;flex-direction:column;align-items:flex-start;gap:.3rem">
+          <label style="font-size:.74rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem">
+            <input type="checkbox" id="pr-track-changes" checked style="width:.95rem;height:.95rem;cursor:pointer"/>
+            <span>🔴🔵 <strong>Trados track changes</strong> — old translation shown with red strikethrough, new shown in blue (uses SDLXLIFF <code style="background:#0a0a14;padding:0 3px;border-radius:2px;font-size:.7rem">x-sdl-deleted</code> / <code style="background:#0a0a14;padding:0 3px;border-radius:2px;font-size:.7rem">x-sdl-added</code>)</span>
+          </label>
           <label style="font-size:.74rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem">
             <input type="checkbox" id="pr-mark-draft" checked style="width:.95rem;height:.95rem;cursor:pointer"/>
             <span>📌 <strong>Mark approved segments as Draft</strong> in Trados (so they show as "needs review" alongside the change)</span>
@@ -5447,6 +5449,86 @@ function prUpdateApprovedCount() {
   if (btn) btn.disabled = (n === 0);
 }
 
+// ─── Trados-native track changes ─────────────────────────────
+// SDLXLIFF format wraps deleted vs inserted text in nested <mrk> tags:
+//   <mrk mtype="seg" mid="1">
+//     <mrk mtype="x-sdl-deleted" sdl:revid="r1">old hebrew</mrk>
+//     <mrk mtype="x-sdl-added"   sdl:revid="r1">new hebrew</mrk>
+//   </mrk>
+// Plus a <sdl:rev-defs> block in the <header> listing each revision so
+// Studio knows when each change was made and by whom. Once present, Trados
+// Studio renders the deletions with red strikethrough and the insertions
+// in blue — the same as if a human reviewer had typed the change with
+// Track Changes turned on.
+
+function prGenRevId(prefix) {
+  // SDL revision IDs are conventionally short alphanumeric tokens
+  return prefix + '-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
+}
+
+// Replace the inner content of a target <mrk mtype="seg" mid="N">…</mrk>
+// with a deleted+added pair. Used when the original target was NON-empty
+// (i.e. proofreading an already-translated segment, which is always the
+// case for this tool).
+function prInsertWithTrackChanges(content, seg, newHebrewText, revId) {
+  const origMrkRe = new RegExp(`(<mrk\\s+mtype="seg"\\s+mid="${seg.mid}"[^>]*>)([\\s\\S]*?)(<\\/mrk>)`);
+  const match = content.match(origMrkRe);
+  if (!match) {
+    // No existing filled mrk — fall back to ordinary insert (rare, would
+    // mean we tried to track-change an unfilled segment).
+    return trInsertTranslation(content, seg, newHebrewText);
+  }
+  const openTag  = match[1];
+  const origInner = match[2];          // raw XML inside the seg mrk (already escaped + may contain inline tags)
+  const closeTag = match[3];
+
+  // Build the NEW Hebrew content the same way trInsertTranslation does:
+  // - Restore any {{TAG_N}} placeholders from seg.tagMap
+  // - XML-escape any literal < > & in the translation text
+  const newInner = trPlaceholdersToXml(newHebrewText, seg.tagMap || []);
+
+  const trackedContent =
+    `<mrk mtype="x-sdl-deleted" sdl:revid="${revId}">${origInner}</mrk>` +
+    `<mrk mtype="x-sdl-added" sdl:revid="${revId}">${newInner}</mrk>`;
+
+  const out = content.replace(origMrkRe, `${openTag}${trackedContent}${closeTag}`);
+
+  // Also stamp conf="Translated" + origin attributes on the <sdl:seg> (matches
+  // the existing translator behavior so Trados still treats the segment as
+  // translated — the changes will get accepted/rejected by the reviewer).
+  return out.replace(
+    new RegExp(`(<sdl:seg\\s+id="${seg.mid}")([^/>]*)(\\s*\\/?>)`),
+    (whole, open, attrs, close) => {
+      let a = attrs;
+      if (!/conf=/.test(a))          a += ' conf="Translated"';
+      if (!/\borigin=/.test(a))      a += ' origin="nmt"';
+      if (!/origin-system=/.test(a)) a += ' origin-system="GPT-5.x Proofreader"';
+      return `${open}${a}${close}`;
+    }
+  );
+}
+
+// Add <sdl:rev-defs> to the file header so Studio recognises the revids
+// used in the body. Creates the section if absent, appends if present.
+function prAddRevDefs(content, revs) {
+  if (!revs || revs.length === 0) return content;
+  const defs = revs.map(r =>
+    `<sdl:rev-def id="${r.id}" type="change" date="${r.date}" user="${(r.user||'Proofreader').replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&apos;'}[c]))}"/>`
+  ).join('');
+
+  // Existing <sdl:rev-defs>? Append our defs into it.
+  if (/<sdl:rev-defs[^>]*>/.test(content)) {
+    return content.replace(/(<sdl:rev-defs[^>]*>)([\s\S]*?)(<\/sdl:rev-defs>)/,
+      (m, open, inner, close) => `${open}${inner}${defs}${close}`);
+  }
+  // No existing — insert just before </header>.
+  if (/<\/header>/.test(content)) {
+    return content.replace('</header>', `<sdl:rev-defs>${defs}</sdl:rev-defs></header>`);
+  }
+  console.warn('[proofreader] no <header> found — track-changes rev-defs not inserted');
+  return content;
+}
+
 // Rewrite a single segment's <sdl:seg id="N" ...> conf attribute to Draft
 // (was "Translated"). This makes Trados Studio surface the segment with the
 // "draft" status icon and pop it into the Editor's review queue — closest we
@@ -5473,7 +5555,9 @@ async function prDownloadRevised() {
 
   const btn = document.getElementById('pr-dl-btn');
   btn.disabled = true; btn.textContent = '⏳ Applying approved fixes…';
-  const markDraft = document.getElementById('pr-mark-draft').checked;
+  const markDraft   = document.getElementById('pr-mark-draft').checked;
+  const trackChanges = document.getElementById('pr-track-changes').checked;
+  const nowIso = new Date().toISOString();
 
   try {
     const buf = await prFile.arrayBuffer();
@@ -5495,16 +5579,29 @@ async function prDownloadRevised() {
       const segMap = new Map();
       segs.forEach(s => segMap.set(s.mid, s));
       const applicable = toApply.filter(t => t.fileIdx === fi);
+      const revsForThisFile = []; // collect revision IDs to register in the header
+
       for (const t of applicable) {
         const seg = segMap.get(t.mid);
         if (!seg) continue;
-        // Apply the first issue's suggested fix
         const fix = t.issues[0].suggestion;
-        content = trInsertTranslation(content, seg, fix);
-        // Optionally downgrade conf to "Draft" so Trados shows it as
-        // pending review (visible track-change signal)
+        if (trackChanges) {
+          // Native Trados track changes: wrap old+new in nested <mrk>
+          // and register the revision in <sdl:rev-defs>.
+          const revId = prGenRevId('pr');
+          content = prInsertWithTrackChanges(content, seg, fix, revId);
+          revsForThisFile.push({ id: revId, date: nowIso, user: 'GPT-5.x Proofreader' });
+        } else {
+          // Silent replace + optional Draft mark
+          content = trInsertTranslation(content, seg, fix);
+        }
         if (markDraft) content = prMarkSegmentAsDraft(content, seg.mid);
       }
+
+      if (revsForThisFile.length > 0) {
+        content = prAddRevDefs(content, revsForThisFile);
+      }
+
       const check = trValidateXml(content);
       if (!check.ok) throw new Error(`File ${fi+1} failed XML validation: ${check.message}`);
       outZip.file(prRawSDLXLIFFs[fi].relPath, content);
