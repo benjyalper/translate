@@ -5553,6 +5553,39 @@ function prAddRevDefs(content, revs) {
   return content;
 }
 
+// Replace a segment's EXISTING target text with new Hebrew. This is the
+// proofreader's main mutation — unlike trInsertTranslation (which only
+// fills empty <mrk> placeholders during fresh translation), this function
+// rewrites the inner content of a NON-EMPTY target mrk. That's the case
+// for every segment the Proofreader touches — they're all already
+// translated, that's why we're reviewing them.
+//
+// Also stamps conf="Translated" + origin attributes so Trados counts the
+// segment as translated and the audit trail survives.
+function prReplaceTargetText(content, seg, newHebrewText) {
+  const newInner = trPlaceholdersToXml(newHebrewText, seg.tagMap || []);
+  // 1) Non-empty target — most common case for proofreading
+  const filledRe = new RegExp(`(<mrk\\s+mtype="seg"\\s+mid="${seg.mid}"[^>]*>)([\\s\\S]*?)(<\\/mrk>)`);
+  let out = content.replace(filledRe, `$1${newInner}$3`);
+  // 2) Self-closing target (only if not matched above)
+  if (out === content) {
+    out = content.replace(`<mrk mtype="seg" mid="${seg.mid}"/>`,
+      `<mrk mtype="seg" mid="${seg.mid}">${newInner}</mrk>`);
+  }
+  // 3) Set/refresh confirmation attributes on the matching <sdl:seg>
+  out = out.replace(
+    new RegExp(`(<sdl:seg\\s+id="${seg.mid}")([^/>]*)(\\s*\\/?>)`),
+    (whole, open, attrs, close) => {
+      let a = attrs;
+      if (!/conf=/.test(a))          a += ' conf="Translated"';
+      if (!/\borigin=/.test(a))      a += ' origin="nmt"';
+      if (!/origin-system=/.test(a)) a += ' origin-system="GPT-5.x Proofreader"';
+      return `${open}${a}${close}`;
+    }
+  );
+  return out;
+}
+
 // Rewrite a single segment's <sdl:seg id="N" ...> conf attribute to Draft
 // (was "Translated"). This makes Trados Studio surface the segment with the
 // "draft" status icon and pop it into the Editor's review queue — closest we
@@ -5616,8 +5649,8 @@ async function prDownloadRevised() {
           content = prInsertWithTrackChanges(content, seg, fix, revId);
           revsForThisFile.push({ id: revId, date: nowIso, user: 'GPT-5.x Proofreader' });
         } else {
-          // Silent replace + optional Draft mark
-          content = trInsertTranslation(content, seg, fix);
+          // Silent replace of existing target with new Hebrew
+          content = prReplaceTargetText(content, seg, fix);
         }
         if (markDraft) content = prMarkSegmentAsDraft(content, seg.mid);
       }
