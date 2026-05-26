@@ -1372,7 +1372,7 @@
               <span>✍️ Add GPT-written narrative summary (~$0.01 extra · 4-6 sentence overall assessment)</span>
             </label>
             <div id="pr-gel-preview" style="display:none;margin:.5rem 0;padding:.5rem .7rem;background:#0f0f17;border-radius:5px;font-size:.76rem;color:#cbd5e1"></div>
-            <button class="tbtn" id="pr-gel-btn" onclick="prGenerateEvaluation()" style="width:auto;padding:.55rem 1rem;font-size:.78rem;background:#1e1b4b;color:#a5b4fc">📋 Generate GEL Evaluation Form (.doc)</button>
+            <button class="tbtn" id="pr-gel-btn" onclick="prGenerateEvaluation()" style="width:auto;padding:.55rem 1rem;font-size:.78rem;background:#1e1b4b;color:#a5b4fc">📋 Fill in original GEL Evaluation Form (.docx)</button>
           </div>
         </div>
 
@@ -5764,10 +5764,21 @@ Write a 4-6 sentence evaluation comment in English suitable for inclusion in a f
   }
 }
 
+// Replace the "Actual scores" cell text in one row of the GEL template.
+// A <w:tc> cell can contain multiple <w:r>/<w:t> runs (Word splits text
+// runs by formatting). We rewrite the first run's text and clear the
+// rest, preserving whatever formatting was on the first run.
+function prSetCellText(cellXml, newText) {
+  const safe = String(newText).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  let used = false;
+  return cellXml.replace(/<w:t(\s[^>]*)?>([^<]*)<\/w:t>/g, (m, attrs) => {
+    if (!used) { used = true; return `<w:t${attrs||''}>${safe}</w:t>`; }
+    return '<w:t/>'; // clear subsequent runs
+  });
+}
+
 async function prGenerateEvaluation() {
   if (!prAllIssues || prAllIssues.length === 0) {
-    // Allow generating the form even with 0 issues (PERFECT grade)
-    // — only block if the file never got analyzed.
     if (!prFile) { showAdminToast('❌ Run Analyze first.'); return; }
   }
   const btn = document.getElementById('pr-gel-btn');
@@ -5782,12 +5793,12 @@ async function prGenerateEvaluation() {
     let summary = '';
     if (wantSummary) {
       const apiKey = getApiKey();
-      if (!apiKey) { promptApiKey(); btn.disabled = false; btn.textContent = '📋 Generate GEL Evaluation Form (.doc)'; return; }
+      if (!apiKey) { promptApiKey(); btn.disabled = false; btn.textContent = '📋 Generate GEL Evaluation Form (.docx)'; return; }
       btn.textContent = '⏳ Writing narrative summary…';
       summary = await prRequestGPTSummary(scores, apiKey);
     }
 
-    // Live preview block in the admin UI
+    // Preview block
     preview.style.display = 'block';
     preview.innerHTML = `
       <div><strong>General Grade:</strong> <span style="color:${scores.gradeColor};font-weight:600">${scores.grade}</span> · <strong>Score:</strong> ${scores.total}/100</div>
@@ -5800,29 +5811,97 @@ async function prGenerateEvaluation() {
         Expertise: <strong>${scores.expertise}/20</strong>
       </div>${summary ? `<div style="margin-top:.4rem;font-size:.72rem;color:#cbd5e1;font-style:italic">${esc(summary)}</div>` : ''}`;
 
-    // Build the GEL-style Word doc
-    const html = prBuildGELDocHTML({
-      scores,
-      summary,
-      translator,
-      editor,
-      filename: prFile?.name || '',
+    btn.textContent = '⏳ Filling in GEL template…';
+    // Fetch the genuine GEL template (the original .doc converted to .docx
+    // once and committed alongside admin.html — see /gel_evaluation_template.docx)
+    const resp = await fetch('gel_evaluation_template.docx?t=' + Date.now());
+    if (!resp.ok) throw new Error('Could not load GEL template (HTTP ' + resp.status + ')');
+    const buf = await resp.arrayBuffer();
+    const zip = await JSZip.loadAsync(buf);
+    let xml = await zip.file('word/document.xml').async('text');
+
+    // The template has exactly ONE table. Modify the 3rd cell ("Actual scores")
+    // of rows 1-7 (skip header row 0). Order in the template matches GEL's
+    // standard exactly.
+    const tableMatch = xml.match(/<w:tbl>[\s\S]*?<\/w:tbl>/);
+    if (!tableMatch) throw new Error('GEL template missing scoring table');
+    const tbl = tableMatch[0];
+    const rows = tbl.match(/<w:tr\b[\s\S]*?<\/w:tr>/g) || [];
+    if (rows.length < 8) throw new Error('GEL template table is malformed (need 8 rows, got ' + rows.length + ')');
+
+    const scoreSeq = [scores.wrongTrans, scores.grammar, scores.fluency, scores.style, scores.skill, scores.expertise, scores.total];
+
+    let newTbl = tbl;
+    for (let i = 0; i < scoreSeq.length; i++) {
+      const row = rows[i + 1]; // skip header
+      const cells = row.match(/<w:tc\b[\s\S]*?<\/w:tc>/g) || [];
+      if (cells.length < 3) continue;
+      const newActual = prSetCellText(cells[2], scoreSeq[i]);
+      const newRow = row.replace(cells[2], newActual);
+      newTbl = newTbl.replace(row, newRow);
+    }
+    xml = xml.replace(tbl, newTbl);
+
+    // Add a header paragraph with the General Grade + meta info right BEFORE the
+    // scoring table, so it's prominent without disrupting the rest of the doc.
+    const today = new Date().toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
+    const escW = (t) => String(t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const headerPara =
+      `<w:p><w:pPr><w:spacing w:before="240" w:after="120"/></w:pPr>` +
+      `<w:r><w:rPr><w:b/><w:sz w:val="28"/></w:rPr><w:t xml:space="preserve">GENERAL GRADE: </w:t></w:r>` +
+      `<w:r><w:rPr><w:b/><w:sz w:val="28"/><w:color w:val="1F4E79"/></w:rPr><w:t xml:space="preserve">${escW(scores.grade)} </w:t></w:r>` +
+      `<w:r><w:rPr><w:sz w:val="24"/></w:rPr><w:t xml:space="preserve">(${scores.total} / 100)</w:t></w:r>` +
+      `</w:p>` +
+      `<w:p><w:pPr><w:spacing w:after="80"/></w:pPr>` +
+      `<w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">Translator: </w:t></w:r>` +
+      `<w:r><w:t xml:space="preserve">${escW(translator || '(not specified)')}   </w:t></w:r>` +
+      `<w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">Editor: </w:t></w:r>` +
+      `<w:r><w:t xml:space="preserve">${escW(editor)}   </w:t></w:r>` +
+      `<w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">Date: </w:t></w:r>` +
+      `<w:r><w:t xml:space="preserve">${escW(today)}</w:t></w:r>` +
+      `</w:p>` +
+      `<w:p><w:pPr><w:spacing w:after="120"/></w:pPr>` +
+      `<w:r><w:rPr><w:i/><w:color w:val="555555"/><w:sz w:val="20"/></w:rPr>` +
+      `<w:t xml:space="preserve">Source file: ${escW(prFile?.name || '')} · Issues: ` +
+      `${scores.tally.critical||0} critical, ${scores.tally.major||0} major, ${scores.tally.minor||0} minor</w:t></w:r>` +
+      `</w:p>`;
+    // Find the table in the (modified) xml and insert just before it
+    xml = xml.replace(/<w:tbl>/, headerPara + '<w:tbl>');
+
+    // If there's a narrative summary, add it as a paragraph just AFTER the
+    // table (before the next paragraph that follows it in the source).
+    if (summary) {
+      const summaryPara =
+        `<w:p><w:pPr><w:spacing w:before="240" w:after="80"/></w:pPr>` +
+        `<w:r><w:rPr><w:b/><w:sz w:val="24"/></w:rPr><w:t xml:space="preserve">Editor's Comments</w:t></w:r></w:p>` +
+        `<w:p><w:pPr><w:spacing w:after="240"/></w:pPr>` +
+        `<w:r><w:t xml:space="preserve">${escW(summary)}</w:t></w:r>` +
+        `</w:p>`;
+      xml = xml.replace(/<\/w:tbl>/, '</w:tbl>' + summaryPara);
+    }
+
+    // Save back
+    zip.file('word/document.xml', xml);
+    const out = await zip.generateAsync({
+      type: 'blob',
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 6 },
     });
-    const blob = new Blob(['﻿' + html], { type: 'application/msword' });
-    const url = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(out);
     const a = document.createElement('a');
     a.href = url;
     const slug = (prFile?.name || 'translation').replace(/\.sdl(pp|rp)x$/i, '').replace(/[^a-z0-9]+/gi, '_').slice(0, 50);
-    a.download = `GEL_Evaluation_${slug}.doc`;
+    a.download = `GEL_Evaluation_${slug}.docx`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1500);
-    showAdminToast(`✅ Evaluation form downloaded · ${scores.grade} (${scores.total}/100)`);
+    showAdminToast(`✅ Original GEL template filled · ${scores.grade} (${scores.total}/100)`);
   } catch (e) {
     document.getElementById('pr-error').style.display = 'block';
     document.getElementById('pr-error').textContent = '❌ ' + e.message;
   } finally {
     btn.disabled = false;
-    btn.textContent = '📋 Generate GEL Evaluation Form (.doc)';
+    btn.textContent = '📋 Generate GEL Evaluation Form (.docx)';
   }
 }
 
