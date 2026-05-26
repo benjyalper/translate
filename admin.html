@@ -1352,6 +1352,26 @@
             <span id="pr-selected-count" style="font-size:.78rem;color:#94a3b8">0 fixes approved</span>
             <span style="font-size:.7rem;color:#64748b;margin-left:auto">📌 Only approved fixes will be written into the downloaded file.</span>
           </div>
+
+          <!-- GEL Evaluation Form section -->
+          <div style="margin-top:1.2rem;padding:.8rem 1rem;background:#0a0a14;border:1px solid #1f2937;border-radius:8px">
+            <div style="font-size:.85rem;color:#a5b4fc;font-weight:600;margin-bottom:.5rem">📋 GEL Evaluation Form (Good Enterprise Limited standard)</div>
+            <div style="font-size:.72rem;color:#94a3b8;margin-bottom:.7rem">Auto-scores the translation across the 6 GEL criteria based on the issues GPT found. Generates a printable .doc that matches GEL's evaluation template — General Grade + scored breakdown table + (optional) written summary.</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin-bottom:.6rem">
+              <label style="font-size:.74rem;color:#cbd5e1">Translator name (optional):
+                <input type="text" id="pr-gel-translator" placeholder="(left blank)" style="width:100%;margin-top:.2rem;padding:.4rem .55rem;background:#0f0f17;border:1px solid var(--border);border-radius:5px;color:#e2e8f0;font-size:.76rem"/>
+              </label>
+              <label style="font-size:.74rem;color:#cbd5e1">Editor name (you):
+                <input type="text" id="pr-gel-editor" value="Benjy Alper" style="width:100%;margin-top:.2rem;padding:.4rem .55rem;background:#0f0f17;border:1px solid var(--border);border-radius:5px;color:#e2e8f0;font-size:.76rem"/>
+              </label>
+            </div>
+            <label style="font-size:.74rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem;margin-bottom:.6rem">
+              <input type="checkbox" id="pr-gel-summary" checked style="width:.95rem;height:.95rem;cursor:pointer"/>
+              <span>✍️ Add GPT-written narrative summary (~$0.01 extra · 4-6 sentence overall assessment)</span>
+            </label>
+            <div id="pr-gel-preview" style="display:none;margin:.5rem 0;padding:.5rem .7rem;background:#0f0f17;border-radius:5px;font-size:.76rem;color:#cbd5e1"></div>
+            <button class="tbtn" id="pr-gel-btn" onclick="prGenerateEvaluation()" style="width:auto;padding:.55rem 1rem;font-size:.78rem;background:#1e1b4b;color:#a5b4fc">📋 Generate GEL Evaluation Form (.doc)</button>
+          </div>
         </div>
 
         <!-- Error -->
@@ -5624,6 +5644,275 @@ async function prDownloadRevised() {
     document.getElementById('pr-error').style.display = 'block';
     document.getElementById('pr-error').textContent = '❌ ' + e.message;
   }
+}
+
+// ─── GEL Evaluation Form generator ──────────────────────────
+// Maps the Proofreader's issue findings (by category × severity) into
+// GEL's 6-criteria 100-point scale, derives the General Grade, and
+// generates a Word-compatible .doc that matches GEL's template.
+function prComputeGELScores() {
+  // Starting scores = full marks per category
+  let wrongTrans = 20; // "Wrong translations / misunderstanding"
+  let grammar    = 15; // Grammar, spelling, punctuation
+  let fluency    = 15; // Fluency / syntax
+  let style      = 15; // Style, redundancy, sentence length
+  let skill      = 15; // Translation skill (literal vs idiomatic)
+  let expertise  = 20; // Terminology & technical correctness
+  // Track counts for the summary
+  const tally = { critical: 0, major: 0, minor: 0, byCat: {} };
+
+  // Severity weights (points deducted per issue)
+  const w = { critical: 3, major: 1.5, minor: 0.5 };
+
+  // Map our 9 categories to GEL's 6 criteria
+  const mapToGEL = {
+    accuracy:    'wrongTrans',
+    omission:    'wrongTrans',
+    addition:    'wrongTrans',
+    grammar:     'grammar',
+    spelling:    'grammar',
+    punctuation: 'grammar',
+    formality:   'fluency',
+    format:      'style',   // numbers/units/tags → style buckets here
+    terminology: 'expertise',
+  };
+
+  for (const item of prAllIssues) {
+    for (const i of (item.issues || [])) {
+      const weight = w[i.severity] || 0.5;
+      tally[i.severity] = (tally[i.severity] || 0) + 1;
+      tally.byCat[i.category || 'other'] = (tally.byCat[i.category || 'other'] || 0) + 1;
+      const target = mapToGEL[i.category] || 'style';
+      switch (target) {
+        case 'wrongTrans': wrongTrans = Math.max(0, wrongTrans - weight); break;
+        case 'grammar':    grammar    = Math.max(0, grammar    - weight); break;
+        case 'fluency':    fluency    = Math.max(0, fluency    - weight); break;
+        case 'style':      style      = Math.max(0, style      - weight); break;
+        case 'skill':      skill      = Math.max(0, skill      - weight); break;
+        case 'expertise':  expertise  = Math.max(0, expertise  - weight); break;
+      }
+    }
+  }
+
+  // Round each to 1 decimal, then total
+  const round1 = (n) => Math.round(n * 10) / 10;
+  wrongTrans = round1(wrongTrans);
+  grammar    = round1(grammar);
+  fluency    = round1(fluency);
+  style      = round1(style);
+  skill      = round1(skill);
+  expertise  = round1(expertise);
+  const totalRaw = wrongTrans + grammar + fluency + style + skill + expertise;
+  const total = Math.round(totalRaw);
+
+  let grade, gradeColor;
+  if (total === 100)      { grade = 'PERFECT';        gradeColor = '#34d399'; }
+  else if (total >= 95)   { grade = 'VERY GOOD';      gradeColor = '#34d399'; }
+  else if (total >= 90)   { grade = 'GOOD';           gradeColor = '#a5b4fc'; }
+  else if (total >= 80)   { grade = 'BASICALLY GOOD'; gradeColor = '#fcd34d'; }
+  else                    { grade = 'UNACCEPTABLE';   gradeColor = '#fca5a5'; }
+
+  return { wrongTrans, grammar, fluency, style, skill, expertise, total, grade, gradeColor, tally };
+}
+
+async function prRequestGPTSummary(scores, apiKey) {
+  // Pick up to 12 representative issues to give GPT context for the narrative
+  const samples = [];
+  for (const item of prAllIssues) {
+    for (const i of (item.issues || [])) {
+      samples.push({ severity: i.severity, category: i.category, description: i.description });
+      if (samples.length >= 12) break;
+    }
+    if (samples.length >= 12) break;
+  }
+  const sysPrompt =
+`You are writing a short, professional evaluation comment for a Hebrew translation review.
+
+Inputs:
+- General Grade: ${scores.grade} (${scores.total}/100)
+- Category scores: Wrong translations ${scores.wrongTrans}/20, Grammar ${scores.grammar}/15, Fluency ${scores.fluency}/15, Style ${scores.style}/15, Translation skill ${scores.skill}/15, Expertise ${scores.expertise}/20
+- Total issues found: critical=${scores.tally.critical||0}, major=${scores.tally.major||0}, minor=${scores.tally.minor||0}
+
+Write a 4-6 sentence evaluation comment in English suitable for inclusion in a formal proofreader's report. Be specific about which areas were strong and which were weak, citing the relevant categories. Avoid generic praise; ground the assessment in the score breakdown. No lists, no markdown — just plain paragraph text. Sign off with a brief recommendation (re-translate / accept with changes / accept as-is).`;
+
+  const userPrompt = 'Representative issues found:\n' +
+    samples.map((s,i) => `${i+1}. [${s.severity}/${s.category}] ${s.description}`).join('\n');
+
+  try {
+    const r = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-5.4',
+        temperature: 0.3,
+        messages: [
+          { role: 'system', content: sysPrompt },
+          { role: 'user',   content: userPrompt },
+        ],
+      }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error?.message || 'GPT error ' + r.status);
+    return (data.choices?.[0]?.message?.content || '').trim();
+  } catch (e) {
+    console.warn('[GEL summary]', e.message);
+    return '';
+  }
+}
+
+async function prGenerateEvaluation() {
+  if (!prAllIssues || prAllIssues.length === 0) {
+    // Allow generating the form even with 0 issues (PERFECT grade)
+    // — only block if the file never got analyzed.
+    if (!prFile) { showAdminToast('❌ Run Analyze first.'); return; }
+  }
+  const btn = document.getElementById('pr-gel-btn');
+  const preview = document.getElementById('pr-gel-preview');
+  btn.disabled = true; btn.textContent = '⏳ Scoring…';
+  try {
+    const scores = prComputeGELScores();
+    const translator = document.getElementById('pr-gel-translator').value.trim();
+    const editor     = document.getElementById('pr-gel-editor').value.trim() || 'Benjy Alper';
+    const wantSummary = document.getElementById('pr-gel-summary').checked;
+
+    let summary = '';
+    if (wantSummary) {
+      const apiKey = getApiKey();
+      if (!apiKey) { promptApiKey(); btn.disabled = false; btn.textContent = '📋 Generate GEL Evaluation Form (.doc)'; return; }
+      btn.textContent = '⏳ Writing narrative summary…';
+      summary = await prRequestGPTSummary(scores, apiKey);
+    }
+
+    // Live preview block in the admin UI
+    preview.style.display = 'block';
+    preview.innerHTML = `
+      <div><strong>General Grade:</strong> <span style="color:${scores.gradeColor};font-weight:600">${scores.grade}</span> · <strong>Score:</strong> ${scores.total}/100</div>
+      <div style="margin-top:.3rem;font-size:.72rem;color:#94a3b8">
+        Wrong translations: <strong>${scores.wrongTrans}/20</strong> ·
+        Grammar: <strong>${scores.grammar}/15</strong> ·
+        Fluency: <strong>${scores.fluency}/15</strong> ·
+        Style: <strong>${scores.style}/15</strong> ·
+        Translation skill: <strong>${scores.skill}/15</strong> ·
+        Expertise: <strong>${scores.expertise}/20</strong>
+      </div>${summary ? `<div style="margin-top:.4rem;font-size:.72rem;color:#cbd5e1;font-style:italic">${esc(summary)}</div>` : ''}`;
+
+    // Build the GEL-style Word doc
+    const html = prBuildGELDocHTML({
+      scores,
+      summary,
+      translator,
+      editor,
+      filename: prFile?.name || '',
+    });
+    const blob = new Blob(['﻿' + html], { type: 'application/msword' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const slug = (prFile?.name || 'translation').replace(/\.sdl(pp|rp)x$/i, '').replace(/[^a-z0-9]+/gi, '_').slice(0, 50);
+    a.download = `GEL_Evaluation_${slug}.doc`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+    showAdminToast(`✅ Evaluation form downloaded · ${scores.grade} (${scores.total}/100)`);
+  } catch (e) {
+    document.getElementById('pr-error').style.display = 'block';
+    document.getElementById('pr-error').textContent = '❌ ' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '📋 Generate GEL Evaluation Form (.doc)';
+  }
+}
+
+// Build the .doc that mirrors GEL's official Evaluation Standard layout
+function prBuildGELDocHTML({ scores, summary, translator, editor, filename }) {
+  const esch = (t) => (t || '').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const today = new Date().toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
+  const gradeColor = scores.grade === 'UNACCEPTABLE' ? '#cc0000'
+                   : scores.grade === 'BASICALLY GOOD' ? '#b45f06'
+                   : '#1e3a8a';
+  return `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head><meta charset="utf-8"><title>GEL Evaluation Form — ${esch(filename)}</title>
+<style>
+body{font-family:Arial,sans-serif;font-size:11pt;line-height:1.45;color:#111}
+.h-org{text-align:center;font-weight:bold;font-size:14pt;margin-bottom:0}
+.h-addr{text-align:center;font-size:9.5pt;color:#444;margin:2pt 0}
+h1{text-align:center;font-size:15pt;color:#1e3a8a;border-bottom:2px solid #1e3a8a;padding-bottom:4pt;margin:14pt 0 10pt 0}
+h2{font-size:12pt;color:#222;margin:12pt 0 4pt 0;border-bottom:1px solid #cccccc;padding-bottom:2pt}
+.meta{margin:6pt 0;font-size:10.5pt}
+.meta .k{font-weight:bold;color:#374151;display:inline-block;min-width:170px}
+.grade-box{margin:10pt 0;padding:10pt 14pt;border:2px solid ${gradeColor};border-radius:6pt;background:#f8fafc}
+.grade-box .lbl{font-size:10pt;color:#666;letter-spacing:.08em;text-transform:uppercase}
+.grade-box .val{font-size:20pt;font-weight:bold;color:${gradeColor};margin-top:2pt}
+.grade-box .score{font-size:14pt;color:#374151;margin-top:2pt}
+table.score-tbl{border-collapse:collapse;width:100%;margin-top:6pt;font-size:10.5pt}
+table.score-tbl th{background:#1e3a8a;color:#fff;padding:6pt 10pt;text-align:left;border:1px solid #1e3a8a}
+table.score-tbl td{border:1px solid #ccc;padding:5pt 10pt;vertical-align:top}
+table.score-tbl td.max,table.score-tbl td.act{text-align:center;font-weight:bold;width:90pt}
+table.score-tbl tr.total td{background:#f0f4ff;font-weight:bold}
+.summary-box{margin-top:6pt;padding:8pt 12pt;background:#f8fafc;border-left:4px solid #1e3a8a;font-size:10.5pt;line-height:1.55}
+.notes{margin-top:14pt;font-size:9.5pt;color:#6b7280;font-style:italic;border-top:1px solid #e5e7eb;padding-top:6pt}
+</style></head>
+<body>
+<p class="h-org">GOOD ENTERPRISE LIMITED</p>
+<p class="h-addr">Add: Room 1903, Unit B, Haisong Building, Tairan 9th Road, Futian District, Shenzhen, P. R. China</p>
+<p class="h-addr">Tel: +86-755-8299 7602 &nbsp; · &nbsp; Fax: +86-755-8299 7576 &nbsp; · &nbsp; E-mail: gel.partners@gel-global.com</p>
+
+<h1>Evaluation Form</h1>
+
+<p class="meta"><span class="k">Translator:</span> ${esch(translator) || '<span style="color:#999;font-style:italic">[not specified]</span>'}</p>
+<p class="meta"><span class="k">Editor / Reviewer:</span> ${esch(editor)}</p>
+<p class="meta"><span class="k">Evaluation date:</span> ${esch(today)}</p>
+<p class="meta"><span class="k">Source file:</span> ${esch(filename) || '<span style="color:#999;font-style:italic">(unspecified)</span>'}</p>
+<p class="meta"><span class="k">Segments with issues:</span> ${prAllIssues.length} &nbsp; · &nbsp;
+  Critical: ${scores.tally.critical||0} · Major: ${scores.tally.major||0} · Minor: ${scores.tally.minor||0}</p>
+
+<div class="grade-box">
+  <div class="lbl">General Grade</div>
+  <div class="val">${esch(scores.grade)}</div>
+  <div class="score">${scores.total} / 100</div>
+</div>
+
+<h2>Breakdown of Scores</h2>
+<table class="score-tbl">
+  <thead>
+    <tr><th>Items</th><th class="max">Maximum scores</th><th class="act">Actual scores</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Wrong translations and information delivery due to the misunderstanding of source texts</td>
+      <td class="max">20</td><td class="act">${scores.wrongTrans}</td>
+    </tr>
+    <tr>
+      <td>Grammar (everything from spelling, correct use of punctuation, upper case or blank space to correct use of verbs)</td>
+      <td class="max">15</td><td class="act">${scores.grammar}</td>
+    </tr>
+    <tr>
+      <td>Fluency (Fluency of the language used in the translation, especially the syntax, such as the pattern/formation of sentences or phrases used in a language)</td>
+      <td class="max">15</td><td class="act">${scores.fluency}</td>
+    </tr>
+    <tr>
+      <td>Style (redundancies, proper use of longer sentences, etc.)</td>
+      <td class="max">15</td><td class="act">${scores.style}</td>
+    </tr>
+    <tr>
+      <td>Translation skill (the translation is a word-for-word translation of the original or it's a processed idea more coherent in the target language)</td>
+      <td class="max">15</td><td class="act">${scores.skill}</td>
+    </tr>
+    <tr>
+      <td>Expertise (including technical background, the correctness and consistency of terminology in the context)</td>
+      <td class="max">20</td><td class="act">${scores.expertise}</td>
+    </tr>
+    <tr class="total">
+      <td>Total</td>
+      <td class="max">100</td><td class="act">${scores.total}</td>
+    </tr>
+  </tbody>
+</table>
+
+${summary ? `<h2>Editor's Comments</h2><div class="summary-box">${esch(summary)}</div>` : ''}
+
+<p class="notes">This evaluation form was generated by the GPT-5.x Proofreader tool. Scores are derived algorithmically from issues identified during the proofreading pass: severity-weighted deductions per category (critical −3, major −1.5, minor −0.5), mapped to GEL's six criteria. The editor's comments above (if present) are an AI-assisted narrative summary based on the same findings.</p>
+
+</body></html>`;
 }
 
 // ═══════════════════════════════════════════════════════════════
