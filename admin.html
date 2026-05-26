@@ -1263,6 +1263,89 @@
         <div id="qa-error" style="display:none;padding:.7rem 1rem;background:#1a0000;border:1px solid #7f1d1d;border-radius:8px;font-size:.82rem;color:#fca5a5;margin-top:.6rem"></div>
       </div><!-- /qa card -->
 
+      <!-- ── 📑 TRANSLATION PROOFREADER ─────────────────────── -->
+      <div class="tool-card" style="grid-column:1/-1">
+        <div class="tool-header">
+          <div class="tool-icon">📑</div>
+          <div>
+            <div class="tool-title">Translation Proofreader (Hebrew)</div>
+            <div class="tool-sub">Upload .sdlppx with translated segments → GPT-5.4 reviews each one → preview issues by severity → apply selected fixes → download revised .sdlrpx</div>
+          </div>
+        </div>
+        <div class="tool-divider"></div>
+
+        <!-- SDLPPX upload -->
+        <div class="tdrop" id="pr-drop">
+          <input type="file" id="pr-file" accept=".sdlppx,.sdlrpx,.zip" onchange="prOnFile(this)"/>
+          <div class="tdrop-icon">📦</div>
+          <div class="tdrop-text">Drop .sdlppx (or .sdlrpx) with translated segments<br><small>Hebrew translation review · up to 200 MB</small></div>
+        </div>
+        <div class="tdrop-sel" id="pr-file-label"></div>
+
+        <!-- Settings row -->
+        <div class="tlang-row" style="margin-top:.5rem;align-items:center;flex-wrap:wrap;gap:.5rem">
+          <span class="tlang-lbl">Model:</span>
+          <select id="pr-model" style="padding:.4rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.78rem">
+            <option value="gpt-5.4" selected>gpt-5.4 (recommended)</option>
+            <option value="gpt-5.5">gpt-5.5 (premium · 2× cost)</option>
+            <option value="gpt-5.4-mini">gpt-5.4-mini (cheap drafts)</option>
+          </select>
+          <span class="tlang-lbl" style="margin-left:.8rem">Glossary:</span>
+          <select id="pr-gloss" style="padding:.4rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.78rem;min-width:180px">
+            <option value="">— None —</option>
+          </select>
+          <label style="font-size:.74rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem;margin-left:.8rem">
+            <input type="checkbox" id="pr-only-translated" checked style="width:.95rem;height:.95rem;cursor:pointer"/>
+            <span>Only review segments already translated</span>
+          </label>
+        </div>
+
+        <button class="tbtn gold" id="pr-btn" onclick="prAnalyze()" disabled>🔍 Analyze Translations</button>
+
+        <!-- Progress -->
+        <div class="tprog" id="pr-prog">
+          <div class="tprog-text" id="pr-prog-text">Working…</div>
+          <div class="tprog-bar-outer"><div class="tprog-bar-inner" id="pr-prog-bar"></div></div>
+        </div>
+
+        <!-- Results -->
+        <div id="pr-results" style="display:none;margin-top:.8rem">
+          <div class="tres-badges" id="pr-badges" style="margin-bottom:.5rem"></div>
+
+          <!-- Severity filter -->
+          <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.5rem;font-size:.74rem">
+            <button class="tbtn pr-filter active" data-sev="all" onclick="prSetFilter('all',this)" style="width:auto;padding:.35rem .8rem;font-size:.7rem;background:#1e1b4b;color:#a5b4fc">All <span id="pr-cnt-all">0</span></button>
+            <button class="tbtn pr-filter" data-sev="critical" onclick="prSetFilter('critical',this)" style="width:auto;padding:.35rem .8rem;font-size:.7rem;background:#0a0a14;color:#fca5a5;border:1px solid #7f1d1d">🔴 Critical <span id="pr-cnt-critical">0</span></button>
+            <button class="tbtn pr-filter" data-sev="major" onclick="prSetFilter('major',this)" style="width:auto;padding:.35rem .8rem;font-size:.7rem;background:#0a0a14;color:#fcd34d;border:1px solid #92400e">🟡 Major <span id="pr-cnt-major">0</span></button>
+            <button class="tbtn pr-filter" data-sev="minor" onclick="prSetFilter('minor',this)" style="width:auto;padding:.35rem .8rem;font-size:.7rem;background:#0a0a14;color:#94a3b8;border:1px solid #475569">⚪ Minor <span id="pr-cnt-minor">0</span></button>
+            <button class="tbtn" style="margin-left:auto;width:auto;padding:.35rem .8rem;font-size:.7rem;background:#1e1b4b;color:#a5b4fc" onclick="prToggleAll(true)">☑ Select all</button>
+            <button class="tbtn" style="width:auto;padding:.35rem .8rem;font-size:.7rem;background:#1e1b4b;color:#a5b4fc" onclick="prToggleAll(false)">☐ Deselect all</button>
+          </div>
+
+          <div style="max-height:520px;overflow-y:auto;border:1px solid var(--border);border-radius:8px">
+            <table style="width:100%;border-collapse:collapse;font-size:.76rem">
+              <thead>
+                <tr style="background:#1e1b4b;position:sticky;top:0;z-index:1">
+                  <th style="padding:.5rem .5rem;width:36px"></th>
+                  <th style="padding:.5rem .5rem;width:40px;color:#a5b4fc">Seg</th>
+                  <th style="padding:.5rem .5rem;width:90px;color:#a5b4fc">Severity</th>
+                  <th style="padding:.5rem .5rem;text-align:left;color:#a5b4fc">Source / Current target / Issue / Suggested fix</th>
+                </tr>
+              </thead>
+              <tbody id="pr-tbody"></tbody>
+            </table>
+          </div>
+
+          <div style="margin-top:.7rem;display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
+            <button class="tbtn gold" id="pr-apply-btn" onclick="prApplyAndDownload()">⚡ Apply Selected &amp; Download Revised .sdlrpx</button>
+            <span id="pr-selected-count" style="font-size:.78rem;color:#94a3b8">0 selected</span>
+          </div>
+        </div>
+
+        <!-- Error -->
+        <div id="pr-error" style="display:none;padding:.7rem 1rem;background:#1a0000;border:1px solid #7f1d1d;border-radius:8px;font-size:.82rem;color:#fca5a5;margin-top:.6rem"></div>
+      </div><!-- /proofreader card -->
+
       <!-- ── ✉️ EMAIL RESPONSE GENERATOR ────────────────────── -->
       <div class="tool-card" style="grid-column:1/-1">
         <div class="tool-header">
@@ -5043,6 +5126,368 @@ Output only the corrected/translated text for each item, numbered to match, one 
     prog.classList.remove('show');
     err.style.display = 'block'; err.textContent = '❌ ' + e.message;
   } finally { btn.disabled = false; }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  📑 TRANSLATION PROOFREADER (Hebrew)
+//  Reads an .sdlppx, sends each translated source/target pair to
+//  gpt-5.4 for review, surfaces issues by severity, and applies
+//  selected fixes back into the SDLXLIFF → revised .sdlrpx.
+// ═══════════════════════════════════════════════════════════════
+let prFile = null;
+let prAllIssues = [];   // [{ segIdx, mid, source, target, fileIdx, issues: [...] }]
+let prActiveFilter = 'all';
+let prRawSDLXLIFFs = []; // [{ relPath, content }] — captured during analysis for later apply
+
+async function prOnFile(input) {
+  prFile = input.files?.[0];
+  const lbl = document.getElementById('pr-file-label');
+  const btn = document.getElementById('pr-btn');
+  if (!prFile) { btn.disabled = true; return; }
+  lbl.style.display = 'block';
+  lbl.textContent = `📦 ${prFile.name} (${(prFile.size/1024/1024).toFixed(2)} MB)`;
+  btn.disabled = false;
+  // Refresh glossary picker from current saved glossaries
+  const sel = document.getElementById('pr-gloss');
+  if (sel && typeof gmLoadStore === 'function') {
+    const store = gmLoadStore();
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">— None —</option>' +
+      store.glossaries.map(g => `<option value="${g.id}">${g.name.replace(/</g,'&lt;')} (${g.terms.length} terms)</option>`).join('');
+    sel.value = prev || '';
+  }
+}
+
+// Drag-and-drop on the upload area
+(function(){
+  const dz = document.getElementById('pr-drop');
+  if (!dz) return;
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+  dz.addEventListener('drop', e => {
+    e.preventDefault(); dz.classList.remove('drag-over');
+    const f = e.dataTransfer.files[0];
+    if (f) prOnFile({ files: [f] });
+  });
+})();
+
+// One batch → GPT-5.4 review → JSON array of {n, issues}
+async function prReviewBatch(batch, model, apiKey, glossary) {
+  const numbered = batch.map((s, i) =>
+    `${i+1}.\nEN: ${(s.source||'').replace(/\s+/g,' ').trim()}\nHE: ${(s.target||'').replace(/\s+/g,' ').trim()}`
+  ).join('\n\n');
+
+  const glossBlock = glossary && glossary.length
+    ? '\n\nGLOSSARY (Hebrew translations that MUST be used for these English terms):\n' +
+      glossary.slice(0, 80).map(t => `- "${t.source}" → "${t.target}"`).join('\n')
+    : '';
+
+  const systemPrompt =
+`You are a senior Hebrew translation reviewer (English → Hebrew). Your job is to find genuine quality issues in each translated pair, not to nitpick.
+
+CATEGORIES:
+- grammar: Hebrew grammar/agreement errors
+- spelling: Hebrew spelling errors
+- terminology: wrong or inconsistent technical term
+- accuracy: target doesn't match the source meaning
+- omission: source content missing from target
+- addition: target has content not in the source
+- punctuation: punctuation errors
+- formality: wrong register (too casual or too stiff for the context)
+- format: numbers / units / dates / placeholders mismatched
+
+SEVERITY:
+- critical: changes meaning, omits key info, breaks usability
+- major: clear error a professional reviewer would fix
+- minor: style polish, optional improvement
+
+For EACH numbered pair, return exactly one JSON object:
+  { "n": <number>, "issues": [ { "severity": "critical"|"major"|"minor", "category": "<one of above>", "description": "<short English explanation>", "suggestion": "<corrected full Hebrew target>" } ] }
+
+If a pair is fine, return: { "n": <number>, "issues": [] }
+
+Output a JSON ARRAY containing exactly ${batch.length} objects in order.
+ONLY the JSON array. NO markdown, NO commentary, NO code fences.
+
+When suggesting a fix, the "suggestion" MUST be the FULL replacement Hebrew target (not just the corrected fragment) — so it can be inserted directly.${glossBlock}`;
+
+  try {
+    const r = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        temperature: 0.2,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user',   content: numbered }
+        ]
+      })
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error?.message || 'GPT error ' + r.status);
+    let raw = (data.choices?.[0]?.message?.content || '').trim();
+    raw = raw.replace(/^```[a-z]*\n?/i, '').replace(/```\s*$/, '').trim();
+    let parsed;
+    try { parsed = JSON.parse(raw); } catch { throw new Error('Non-JSON response: ' + raw.slice(0, 200)); }
+    if (!Array.isArray(parsed)) throw new Error('Expected JSON array');
+    return parsed;
+  } catch (e) {
+    console.warn('[proofreader] batch failed:', e.message);
+    // Return an empty result for each segment in this batch
+    return batch.map((_, i) => ({ n: i+1, issues: [] }));
+  }
+}
+
+async function prAnalyze() {
+  const apiKey = getApiKey();
+  if (!apiKey) { promptApiKey(); return; }
+  if (!prFile) return;
+
+  const model = document.getElementById('pr-model').value || 'gpt-5.4';
+  const glossId = document.getElementById('pr-gloss').value;
+  const onlyTranslated = document.getElementById('pr-only-translated').checked;
+  const glossary = (glossId && typeof gmFind === 'function') ? (gmFind(glossId)?.terms || []) : [];
+
+  const btn  = document.getElementById('pr-btn');
+  const prog = document.getElementById('pr-prog');
+  const bar  = document.getElementById('pr-prog-bar');
+  const txt  = document.getElementById('pr-prog-text');
+  const err  = document.getElementById('pr-error');
+  const res  = document.getElementById('pr-results');
+  err.style.display = 'none'; res.style.display = 'none';
+  btn.disabled = true; prog.classList.add('show');
+  bar.style.width = '5%';
+
+  try {
+    txt.textContent = 'Reading package…';
+    const buf = await prFile.arrayBuffer();
+    const zip = await JSZip.loadAsync(buf);
+
+    // Find all SDLXLIFF files in any locale folder
+    const xliffEntries = [];
+    zip.forEach((relPath, entry) => {
+      if (!entry.dir && /\.sdlxliff$/i.test(relPath)) xliffEntries.push({ relPath, entry });
+    });
+    if (xliffEntries.length === 0) throw new Error('No .sdlxliff files found in the package.');
+
+    // Extract source+target pairs from each file
+    prRawSDLXLIFFs = [];
+    const segsToReview = [];
+    for (let fi = 0; fi < xliffEntries.length; fi++) {
+      const { relPath, entry } = xliffEntries[fi];
+      const xml = await entry.async('string');
+      prRawSDLXLIFFs.push({ relPath, content: xml });
+      const segs = trExtractSegments(xml); // reuses Trados translator's parser
+      for (const s of segs) {
+        if (onlyTranslated && !s.targetText) continue;
+        if (!s.targetText) continue; // need both source and target to proofread
+        // Get plain source (without placeholders) for GPT context
+        const src = (s.sourceText || '').replace(/\{\{TAG_\d+\}\}/g, ' ').replace(/\s+/g,' ').trim();
+        const tgt = (s.targetText || '').replace(/\{\{TAG_\d+\}\}/g, ' ').replace(/\s+/g,' ').trim();
+        if (!src || !tgt) continue;
+        segsToReview.push({ fileIdx: fi, mid: s.mid, unitId: s.unitId, source: src, target: tgt });
+      }
+    }
+
+    if (segsToReview.length === 0) throw new Error('No translated segments found to review.');
+
+    txt.textContent = `Reviewing ${segsToReview.length} translated segments with ${model}…`;
+    bar.style.width = '15%';
+
+    const BATCH = 12;
+    prAllIssues = [];
+    let segIdxCounter = 0;
+    for (let i = 0; i < segsToReview.length; i += BATCH) {
+      const batch = segsToReview.slice(i, i + BATCH);
+      txt.textContent = `Reviewing segments ${i+1}–${Math.min(i+BATCH, segsToReview.length)} of ${segsToReview.length} (${model})…`;
+      bar.style.width = (15 + (i / segsToReview.length) * 80) + '%';
+      const results = await prReviewBatch(batch, model, apiKey, glossary);
+      for (let j = 0; j < batch.length; j++) {
+        const r = results.find(x => x.n === j+1) || { issues: [] };
+        if (r.issues && r.issues.length > 0) {
+          prAllIssues.push({
+            id: 'iss_' + (segIdxCounter++),
+            ...batch[j],
+            issues: r.issues,
+            apply: false,
+          });
+        }
+      }
+      if (i + BATCH < segsToReview.length) await new Promise(r => setTimeout(r, 250));
+    }
+
+    bar.style.width = '100%'; txt.textContent = '✅ Done!';
+    setTimeout(() => prog.classList.remove('show'), 1500);
+    prRenderResults();
+  } catch (e) {
+    prog.classList.remove('show');
+    err.style.display = 'block';
+    err.textContent = '❌ ' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function prSetFilter(sev, btn) {
+  prActiveFilter = sev;
+  document.querySelectorAll('.pr-filter').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  prRenderResults(true);
+}
+
+function prToggleAll(state) {
+  // Only toggle visible (filtered) rows
+  prAllIssues.forEach(item => {
+    const maxSev = prMaxSeverity(item.issues);
+    if (prActiveFilter === 'all' || maxSev === prActiveFilter) item.apply = state;
+  });
+  prRenderResults(true);
+}
+
+function prMaxSeverity(issues) {
+  const order = { critical: 3, major: 2, minor: 1 };
+  let max = 0, maxSev = 'minor';
+  for (const i of issues) {
+    const v = order[i.severity] || 0;
+    if (v > max) { max = v; maxSev = i.severity; }
+  }
+  return maxSev;
+}
+
+function prSeverityBadge(sev) {
+  if (sev === 'critical') return '<span style="background:rgba(248,113,113,.18);color:#fca5a5;padding:.15rem .5rem;border-radius:4px;font-weight:600;font-size:.7rem">🔴 critical</span>';
+  if (sev === 'major')    return '<span style="background:rgba(252,211,77,.15);color:#fcd34d;padding:.15rem .5rem;border-radius:4px;font-weight:600;font-size:.7rem">🟡 major</span>';
+  return '<span style="background:rgba(148,163,184,.15);color:#cbd5e1;padding:.15rem .5rem;border-radius:4px;font-weight:600;font-size:.7rem">⚪ minor</span>';
+}
+
+function prRenderResults(skipBadges) {
+  const res = document.getElementById('pr-results');
+  res.style.display = 'block';
+
+  // Counts by severity (across all issues, not per-segment)
+  let cAll = prAllIssues.length, cCrit = 0, cMaj = 0, cMin = 0;
+  prAllIssues.forEach(item => {
+    const m = prMaxSeverity(item.issues);
+    if (m === 'critical') cCrit++; else if (m === 'major') cMaj++; else cMin++;
+  });
+  document.getElementById('pr-cnt-all').textContent = cAll;
+  document.getElementById('pr-cnt-critical').textContent = cCrit;
+  document.getElementById('pr-cnt-major').textContent = cMaj;
+  document.getElementById('pr-cnt-minor').textContent = cMin;
+
+  if (!skipBadges) {
+    document.getElementById('pr-badges').innerHTML = `
+      <span class="tres-badge tb-seg">📑 ${cAll} segments with issues</span>
+      <span class="tres-badge tb-lang">🔴 ${cCrit} critical</span>
+      <span class="tres-badge tb-lang">🟡 ${cMaj} major</span>
+      <span class="tres-badge tb-lang">⚪ ${cMin} minor</span>`;
+  }
+
+  const filtered = prAllIssues.filter(item => {
+    if (prActiveFilter === 'all') return true;
+    return prMaxSeverity(item.issues) === prActiveFilter;
+  });
+
+  document.getElementById('pr-tbody').innerHTML = filtered.length === 0
+    ? '<tr><td colspan="4" style="padding:1rem;text-align:center;color:#64748b">No issues at this severity.</td></tr>'
+    : filtered.map(item => {
+        const sev = prMaxSeverity(item.issues);
+        const issuesHTML = item.issues.map((i, idx) => `
+          <div style="margin-top:.45rem;padding:.4rem .55rem;background:#0a0a14;border:1px solid #1f2937;border-radius:6px">
+            <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.25rem">
+              ${prSeverityBadge(i.severity)}
+              <span style="color:#94a3b8;font-size:.7rem">${esc(i.category||'')}</span>
+              <span style="color:#cbd5e1;font-size:.74rem">${esc(i.description||'')}</span>
+            </div>
+            ${i.suggestion ? `<div style="margin-top:.2rem"><span style="color:#34d399;font-size:.72rem">→ Suggested fix:</span> <span dir="rtl" style="color:#e2e8f0;font-size:.78rem">${esc(i.suggestion)}</span></div>` : ''}
+          </div>`).join('');
+        return `<tr style="border-top:1px solid #1f2937">
+          <td style="padding:.45rem .4rem;text-align:center;vertical-align:top">
+            <input type="checkbox" class="pr-cb" data-id="${item.id}" ${item.apply?'checked':''} onchange="prToggleOne('${item.id}', this.checked)" style="width:1rem;height:1rem;cursor:pointer"/>
+          </td>
+          <td style="padding:.45rem .4rem;text-align:center;color:#a5b4fc;font-family:monospace;font-size:.72rem;vertical-align:top">${item.mid}</td>
+          <td style="padding:.45rem .4rem;text-align:center;vertical-align:top">${prSeverityBadge(sev)}</td>
+          <td style="padding:.45rem .55rem;vertical-align:top">
+            <div style="font-size:.72rem;color:#94a3b8"><strong style="color:#cbd5e1">EN:</strong> ${esc(item.source)}</div>
+            <div style="font-size:.72rem;color:#94a3b8;direction:rtl;text-align:right;margin-top:.15rem"><strong style="color:#cbd5e1">HE:</strong> ${esc(item.target)}</div>
+            ${issuesHTML}
+          </td>
+        </tr>`;
+      }).join('');
+
+  prUpdateSelectedCount();
+}
+
+function prToggleOne(id, state) {
+  const item = prAllIssues.find(x => x.id === id);
+  if (item) { item.apply = state; prUpdateSelectedCount(); }
+}
+
+function prUpdateSelectedCount() {
+  const n = prAllIssues.filter(x => x.apply).length;
+  const el = document.getElementById('pr-selected-count');
+  if (el) el.textContent = `${n} selected`;
+}
+
+async function prApplyAndDownload() {
+  const toApply = prAllIssues.filter(x => x.apply && x.issues.length && x.issues[0].suggestion);
+  if (toApply.length === 0) { showAdminToast('No fixes selected.'); return; }
+  if (!prFile || !prRawSDLXLIFFs.length) { showAdminToast('No file loaded.'); return; }
+
+  const btn = document.getElementById('pr-apply-btn');
+  btn.disabled = true; btn.textContent = '⏳ Applying fixes…';
+
+  try {
+    const buf = await prFile.arrayBuffer();
+    const zip = await JSZip.loadAsync(buf);
+    const outZip = new JSZip();
+    // Copy all non-SDLXLIFF files verbatim
+    const copyJobs = [];
+    zip.forEach((relPath, entry) => {
+      if (entry.dir) return;
+      if (/\.sdlxliff$/i.test(relPath)) return; // we'll rewrite these
+      copyJobs.push(entry.async('arraybuffer').then(ab => outZip.file(relPath, ab)));
+    });
+    await Promise.all(copyJobs);
+
+    // For each SDLXLIFF, apply fixes targeted at it
+    for (let fi = 0; fi < prRawSDLXLIFFs.length; fi++) {
+      let content = prRawSDLXLIFFs[fi].content;
+      const segs = trExtractSegments(content);
+      const segMap = new Map();
+      segs.forEach(s => segMap.set(s.mid, s));
+      const applicable = toApply.filter(t => t.fileIdx === fi);
+      for (const t of applicable) {
+        const seg = segMap.get(t.mid);
+        if (!seg) continue;
+        // Use the first suggested fix (sorted by severity); concatenate placeholders if any
+        const fix = t.issues[0].suggestion;
+        content = trInsertTranslation(content, seg, fix);
+      }
+      // Validate the resulting XML
+      const check = trValidateXml(content);
+      if (!check.ok) throw new Error(`File ${fi+1} failed XML validation after applying fixes: ${check.message}`);
+      outZip.file(prRawSDLXLIFFs[fi].relPath, content);
+    }
+
+    btn.textContent = '⏳ Packaging…';
+    const outBlob = await outZip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+    const url = URL.createObjectURL(outBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = prFile.name.replace(/\.sdl(pp|rp)x$/i, '_PROOFREAD.sdlrpx');
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+    showAdminToast(`✅ Applied ${toApply.length} fixes — file downloaded.`);
+    btn.textContent = `✓ Downloaded — ${toApply.length} fixes applied. Re-download?`;
+    btn.disabled = false;
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = '⚡ Apply Selected & Download Revised .sdlrpx';
+    document.getElementById('pr-error').style.display = 'block';
+    document.getElementById('pr-error').textContent = '❌ ' + e.message;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
