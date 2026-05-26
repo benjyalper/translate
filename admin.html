@@ -1299,8 +1299,17 @@
             <span>Only review segments already translated</span>
           </label>
         </div>
+        <!-- Track-changes flag: mark approved segments as Draft so Trados shows
+             them as "needs review" — closest safe approximation to true
+             change tracking without risking SDLXLIFF corruption. -->
+        <div class="tlang-row" style="margin-top:.4rem">
+          <label style="font-size:.74rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem">
+            <input type="checkbox" id="pr-mark-draft" checked style="width:.95rem;height:.95rem;cursor:pointer"/>
+            <span>📌 <strong>Mark approved segments as Draft</strong> in Trados (so they show as "needs review" alongside the change)</span>
+          </label>
+        </div>
 
-        <button class="tbtn gold" id="pr-btn" onclick="prAnalyze()" disabled>🔍 Analyze Translations</button>
+        <button class="tbtn gold" id="pr-btn" onclick="prAnalyze()" disabled>🔍 Analyze Translations (suggestions only — nothing modified)</button>
 
         <!-- Progress -->
         <div class="tprog" id="pr-prog">
@@ -1318,27 +1327,28 @@
             <button class="tbtn pr-filter" data-sev="critical" onclick="prSetFilter('critical',this)" style="width:auto;padding:.35rem .8rem;font-size:.7rem;background:#0a0a14;color:#fca5a5;border:1px solid #7f1d1d">🔴 Critical <span id="pr-cnt-critical">0</span></button>
             <button class="tbtn pr-filter" data-sev="major" onclick="prSetFilter('major',this)" style="width:auto;padding:.35rem .8rem;font-size:.7rem;background:#0a0a14;color:#fcd34d;border:1px solid #92400e">🟡 Major <span id="pr-cnt-major">0</span></button>
             <button class="tbtn pr-filter" data-sev="minor" onclick="prSetFilter('minor',this)" style="width:auto;padding:.35rem .8rem;font-size:.7rem;background:#0a0a14;color:#94a3b8;border:1px solid #475569">⚪ Minor <span id="pr-cnt-minor">0</span></button>
-            <button class="tbtn" style="margin-left:auto;width:auto;padding:.35rem .8rem;font-size:.7rem;background:#1e1b4b;color:#a5b4fc" onclick="prToggleAll(true)">☑ Select all</button>
-            <button class="tbtn" style="width:auto;padding:.35rem .8rem;font-size:.7rem;background:#1e1b4b;color:#a5b4fc" onclick="prToggleAll(false)">☐ Deselect all</button>
+            <button class="tbtn" style="margin-left:auto;width:auto;padding:.35rem .8rem;font-size:.7rem;background:#1e1b4b;color:#a5b4fc" onclick="prApproveAllVisible(true)">✓ Approve all visible</button>
+            <button class="tbtn" style="width:auto;padding:.35rem .8rem;font-size:.7rem;background:#1e1b4b;color:#a5b4fc" onclick="prApproveAllVisible(false)">↶ Un-approve all visible</button>
           </div>
 
           <div style="max-height:520px;overflow-y:auto;border:1px solid var(--border);border-radius:8px">
             <table style="width:100%;border-collapse:collapse;font-size:.76rem">
               <thead>
                 <tr style="background:#1e1b4b;position:sticky;top:0;z-index:1">
-                  <th style="padding:.5rem .5rem;width:36px"></th>
                   <th style="padding:.5rem .5rem;width:40px;color:#a5b4fc">Seg</th>
                   <th style="padding:.5rem .5rem;width:90px;color:#a5b4fc">Severity</th>
                   <th style="padding:.5rem .5rem;text-align:left;color:#a5b4fc">Source / Current target / Issue / Suggested fix</th>
+                  <th style="padding:.5rem .5rem;width:160px;color:#a5b4fc">Action</th>
                 </tr>
               </thead>
               <tbody id="pr-tbody"></tbody>
             </table>
           </div>
 
-          <div style="margin-top:.7rem;display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
-            <button class="tbtn gold" id="pr-apply-btn" onclick="prApplyAndDownload()">⚡ Apply Selected &amp; Download Revised .sdlrpx</button>
-            <span id="pr-selected-count" style="font-size:.78rem;color:#94a3b8">0 selected</span>
+          <div style="margin-top:.7rem;display:flex;gap:.7rem;flex-wrap:wrap;align-items:center">
+            <button class="tbtn gold" id="pr-dl-btn" onclick="prDownloadRevised()" disabled>⬇ Download Revised .sdlrpx</button>
+            <span id="pr-selected-count" style="font-size:.78rem;color:#94a3b8">0 fixes approved</span>
+            <span style="font-size:.7rem;color:#64748b;margin-left:auto">📌 Only approved fixes will be written into the downloaded file.</span>
           </div>
         </div>
 
@@ -5336,11 +5346,16 @@ function prSetFilter(sev, btn) {
   prRenderResults(true);
 }
 
-function prToggleAll(state) {
-  // Only toggle visible (filtered) rows
+// Per-row approvals — clicking "✓ Approve" flips the in-memory flag.
+// Nothing happens to any file until the user clicks "Download Revised".
+function prApprove(id)   { const i = prAllIssues.find(x => x.id === id); if (i) { i.approved = true;  prRenderResults(true); } }
+function prUnapprove(id) { const i = prAllIssues.find(x => x.id === id); if (i) { i.approved = false; prRenderResults(true); } }
+
+// Bulk action that respects the active severity filter.
+function prApproveAllVisible(state) {
   prAllIssues.forEach(item => {
     const maxSev = prMaxSeverity(item.issues);
-    if (prActiveFilter === 'all' || maxSev === prActiveFilter) item.apply = state;
+    if (prActiveFilter === 'all' || maxSev === prActiveFilter) item.approved = !!state;
   });
   prRenderResults(true);
 }
@@ -5393,7 +5408,7 @@ function prRenderResults(skipBadges) {
     ? '<tr><td colspan="4" style="padding:1rem;text-align:center;color:#64748b">No issues at this severity.</td></tr>'
     : filtered.map(item => {
         const sev = prMaxSeverity(item.issues);
-        const issuesHTML = item.issues.map((i, idx) => `
+        const issuesHTML = item.issues.map((i) => `
           <div style="margin-top:.45rem;padding:.4rem .55rem;background:#0a0a14;border:1px solid #1f2937;border-radius:6px">
             <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.25rem">
               ${prSeverityBadge(i.severity)}
@@ -5402,10 +5417,14 @@ function prRenderResults(skipBadges) {
             </div>
             ${i.suggestion ? `<div style="margin-top:.2rem"><span style="color:#34d399;font-size:.72rem">→ Suggested fix:</span> <span dir="rtl" style="color:#e2e8f0;font-size:.78rem">${esc(i.suggestion)}</span></div>` : ''}
           </div>`).join('');
-        return `<tr style="border-top:1px solid #1f2937">
-          <td style="padding:.45rem .4rem;text-align:center;vertical-align:top">
-            <input type="checkbox" class="pr-cb" data-id="${item.id}" ${item.apply?'checked':''} onchange="prToggleOne('${item.id}', this.checked)" style="width:1rem;height:1rem;cursor:pointer"/>
-          </td>
+        const hasSuggestion = item.issues.some(i => i.suggestion);
+        const actionCell = !hasSuggestion
+          ? '<span style="color:#64748b;font-size:.7rem;font-style:italic">(no suggestion to apply)</span>'
+          : (item.approved
+              ? `<button class="tbtn" onclick="prUnapprove('${item.id}')" style="width:100%;padding:.4rem .7rem;font-size:.72rem;background:#0a1a0a;color:#34d399;border:1px solid #14532d;font-weight:600">✓ Approved · undo</button>`
+              : `<button class="tbtn" onclick="prApprove('${item.id}')" style="width:100%;padding:.4rem .7rem;font-size:.72rem;background:#1e1b4b;color:#a5b4fc">✓ Approve fix</button>`);
+        const rowBg = item.approved ? 'background:rgba(52,211,153,0.04)' : '';
+        return `<tr style="border-top:1px solid #1f2937;${rowBg}">
           <td style="padding:.45rem .4rem;text-align:center;color:#a5b4fc;font-family:monospace;font-size:.72rem;vertical-align:top">${item.mid}</td>
           <td style="padding:.45rem .4rem;text-align:center;vertical-align:top">${prSeverityBadge(sev)}</td>
           <td style="padding:.45rem .55rem;vertical-align:top">
@@ -5413,30 +5432,48 @@ function prRenderResults(skipBadges) {
             <div style="font-size:.72rem;color:#94a3b8;direction:rtl;text-align:right;margin-top:.15rem"><strong style="color:#cbd5e1">HE:</strong> ${esc(item.target)}</div>
             ${issuesHTML}
           </td>
+          <td style="padding:.45rem .5rem;vertical-align:top">${actionCell}</td>
         </tr>`;
       }).join('');
 
-  prUpdateSelectedCount();
+  prUpdateApprovedCount();
 }
 
-function prToggleOne(id, state) {
-  const item = prAllIssues.find(x => x.id === id);
-  if (item) { item.apply = state; prUpdateSelectedCount(); }
+function prUpdateApprovedCount() {
+  const n = prAllIssues.filter(x => x.approved).length;
+  const lbl = document.getElementById('pr-selected-count');
+  const btn = document.getElementById('pr-dl-btn');
+  if (lbl) lbl.textContent = `${n} fix${n===1?'':'es'} approved`;
+  if (btn) btn.disabled = (n === 0);
 }
 
-function prUpdateSelectedCount() {
-  const n = prAllIssues.filter(x => x.apply).length;
-  const el = document.getElementById('pr-selected-count');
-  if (el) el.textContent = `${n} selected`;
+// Rewrite a single segment's <sdl:seg id="N" ...> conf attribute to Draft
+// (was "Translated"). This makes Trados Studio surface the segment with the
+// "draft" status icon and pop it into the Editor's review queue — closest we
+// can safely get to true track-changes without risking SDLXLIFF corruption.
+function prMarkSegmentAsDraft(xml, mid) {
+  return xml.replace(
+    new RegExp(`(<sdl:seg\\s+id="${mid}")([^/>]*)(\\s*\\/?>)`),
+    (whole, open, attrs, close) => {
+      // Replace existing conf="X" with conf="Draft"; add if missing
+      let newAttrs = attrs.replace(/conf="[^"]*"/, 'conf="Draft"');
+      if (newAttrs === attrs && !/conf=/.test(attrs)) newAttrs = attrs + ' conf="Draft"';
+      // Tag origin as proofreader so PMs can audit who/what changed it
+      if (!/origin-system=/.test(newAttrs)) newAttrs += ' origin-system="GPT-5.x Proofreader"';
+      else newAttrs = newAttrs.replace(/origin-system="[^"]*"/, 'origin-system="GPT-5.x Proofreader"');
+      return `${open}${newAttrs}${close}`;
+    }
+  );
 }
 
-async function prApplyAndDownload() {
-  const toApply = prAllIssues.filter(x => x.apply && x.issues.length && x.issues[0].suggestion);
-  if (toApply.length === 0) { showAdminToast('No fixes selected.'); return; }
+async function prDownloadRevised() {
+  const toApply = prAllIssues.filter(x => x.approved && x.issues.length && x.issues[0].suggestion);
+  if (toApply.length === 0) { showAdminToast('No fixes approved.'); return; }
   if (!prFile || !prRawSDLXLIFFs.length) { showAdminToast('No file loaded.'); return; }
 
-  const btn = document.getElementById('pr-apply-btn');
-  btn.disabled = true; btn.textContent = '⏳ Applying fixes…';
+  const btn = document.getElementById('pr-dl-btn');
+  btn.disabled = true; btn.textContent = '⏳ Applying approved fixes…';
+  const markDraft = document.getElementById('pr-mark-draft').checked;
 
   try {
     const buf = await prFile.arrayBuffer();
@@ -5446,12 +5483,12 @@ async function prApplyAndDownload() {
     const copyJobs = [];
     zip.forEach((relPath, entry) => {
       if (entry.dir) return;
-      if (/\.sdlxliff$/i.test(relPath)) return; // we'll rewrite these
+      if (/\.sdlxliff$/i.test(relPath)) return;
       copyJobs.push(entry.async('arraybuffer').then(ab => outZip.file(relPath, ab)));
     });
     await Promise.all(copyJobs);
 
-    // For each SDLXLIFF, apply fixes targeted at it
+    // For each SDLXLIFF, apply ONLY the approved fixes targeted at it
     for (let fi = 0; fi < prRawSDLXLIFFs.length; fi++) {
       let content = prRawSDLXLIFFs[fi].content;
       const segs = trExtractSegments(content);
@@ -5461,13 +5498,15 @@ async function prApplyAndDownload() {
       for (const t of applicable) {
         const seg = segMap.get(t.mid);
         if (!seg) continue;
-        // Use the first suggested fix (sorted by severity); concatenate placeholders if any
+        // Apply the first issue's suggested fix
         const fix = t.issues[0].suggestion;
         content = trInsertTranslation(content, seg, fix);
+        // Optionally downgrade conf to "Draft" so Trados shows it as
+        // pending review (visible track-change signal)
+        if (markDraft) content = prMarkSegmentAsDraft(content, seg.mid);
       }
-      // Validate the resulting XML
       const check = trValidateXml(content);
-      if (!check.ok) throw new Error(`File ${fi+1} failed XML validation after applying fixes: ${check.message}`);
+      if (!check.ok) throw new Error(`File ${fi+1} failed XML validation: ${check.message}`);
       outZip.file(prRawSDLXLIFFs[fi].relPath, content);
     }
 
@@ -5479,12 +5518,12 @@ async function prApplyAndDownload() {
     a.download = prFile.name.replace(/\.sdl(pp|rp)x$/i, '_PROOFREAD.sdlrpx');
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1500);
-    showAdminToast(`✅ Applied ${toApply.length} fixes — file downloaded.`);
-    btn.textContent = `✓ Downloaded — ${toApply.length} fixes applied. Re-download?`;
+    showAdminToast(`✅ Wrote ${toApply.length} approved fix${toApply.length===1?'':'es'} — file downloaded.`);
+    btn.textContent = `✓ Downloaded — ${toApply.length} fix${toApply.length===1?'':'es'} applied. Re-download?`;
     btn.disabled = false;
   } catch (e) {
     btn.disabled = false;
-    btn.textContent = '⚡ Apply Selected & Download Revised .sdlrpx';
+    btn.textContent = '⬇ Download Revised .sdlrpx';
     document.getElementById('pr-error').style.display = 'block';
     document.getElementById('pr-error').textContent = '❌ ' + e.message;
   }
