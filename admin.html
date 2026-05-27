@@ -7,6 +7,14 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <!-- PDF.js for the Document Proofreader card (PDF text extraction in browser) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.js"></script>
+  <script>
+    if (window.pdfjsLib) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js';
+    }
+  </script>
   <!-- (No ffmpeg.wasm needed — we slice with the browser's native Web Audio API) -->
   <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -1376,6 +1384,77 @@
         <!-- Error -->
         <div id="pr-error" style="display:none;padding:.7rem 1rem;background:#1a0000;border:1px solid #7f1d1d;border-radius:8px;font-size:.82rem;color:#fca5a5;margin-top:.6rem"></div>
       </div><!-- /proofreader card -->
+
+      <!-- ── 📄 DOCUMENT PROOFREADER (PDF / DOCX → Word) ───────── -->
+      <div class="tool-card" style="grid-column:1/-1">
+        <div class="tool-header">
+          <div class="tool-icon">📄</div>
+          <div>
+            <div class="tool-title">Document Proofreader (Hebrew)</div>
+            <div class="tool-sub">Upload Hebrew .pdf or .docx → GPT-5.4 reviews each paragraph → preview issues by severity → approve fixes → download .docx with native Word track changes (red strikethrough + blue insert)</div>
+          </div>
+        </div>
+        <div class="tool-divider"></div>
+
+        <!-- File upload -->
+        <div class="tdrop" id="dp-drop">
+          <input type="file" id="dp-file" accept=".pdf,.docx" onchange="dpOnFile(this)"/>
+          <div class="tdrop-icon">📄</div>
+          <div class="tdrop-text">Drop a Hebrew .pdf or .docx<br><small>monolingual Hebrew review · up to 50 MB</small></div>
+        </div>
+        <div class="tdrop-sel" id="dp-file-label"></div>
+
+        <!-- Settings row -->
+        <div class="tlang-row" style="margin-top:.5rem;align-items:center;flex-wrap:wrap;gap:.5rem">
+          <span class="tlang-lbl">Model:</span>
+          <select id="dp-model" style="padding:.4rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.78rem">
+            <option value="gpt-5.4" selected>gpt-5.4 (recommended)</option>
+            <option value="gpt-5.5">gpt-5.5 (premium · 2× cost)</option>
+            <option value="gpt-5.4-mini">gpt-5.4-mini (cheap drafts)</option>
+          </select>
+          <label style="font-size:.74rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem;margin-left:.8rem">
+            <input type="text" id="dp-author" value="Benjy Alper" style="padding:.4rem .55rem;background:#0f0f17;border:1px solid var(--border);border-radius:5px;color:#e2e8f0;font-size:.76rem;width:130px"/>
+            <span>Reviewer name (Word author)</span>
+          </label>
+        </div>
+
+        <button class="tbtn gold" id="dp-btn" onclick="dpAnalyze()" disabled>🔍 Analyze Paragraphs (suggestions only — nothing modified)</button>
+
+        <!-- Progress -->
+        <div class="tprog" id="dp-prog">
+          <div class="tprog-text" id="dp-prog-text">Working…</div>
+          <div class="tprog-bar-outer"><div class="tprog-bar-inner" id="dp-prog-bar"></div></div>
+        </div>
+
+        <!-- Results -->
+        <div id="dp-results" style="display:none;margin-top:.8rem">
+          <div class="tres-badges" id="dp-badges" style="margin-bottom:.5rem"></div>
+
+          <!-- Severity filter -->
+          <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.5rem;font-size:.74rem">
+            <button class="tbtn dp-filter active" data-sev="all" onclick="dpSetFilter('all',this)" style="width:auto;padding:.35rem .8rem;font-size:.7rem;background:#1e1b4b;color:#a5b4fc">All <span id="dp-cnt-all">0</span></button>
+            <button class="tbtn dp-filter" data-sev="critical" onclick="dpSetFilter('critical',this)" style="width:auto;padding:.35rem .8rem;font-size:.7rem;background:#0a0a14;color:#fca5a5;border:1px solid #7f1d1d">🔴 Critical <span id="dp-cnt-critical">0</span></button>
+            <button class="tbtn dp-filter" data-sev="major" onclick="dpSetFilter('major',this)" style="width:auto;padding:.35rem .8rem;font-size:.7rem;background:#0a0a14;color:#fcd34d;border:1px solid #92400e">🟡 Major <span id="dp-cnt-major">0</span></button>
+            <button class="tbtn dp-filter" data-sev="minor" onclick="dpSetFilter('minor',this)" style="width:auto;padding:.35rem .8rem;font-size:.7rem;background:#0a0a14;color:#94a3b8;border:1px solid #475569">⚪ Minor <span id="dp-cnt-minor">0</span></button>
+            <button class="tbtn" style="margin-left:auto;width:auto;padding:.35rem .8rem;font-size:.7rem;background:#1e1b4b;color:#a5b4fc" onclick="dpApproveAllVisible(true)">✓ Approve all visible</button>
+            <button class="tbtn" style="width:auto;padding:.35rem .8rem;font-size:.7rem;background:#1e1b4b;color:#a5b4fc" onclick="dpApproveAllVisible(false)">↶ Un-approve all visible</button>
+          </div>
+
+          <!-- Card-based results panel. One card per paragraph with issues. -->
+          <div style="max-height:560px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:.5rem;background:#0a0a14">
+            <div id="dp-tbody" style="display:flex;flex-direction:column;gap:.55rem"></div>
+          </div>
+
+          <div style="margin-top:.7rem;display:flex;gap:.7rem;flex-wrap:wrap;align-items:center">
+            <button class="tbtn gold" id="dp-dl-btn" onclick="dpDownloadRevised()" disabled>⬇ Download Proofread .docx</button>
+            <span id="dp-selected-count" style="font-size:.78rem;color:#94a3b8">0 fixes approved</span>
+            <span style="font-size:.7rem;color:#64748b;margin-left:auto">📌 Approved fixes become Word track-changes (Review ribbon → Accept/Reject).</span>
+          </div>
+        </div>
+
+        <!-- Error -->
+        <div id="dp-error" style="display:none;padding:.7rem 1rem;background:#1a0000;border:1px solid #7f1d1d;border-radius:8px;font-size:.82rem;color:#fca5a5;margin-top:.6rem"></div>
+      </div><!-- /document proofreader card -->
 
       <!-- ── ✉️ EMAIL RESPONSE GENERATOR ────────────────────── -->
       <div class="tool-card" style="grid-column:1/-1">
@@ -5882,6 +5961,527 @@ async function prDownloadRevised() {
     btn.textContent = '⬇ Download Revised .sdlrpx';
     document.getElementById('pr-error').style.display = 'block';
     document.getElementById('pr-error').textContent = '❌ ' + e.message;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ─── 📄 DOCUMENT PROOFREADER (PDF / DOCX → Word) ───────────────
+// ═══════════════════════════════════════════════════════════════
+// Companion to the SDLXLIFF proofreader above, for files that arrive
+// as flat PDF or .docx (no source/target pairing, no Trados package).
+// Workflow:
+//   1. User uploads .pdf or .docx
+//   2. dpExtractText splits the file into Hebrew paragraphs
+//   3. dpAnalyze batches them to GPT for grammar/style/term review
+//   4. User reviews per-paragraph cards, approves fixes
+//   5. dpDownloadRevised assembles a new .docx where every paragraph
+//      either reproduces the original verbatim OR carries a Word-native
+//      track-changes pair (<w:ins> new + <w:del> old) for an approved fix.
+//      Output opens in Word → Review ribbon shows Accept/Reject.
+
+let dpFile = null;
+let dpParagraphs = [];   // [{ idx, text, reviewable }] — every paragraph from the source, in order
+let dpAllIssues  = [];   // [{ id, paraIdx, text, issues:[...], approved }]
+let dpActiveFilter = 'all';
+
+function dpOnFile(input) {
+  dpFile = input.files?.[0] || null;
+  const lbl = document.getElementById('dp-file-label');
+  const btn = document.getElementById('dp-btn');
+  if (dpFile) {
+    lbl.textContent = `📎 ${dpFile.name} (${(dpFile.size/1024/1024).toFixed(2)} MB)`;
+    btn.disabled = false;
+  } else {
+    lbl.textContent = '';
+    btn.disabled = true;
+  }
+  // Reset previous results
+  dpAllIssues = []; dpParagraphs = [];
+  document.getElementById('dp-results').style.display = 'none';
+  document.getElementById('dp-error').style.display = 'none';
+}
+
+// ── Text extraction ─────────────────────────────────────────────
+
+async function dpExtractText(file) {
+  const name = (file.name || '').toLowerCase();
+  if (name.endsWith('.pdf'))  return await dpExtractPDF(file);
+  if (name.endsWith('.docx')) return await dpExtractDOCX(file);
+  throw new Error('Unsupported file type — upload a .pdf or .docx.');
+}
+
+// PDF: PDF.js gives us positioned text items per page. We reconstruct
+// lines by Y position, then merge sequential lines into paragraphs.
+async function dpExtractPDF(file) {
+  if (!window.pdfjsLib) throw new Error('PDF.js failed to load from CDN.');
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  const paragraphs = [];
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const content = await page.getTextContent();
+    // Group text items into lines by Y (rounded). PDF Y grows upward,
+    // so sort descending to get top-to-bottom reading order.
+    const lineMap = new Map();
+    for (const item of content.items) {
+      const y = Math.round(item.transform[5]);
+      if (!lineMap.has(y)) lineMap.set(y, []);
+      lineMap.get(y).push({ x: item.transform[4], str: item.str });
+    }
+    const ys = [...lineMap.keys()].sort((a, b) => b - a);
+    const pageLines = [];
+    for (const y of ys) {
+      // Sort by X within line. For Hebrew RTL the rendered order may
+      // already be visual; we keep textContent's raw order (it tracks
+      // logical order for ATSUI / Unicode bidi) and trim.
+      const line = lineMap.get(y).map(i => i.str).join(' ').replace(/\s+/g, ' ').trim();
+      if (line) pageLines.push(line);
+    }
+    // Heuristic paragraph segmentation: join lines that look continuous
+    // (don't end with a sentence terminator), split on apparent breaks.
+    let buf2 = '';
+    for (const line of pageLines) {
+      if (!buf2) { buf2 = line; continue; }
+      const prevEnd = buf2.slice(-1);
+      if (/[.!?…׃]$/.test(prevEnd) || /^[•\-–—]/.test(line)) {
+        paragraphs.push(buf2); buf2 = line;
+      } else {
+        buf2 += ' ' + line;
+      }
+    }
+    if (buf2) paragraphs.push(buf2);
+    // Blank separator between pages
+    paragraphs.push('');
+  }
+  return paragraphs;
+}
+
+// DOCX: read word/document.xml, walk <w:p> elements, concatenate
+// <w:t> text children per paragraph. Skip rendering-only nodes.
+async function dpExtractDOCX(file) {
+  const buf = await file.arrayBuffer();
+  const zip = await JSZip.loadAsync(buf);
+  const entry = zip.file('word/document.xml');
+  if (!entry) throw new Error('document.xml not found inside .docx — file may be corrupt.');
+  const xml = await entry.async('string');
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(xml, 'application/xml');
+  const err = doc.querySelector('parsererror');
+  if (err) throw new Error('document.xml is not valid XML: ' + (err.textContent || '').slice(0, 200));
+  const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+  const paras = doc.getElementsByTagNameNS(W_NS, 'p');
+  const out = [];
+  for (let i = 0; i < paras.length; i++) {
+    const texts = paras[i].getElementsByTagNameNS(W_NS, 't');
+    let text = '';
+    for (let j = 0; j < texts.length; j++) text += texts[j].textContent || '';
+    out.push(text.trim());
+  }
+  return out;
+}
+
+// ── GPT review (monolingual Hebrew) ─────────────────────────────
+
+async function dpReviewBatch(batch, model, apiKey) {
+  const numbered = batch.map((p, i) => `${i+1}. ${p.text.replace(/\s+/g,' ').trim()}`).join('\n\n');
+  const systemPrompt =
+`You are a senior Hebrew copyeditor. Review each numbered Hebrew paragraph for genuine quality issues — not nitpicks.
+
+CATEGORIES:
+- grammar: Hebrew grammar / agreement errors
+- spelling: Hebrew spelling errors
+- terminology: wrong or inconsistent term
+- style: awkward phrasing, redundancy, register
+- punctuation: punctuation errors
+- formality: wrong register for the context
+- clarity: ambiguous or hard-to-parse sentence
+
+SEVERITY:
+- critical: changes meaning, makes the text unreadable, or factually wrong
+- major: clear error a professional editor would fix
+- minor: polish, optional improvement
+
+For EACH numbered paragraph, return exactly one JSON object:
+  { "n": <number>, "issues": [ { "severity": "critical"|"major"|"minor", "category": "<one above>", "description": "<short English explanation>", "suggestion": "<corrected FULL paragraph>" } ] }
+
+If a paragraph is fine, return: { "n": <number>, "issues": [] }
+
+Output a JSON ARRAY containing exactly ${batch.length} objects in order.
+ONLY the JSON array. NO markdown, NO commentary, NO code fences.
+
+The "suggestion" MUST be the FULL replacement paragraph (not just the corrected fragment) so it can be inserted as a single edit.`;
+
+  try {
+    const r = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        temperature: 0.2,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user',   content: numbered }
+        ]
+      })
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error?.message || 'GPT error ' + r.status);
+    let raw = (data.choices?.[0]?.message?.content || '').trim();
+    raw = raw.replace(/^```[a-z]*\n?/i, '').replace(/```\s*$/, '').trim();
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) throw new Error('Expected JSON array');
+    return parsed;
+  } catch (e) {
+    console.warn('[dp] batch failed:', e.message);
+    return batch.map((_, i) => ({ n: i+1, issues: [] }));
+  }
+}
+
+async function dpAnalyze() {
+  const apiKey = getApiKey();
+  if (!apiKey) { promptApiKey(); return; }
+  if (!dpFile) return;
+
+  const model = document.getElementById('dp-model').value || 'gpt-5.4';
+
+  const btn  = document.getElementById('dp-btn');
+  const prog = document.getElementById('dp-prog');
+  const bar  = document.getElementById('dp-prog-bar');
+  const txt  = document.getElementById('dp-prog-text');
+  const err  = document.getElementById('dp-error');
+  const res  = document.getElementById('dp-results');
+  err.style.display = 'none'; res.style.display = 'none';
+  btn.disabled = true; prog.classList.add('show');
+  bar.style.width = '5%';
+
+  try {
+    txt.textContent = 'Extracting text…';
+    const paragraphs = await dpExtractText(dpFile);
+    if (!paragraphs.some(p => p && p.trim())) throw new Error('No text extracted from the file.');
+
+    // Build the index that drives both rendering and download. Every
+    // paragraph from the source is preserved (untouched paragraphs are
+    // still emitted into the output .docx); only non-empty ones with
+    // ≥3 chars are sent for review.
+    dpParagraphs = paragraphs.map((text, idx) => ({
+      idx,
+      text,
+      reviewable: !!(text && text.trim().length >= 3)
+    }));
+
+    const toReview = dpParagraphs.filter(p => p.reviewable);
+    if (toReview.length === 0) throw new Error('No reviewable paragraphs found.');
+
+    txt.textContent = `Reviewing ${toReview.length} paragraph(s) with ${model}…`;
+    bar.style.width = '15%';
+
+    const BATCH = 8;
+    dpAllIssues = [];
+    let counter = 0;
+    for (let i = 0; i < toReview.length; i += BATCH) {
+      const batch = toReview.slice(i, i + BATCH);
+      txt.textContent = `Reviewing paragraphs ${i+1}–${Math.min(i+BATCH, toReview.length)} of ${toReview.length} (${model})…`;
+      bar.style.width = (15 + (i / toReview.length) * 80) + '%';
+      const results = await dpReviewBatch(batch, model, apiKey);
+      for (let j = 0; j < batch.length; j++) {
+        const r = results.find(x => x.n === j+1) || { issues: [] };
+        if (r.issues && r.issues.length > 0) {
+          dpAllIssues.push({
+            id: 'dp_' + (counter++),
+            paraIdx: batch[j].idx,
+            text: batch[j].text,
+            issues: r.issues,
+            approved: false,
+          });
+        }
+      }
+      if (i + BATCH < toReview.length) await new Promise(r => setTimeout(r, 250));
+    }
+
+    bar.style.width = '100%'; txt.textContent = '✅ Done!';
+    setTimeout(() => prog.classList.remove('show'), 1500);
+    dpRenderResults();
+    document.getElementById('dp-dl-btn').disabled = false;
+  } catch (e) {
+    prog.classList.remove('show');
+    err.style.display = 'block';
+    err.textContent = '❌ ' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ── UI state + rendering (mirrors pr* card layout) ──────────────
+
+function dpSetFilter(sev, btn) {
+  dpActiveFilter = sev;
+  document.querySelectorAll('.dp-filter').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  dpRenderResults(true);
+}
+function dpApprove(id)   { const i = dpAllIssues.find(x => x.id === id); if (i) { i.approved = true;  dpRenderResults(true); } }
+function dpUnapprove(id) { const i = dpAllIssues.find(x => x.id === id); if (i) { i.approved = false; dpRenderResults(true); } }
+function dpApproveAllVisible(state) {
+  dpAllIssues.forEach(item => {
+    const maxSev = prMaxSeverity(item.issues);
+    if (dpActiveFilter === 'all' || maxSev === dpActiveFilter) item.approved = !!state;
+  });
+  dpRenderResults(true);
+}
+function dpUpdateApprovedCount() {
+  const n = dpAllIssues.filter(x => x.approved && x.issues.some(i => i.suggestion)).length;
+  const lbl = document.getElementById('dp-selected-count');
+  if (lbl) lbl.textContent = `${n} fix${n===1?'':'es'} approved`;
+  const btn = document.getElementById('dp-dl-btn');
+  if (btn) btn.disabled = (dpAllIssues.length === 0);
+}
+
+// Card for monolingual Hebrew. Same skeleton as prRenderCard but the
+// top row shows the paragraph number + a truncated Hebrew preview
+// (RTL) instead of "EN: source".
+function dpRenderCard(item) {
+  const sevCounts = {};
+  for (const i of item.issues) {
+    const s = i.severity || 'minor';
+    sevCounts[s] = (sevCounts[s] || 0) + 1;
+  }
+  const sevOrder = ['critical', 'major', 'minor'];
+  const sevChips = sevOrder.filter(s => sevCounts[s]).map(s => {
+    const badge = prSeverityBadge(s);
+    const count = sevCounts[s];
+    return count > 1 ? badge.replace(/(<\/span>)$/, ` ×${count}$1`) : badge;
+  }).join('');
+
+  const explainHTML = item.issues.map(i => `
+    <div style="display:flex;gap:.45rem;align-items:flex-start;padding:.18rem 0;font-size:.74rem;color:#cbd5e1;line-height:1.45">
+      ${i.category ? `<span style="display:inline-block;flex:0 0 auto;padding:.05rem .4rem;background:#1e1b4b;color:#a5b4fc;border-radius:3px;font-size:.66rem;text-transform:lowercase;letter-spacing:.02em">${esc(i.category)}</span>` : ''}
+      <span>${esc(i.description || '')}</span>
+    </div>`).join('');
+
+  const firstSuggestion = (item.issues.find(i => i.suggestion) || {}).suggestion || '';
+  const hasRealFix = firstSuggestion && firstSuggestion.trim() !== (item.text || '').trim();
+  const suggestionDisplay = firstSuggestion || item.text || '';
+
+  let actionHTML;
+  if (!hasRealFix) {
+    actionHTML = `<button class="tbtn" disabled style="width:100%;padding:.5rem .8rem;font-size:.76rem;background:#0a0a14;color:#64748b;border:1px solid #1f2937;cursor:not-allowed;font-style:italic">(no change to apply)</button>`;
+  } else if (item.approved) {
+    actionHTML = `<button class="tbtn" onclick="dpUnapprove('${item.id}')" style="width:100%;padding:.5rem .8rem;font-size:.78rem;background:#0a1a0a;color:#34d399;border:1px solid #14532d;font-weight:600">✓ Approved · click to undo</button>`;
+  } else {
+    actionHTML = `<button class="tbtn" onclick="dpApprove('${item.id}')" style="width:100%;padding:.5rem .8rem;font-size:.78rem;background:#1e1b4b;color:#a5b4fc;font-weight:600">✓ Approve fix</button>`;
+  }
+
+  const cardBorder = item.approved ? '1px solid #14532d' : '1px solid #1f2937';
+  const cardBg     = item.approved ? 'rgba(52,211,153,0.04)' : '#0f0f17';
+  const preview    = (item.text || '').slice(0, 90) + ((item.text || '').length > 90 ? '…' : '');
+
+  return `
+    <div style="display:grid;grid-template-columns:104px 1fr;border:${cardBorder};border-radius:8px;overflow:hidden;background:${cardBg}">
+      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.35rem;padding:.7rem .35rem;background:#0a0a14;border-right:1px solid #1f2937">
+        ${sevChips}
+      </div>
+      <div style="display:grid;grid-template-rows:auto auto auto auto">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:.7rem;padding:.55rem .75rem;background:#0a0a14;border-bottom:1px solid #1f2937">
+          <div dir="rtl" style="font-size:.82rem;color:#e2e8f0;line-height:1.4;flex:1 1 auto;min-width:0;text-align:right">${esc(preview)}</div>
+          <div style="font-size:.7rem;color:#64748b;font-family:monospace;white-space:nowrap;flex:0 0 auto;padding-top:.18rem">¶&nbsp;#${esc(String(item.paraIdx + 1))}</div>
+        </div>
+        <div style="padding:.5rem .75rem;border-bottom:1px solid #1f2937;background:rgba(15,15,23,0.4)">
+          ${explainHTML}
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #1f2937">
+          <div style="padding:.55rem .75rem;border-right:1px solid #1f2937;background:rgba(52,211,153,0.06)">
+            <div style="font-size:.62rem;color:#34d399;text-transform:uppercase;letter-spacing:.06em;margin-bottom:.25rem;font-weight:700">Suggested fix</div>
+            <div dir="rtl" style="font-size:.86rem;color:#bbf7d0;line-height:1.45;text-align:right">${esc(suggestionDisplay)}</div>
+          </div>
+          <div style="padding:.55rem .75rem;background:rgba(252,211,77,0.06)">
+            <div style="font-size:.62rem;color:#fcd34d;text-transform:uppercase;letter-spacing:.06em;margin-bottom:.25rem;font-weight:700">Current text</div>
+            <div dir="rtl" style="font-size:.86rem;color:#fef3c7;line-height:1.45;text-align:right">${esc(item.text || '')}</div>
+          </div>
+        </div>
+        <div style="padding:.5rem .75rem;background:#0a0a14">
+          ${actionHTML}
+        </div>
+      </div>
+    </div>`;
+}
+
+function dpRenderResults(skipBadges) {
+  const res = document.getElementById('dp-results');
+  res.style.display = 'block';
+
+  let cAll = dpAllIssues.length, cCrit = 0, cMaj = 0, cMin = 0;
+  dpAllIssues.forEach(item => {
+    const m = prMaxSeverity(item.issues);
+    if (m === 'critical') cCrit++; else if (m === 'major') cMaj++; else cMin++;
+  });
+  document.getElementById('dp-cnt-all').textContent      = cAll;
+  document.getElementById('dp-cnt-critical').textContent = cCrit;
+  document.getElementById('dp-cnt-major').textContent    = cMaj;
+  document.getElementById('dp-cnt-minor').textContent    = cMin;
+
+  if (!skipBadges) {
+    document.getElementById('dp-badges').innerHTML = `
+      <span class="tres-badge tb-seg">📑 ${cAll} paragraph${cAll===1?'':'s'} with issues</span>
+      <span class="tres-badge tb-lang">🔴 ${cCrit} critical</span>
+      <span class="tres-badge tb-lang">🟡 ${cMaj} major</span>
+      <span class="tres-badge tb-lang">⚪ ${cMin} minor</span>`;
+  }
+
+  const filtered = dpAllIssues.filter(item => {
+    if (dpActiveFilter === 'all') return true;
+    return prMaxSeverity(item.issues) === dpActiveFilter;
+  });
+
+  document.getElementById('dp-tbody').innerHTML = filtered.length === 0
+    ? '<div style="padding:1.2rem;text-align:center;color:#64748b;font-size:.78rem">No issues at this severity.</div>'
+    : filtered.map(item => dpRenderCard(item)).join('');
+
+  dpUpdateApprovedCount();
+}
+
+// ── .docx generation with Word-native track changes ─────────────
+// OOXML reference: §17.13.5 (revisions) of ECMA-376.
+//   <w:ins w:id="N" w:author="…" w:date="ISO-8601">
+//     <w:r>…</w:r>
+//   </w:ins>
+//   <w:del w:id="N" w:author="…" w:date="ISO-8601">
+//     <w:r><w:delText>…</w:delText></w:r>     ← delText, not t
+//   </w:del>
+// w:id is a sequential integer scoped to the document, not a GUID.
+
+function dpXmlEscape(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+// Build a single <w:r>…</w:r> run with RTL marker so Hebrew renders correctly
+function dpRun(text, useDelText) {
+  const tag = useDelText ? 'w:delText' : 'w:t';
+  const xmlSpace = /^\s|\s$|  /.test(text) ? ' xml:space="preserve"' : '';
+  return `<w:r><w:rPr><w:rtl/></w:rPr><${tag}${xmlSpace}>${dpXmlEscape(text)}</${tag}></w:r>`;
+}
+
+// One <w:p> for a paragraph. If `edit` is provided, it carries Word
+// track-change markup (insertion before deletion, matching what Word
+// itself emits).
+function dpParagraphXml(text, edit, idCounter) {
+  const pPr = '<w:pPr><w:bidi/></w:pPr>';
+  if (!edit) {
+    return `<w:p>${pPr}${dpRun(text, false)}</w:p>`;
+  }
+  const author = dpXmlEscape(edit.author || 'GPT-5.x Proofreader');
+  const date   = edit.date; // ISO-8601 string
+  const insId  = idCounter.next++;
+  const delId  = idCounter.next++;
+  const ins = `<w:ins w:id="${insId}" w:author="${author}" w:date="${date}">${dpRun(edit.newText, false)}</w:ins>`;
+  const del = `<w:del w:id="${delId}" w:author="${author}" w:date="${date}">${dpRun(edit.oldText, true)}</w:del>`;
+  return `<w:p>${pPr}${ins}${del}</w:p>`;
+}
+
+// Assemble the full document.xml from a list of {text, edit?} paragraphs
+function dpBuildDocumentXml(paraSpecs) {
+  const idCounter = { next: 1 };
+  const body = paraSpecs.map(p => dpParagraphXml(p.text, p.edit, idCounter)).join('');
+  // sectPr at end of body — sets page size, margins, and section-level RTL
+  const sectPr =
+    '<w:sectPr>' +
+    '<w:pgSz w:w="11906" w:h="16838"/>' +                        // A4 portrait, twentieths-of-a-point
+    '<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/>' +
+    '<w:bidi/>' +                                                 // RTL section
+    '</w:sectPr>';
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
+    `<w:body>${body}${sectPr}</w:body></w:document>`;
+}
+
+function dpBuildContentTypes() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
+    `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>` +
+    `<Default Extension="xml" ContentType="application/xml"/>` +
+    `<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>` +
+    `<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>` +
+    `</Types>`;
+}
+function dpBuildRootRels() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+    `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>` +
+    `</Relationships>`;
+}
+function dpBuildDocumentRels() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+    `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>` +
+    `</Relationships>`;
+}
+function dpBuildStylesXml() {
+  // Minimal styles.xml — sets a Hebrew-friendly default font so Word
+  // doesn't substitute a glyph-missing fallback for unstyled runs.
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
+    `<w:docDefaults><w:rPrDefault><w:rPr>` +
+    `<w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/>` +
+    `<w:sz w:val="22"/><w:szCs w:val="22"/>` +
+    `</w:rPr></w:rPrDefault></w:docDefaults></w:styles>`;
+}
+
+async function dpDownloadRevised() {
+  if (!dpFile) { showAdminToast('No file loaded.'); return; }
+  if (!dpParagraphs.length) { showAdminToast('No paragraphs available — run Analyze first.'); return; }
+  const btn = document.getElementById('dp-dl-btn');
+  btn.disabled = true; btn.textContent = '⏳ Building .docx…';
+
+  try {
+    // Index approved fixes by paragraph index (one fix per paragraph max —
+    // GPT's "suggestion" is the full replacement for that paragraph).
+    const approvedByPara = new Map();
+    for (const item of dpAllIssues) {
+      if (!item.approved) continue;
+      const sugg = (item.issues.find(i => i.suggestion) || {}).suggestion;
+      if (!sugg) continue;
+      if (sugg.trim() === (item.text || '').trim()) continue; // no real change
+      approvedByPara.set(item.paraIdx, { newText: sugg, oldText: item.text });
+    }
+
+    // Author + ISO date for all rev-defs in this build
+    const author = (document.getElementById('dp-author')?.value || 'Benjy Alper').trim() || 'Benjy Alper';
+    const date = new Date().toISOString().replace(/\.\d+Z$/, 'Z');  // strip ms
+
+    // Build paragraph spec list — every source paragraph is preserved.
+    const paraSpecs = dpParagraphs.map(p => {
+      const fix = approvedByPara.get(p.idx);
+      if (fix) return { text: '', edit: { newText: fix.newText, oldText: fix.oldText, author, date } };
+      return { text: p.text || '' };
+    });
+
+    const zip = new JSZip();
+    zip.file('[Content_Types].xml',      dpBuildContentTypes());
+    zip.file('_rels/.rels',              dpBuildRootRels());
+    zip.file('word/document.xml',        dpBuildDocumentXml(paraSpecs));
+    zip.file('word/_rels/document.xml.rels', dpBuildDocumentRels());
+    zip.file('word/styles.xml',          dpBuildStylesXml());
+
+    const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (dpFile.name || 'document').replace(/\.(pdf|docx)$/i, '') + '_PROOFREAD.docx';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+    const n = approvedByPara.size;
+    showAdminToast(`✅ Wrote ${n} approved fix${n===1?'':'es'} — .docx downloaded.`);
+    btn.textContent = `✓ Downloaded — ${n} fix${n===1?'':'es'} applied. Re-download?`;
+    btn.disabled = false;
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = '⬇ Download Proofread .docx';
+    document.getElementById('dp-error').style.display = 'block';
+    document.getElementById('dp-error').textContent = '❌ ' + e.message;
   }
 }
 
