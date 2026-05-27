@@ -1338,18 +1338,12 @@
             <button class="tbtn" style="width:auto;padding:.35rem .8rem;font-size:.7rem;background:#1e1b4b;color:#a5b4fc" onclick="prApproveAllVisible(false)">↶ Un-approve all visible</button>
           </div>
 
-          <div style="max-height:520px;overflow-y:auto;border:1px solid var(--border);border-radius:8px">
-            <table style="width:100%;border-collapse:collapse;font-size:.76rem">
-              <thead>
-                <tr style="background:#1e1b4b;position:sticky;top:0;z-index:1">
-                  <th style="padding:.5rem .5rem;width:40px;color:#a5b4fc">Seg</th>
-                  <th style="padding:.5rem .5rem;width:90px;color:#a5b4fc">Severity</th>
-                  <th style="padding:.5rem .5rem;text-align:left;color:#a5b4fc">Source / Current target / Issue / Suggested fix</th>
-                  <th style="padding:.5rem .5rem;width:160px;color:#a5b4fc">Action</th>
-                </tr>
-              </thead>
-              <tbody id="pr-tbody"></tbody>
-            </table>
+          <!-- Card-based results panel. One card per segment with issues;
+               severity chips on the left column, source+seg# header,
+               stacked issue explanations, then a 2-up suggested-vs-current
+               translation comparison and a full-width approve button. -->
+          <div style="max-height:560px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:.5rem;background:#0a0a14">
+            <div id="pr-tbody" style="display:flex;flex-direction:column;gap:.55rem"></div>
           </div>
 
           <div style="margin-top:.7rem;display:flex;gap:.7rem;flex-wrap:wrap;align-items:center">
@@ -5403,6 +5397,111 @@ function prSeverityBadge(sev) {
   return '<span style="background:rgba(148,163,184,.15);color:#cbd5e1;padding:.15rem .5rem;border-radius:4px;font-weight:600;font-size:.7rem">⚪ minor</span>';
 }
 
+// Render one segment as a card matching the schema:
+//
+//   ┌──────────┬─────────────────────────────────────────────┐
+//   │ severity │  EN: source                       Seg #N    │
+//   │ chips    ├─────────────────────────────────────────────┤
+//   │ (1+)     │  [chip] category — description              │
+//   │          │  [chip] category — description              │
+//   │          ├──────────────────────┬──────────────────────┤
+//   │          │ SUGGESTED (green)    │ CURRENT (yellow)     │
+//   │          │ Hebrew RTL           │ Hebrew RTL           │
+//   │          ├──────────────────────┴──────────────────────┤
+//   │          │            [ ✓ Approve fix ]                │
+//   └──────────┴─────────────────────────────────────────────┘
+function prRenderCard(item) {
+  // Severity chips: one per issue, stacked vertically in the left rail.
+  // Dedupe identical severities so 3-minor-issue segments don't show 3
+  // identical chips — collapse to one chip with a "×N" count.
+  const sevCounts = {};
+  for (const i of item.issues) {
+    const s = i.severity || 'minor';
+    sevCounts[s] = (sevCounts[s] || 0) + 1;
+  }
+  const sevOrder = ['critical', 'major', 'minor'];
+  const sevChips = sevOrder
+    .filter(s => sevCounts[s])
+    .map(s => {
+      const badge = prSeverityBadge(s);
+      const count = sevCounts[s];
+      return count > 1
+        ? badge.replace(/(<\/span>)$/, ` ×${count}$1`)
+        : badge;
+    }).join('');
+
+  // Explanation rows: one per issue with category tag + description.
+  const explainHTML = item.issues.map(i => `
+    <div style="display:flex;gap:.45rem;align-items:flex-start;padding:.18rem 0;font-size:.74rem;color:#cbd5e1;line-height:1.45">
+      ${i.category ? `<span style="display:inline-block;flex:0 0 auto;padding:.05rem .4rem;background:#1e1b4b;color:#a5b4fc;border-radius:3px;font-size:.66rem;text-transform:lowercase;letter-spacing:.02em">${esc(i.category)}</span>` : ''}
+      <span>${esc(i.description || '')}</span>
+    </div>`).join('');
+
+  // Suggested vs current. Use the first suggestion that exists; if none,
+  // mirror the current target so both cells show the same Hebrew and the
+  // approve button is disabled.
+  const firstSuggestion = (item.issues.find(i => i.suggestion) || {}).suggestion || '';
+  const hasRealFix = firstSuggestion && firstSuggestion.trim() !== (item.target || '').trim();
+  const suggestionDisplay = firstSuggestion || item.target || '';
+
+  // Approve button: three states — no change, approve, undo.
+  let actionHTML;
+  if (!hasRealFix) {
+    actionHTML = `<button class="tbtn" disabled style="width:100%;padding:.5rem .8rem;font-size:.76rem;background:#0a0a14;color:#64748b;border:1px solid #1f2937;cursor:not-allowed;font-style:italic">(no change to apply)</button>`;
+  } else if (item.approved) {
+    actionHTML = `<button class="tbtn" onclick="prUnapprove('${item.id}')" style="width:100%;padding:.5rem .8rem;font-size:.78rem;background:#0a1a0a;color:#34d399;border:1px solid #14532d;font-weight:600">✓ Approved · click to undo</button>`;
+  } else {
+    actionHTML = `<button class="tbtn" onclick="prApprove('${item.id}')" style="width:100%;padding:.5rem .8rem;font-size:.78rem;background:#1e1b4b;color:#a5b4fc;font-weight:600">✓ Approve fix</button>`;
+  }
+
+  // Approved tint on the whole card
+  const cardBorder = item.approved ? '1px solid #14532d' : '1px solid #1f2937';
+  const cardBg = item.approved ? 'rgba(52,211,153,0.04)' : '#0f0f17';
+
+  return `
+    <div style="display:grid;grid-template-columns:104px 1fr;border:${cardBorder};border-radius:8px;overflow:hidden;background:${cardBg}">
+
+      <!-- Left rail: severity chips -->
+      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.35rem;padding:.7rem .35rem;background:#0a0a14;border-right:1px solid #1f2937">
+        ${sevChips}
+      </div>
+
+      <!-- Right column: stacked sections -->
+      <div style="display:grid;grid-template-rows:auto auto auto auto">
+
+        <!-- Source + segment number -->
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:.7rem;padding:.55rem .75rem;background:#0a0a14;border-bottom:1px solid #1f2937">
+          <div style="font-size:.82rem;color:#e2e8f0;line-height:1.4;flex:1 1 auto;min-width:0">
+            <span style="color:#a5b4fc;font-weight:600;margin-right:.3rem">EN:</span>${esc(item.source || '')}
+          </div>
+          <div style="font-size:.7rem;color:#64748b;font-family:monospace;white-space:nowrap;flex:0 0 auto;padding-top:.18rem">Seg&nbsp;#${esc(String(item.mid))}</div>
+        </div>
+
+        <!-- Explanation -->
+        <div style="padding:.5rem .75rem;border-bottom:1px solid #1f2937;background:rgba(15,15,23,0.4)">
+          ${explainHTML}
+        </div>
+
+        <!-- Suggested vs current -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #1f2937">
+          <div style="padding:.55rem .75rem;border-right:1px solid #1f2937;background:rgba(52,211,153,0.06)">
+            <div style="font-size:.62rem;color:#34d399;text-transform:uppercase;letter-spacing:.06em;margin-bottom:.25rem;font-weight:700">Suggested translation</div>
+            <div dir="rtl" style="font-size:.86rem;color:#bbf7d0;line-height:1.45;text-align:right">${esc(suggestionDisplay)}</div>
+          </div>
+          <div style="padding:.55rem .75rem;background:rgba(252,211,77,0.06)">
+            <div style="font-size:.62rem;color:#fcd34d;text-transform:uppercase;letter-spacing:.06em;margin-bottom:.25rem;font-weight:700">Current translation</div>
+            <div dir="rtl" style="font-size:.86rem;color:#fef3c7;line-height:1.45;text-align:right">${esc(item.target || '')}</div>
+          </div>
+        </div>
+
+        <!-- Approve button -->
+        <div style="padding:.5rem .75rem;background:#0a0a14">
+          ${actionHTML}
+        </div>
+      </div>
+    </div>`;
+}
+
 function prRenderResults(skipBadges) {
   const res = document.getElementById('pr-results');
   res.style.display = 'block';
@@ -5432,36 +5531,8 @@ function prRenderResults(skipBadges) {
   });
 
   document.getElementById('pr-tbody').innerHTML = filtered.length === 0
-    ? '<tr><td colspan="4" style="padding:1rem;text-align:center;color:#64748b">No issues at this severity.</td></tr>'
-    : filtered.map(item => {
-        const sev = prMaxSeverity(item.issues);
-        const issuesHTML = item.issues.map((i) => `
-          <div style="margin-top:.45rem;padding:.4rem .55rem;background:#0a0a14;border:1px solid #1f2937;border-radius:6px">
-            <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.25rem">
-              ${prSeverityBadge(i.severity)}
-              <span style="color:#94a3b8;font-size:.7rem">${esc(i.category||'')}</span>
-              <span style="color:#cbd5e1;font-size:.74rem">${esc(i.description||'')}</span>
-            </div>
-            ${i.suggestion ? `<div style="margin-top:.2rem"><span style="color:#34d399;font-size:.72rem">→ Suggested fix:</span> <span dir="rtl" style="color:#e2e8f0;font-size:.78rem">${esc(i.suggestion)}</span></div>` : ''}
-          </div>`).join('');
-        const hasSuggestion = item.issues.some(i => i.suggestion);
-        const actionCell = !hasSuggestion
-          ? '<span style="color:#64748b;font-size:.7rem;font-style:italic">(no suggestion to apply)</span>'
-          : (item.approved
-              ? `<button class="tbtn" onclick="prUnapprove('${item.id}')" style="width:100%;padding:.4rem .7rem;font-size:.72rem;background:#0a1a0a;color:#34d399;border:1px solid #14532d;font-weight:600">✓ Approved · undo</button>`
-              : `<button class="tbtn" onclick="prApprove('${item.id}')" style="width:100%;padding:.4rem .7rem;font-size:.72rem;background:#1e1b4b;color:#a5b4fc">✓ Approve fix</button>`);
-        const rowBg = item.approved ? 'background:rgba(52,211,153,0.04)' : '';
-        return `<tr style="border-top:1px solid #1f2937;${rowBg}">
-          <td style="padding:.45rem .4rem;text-align:center;color:#a5b4fc;font-family:monospace;font-size:.72rem;vertical-align:top">${item.mid}</td>
-          <td style="padding:.45rem .4rem;text-align:center;vertical-align:top">${prSeverityBadge(sev)}</td>
-          <td style="padding:.45rem .55rem;vertical-align:top">
-            <div style="font-size:.72rem;color:#94a3b8"><strong style="color:#cbd5e1">EN:</strong> ${esc(item.source)}</div>
-            <div style="font-size:.72rem;color:#94a3b8;direction:rtl;text-align:right;margin-top:.15rem"><strong style="color:#cbd5e1">HE:</strong> ${esc(item.target)}</div>
-            ${issuesHTML}
-          </td>
-          <td style="padding:.45rem .5rem;vertical-align:top">${actionCell}</td>
-        </tr>`;
-      }).join('');
+    ? '<div style="padding:1.2rem;text-align:center;color:#64748b;font-size:.78rem">No issues at this severity.</div>'
+    : filtered.map(item => prRenderCard(item)).join('');
 
   prUpdateApprovedCount();
 }
