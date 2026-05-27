@@ -1293,7 +1293,7 @@
         <!-- Settings row -->
         <div class="tlang-row" style="margin-top:.5rem;align-items:center;flex-wrap:wrap;gap:.5rem">
           <span class="tlang-lbl">Model:</span>
-          <select id="pr-model" style="padding:.4rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.78rem">
+          <select id="pr-model" onchange="prRenderCostEstimate()" style="padding:.4rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.78rem">
             <option value="gpt-5.4" selected>gpt-5.4 (recommended)</option>
             <option value="gpt-5.5">gpt-5.5 (premium · 2× cost)</option>
             <option value="gpt-5.4-mini">gpt-5.4-mini (cheap drafts)</option>
@@ -1303,10 +1303,13 @@
             <option value="">— None —</option>
           </select>
           <label style="font-size:.74rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem;margin-left:.8rem">
-            <input type="checkbox" id="pr-only-translated" checked style="width:.95rem;height:.95rem;cursor:pointer"/>
+            <input type="checkbox" id="pr-only-translated" checked onchange="if (prFile) prOnFile({ files: [prFile] })" style="width:.95rem;height:.95rem;cursor:pointer"/>
             <span>Only review segments already translated</span>
           </label>
         </div>
+
+        <!-- Volume-based cost estimate (populated by prRenderCostEstimate after upload) -->
+        <div id="pr-cost-estimate" style="display:none;margin-top:.5rem;padding:.5rem .6rem;background:#0a0a14;border:1px solid #1f2937;border-radius:7px"></div>
         <!-- Output format toggles. Track-changes schema is verified against
              a Trados-Studio-produced reference file (see the long comment
              above prGenRevId in the script) — re-enabled after two earlier
@@ -1407,7 +1410,7 @@
         <!-- Settings row -->
         <div class="tlang-row" style="margin-top:.5rem;align-items:center;flex-wrap:wrap;gap:.5rem">
           <span class="tlang-lbl">Model:</span>
-          <select id="dp-model" style="padding:.4rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.78rem">
+          <select id="dp-model" onchange="dpRenderCostEstimate()" style="padding:.4rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.78rem">
             <option value="gpt-5.4" selected>gpt-5.4 (recommended)</option>
             <option value="gpt-5.5">gpt-5.5 (premium · 2× cost)</option>
             <option value="gpt-5.4-mini">gpt-5.4-mini (cheap drafts)</option>
@@ -1417,6 +1420,9 @@
             <span>Reviewer name (Word author)</span>
           </label>
         </div>
+
+        <!-- Volume-based cost estimate (populated by dpRenderCostEstimate after upload) -->
+        <div id="dp-cost-estimate" style="display:none;margin-top:.5rem;padding:.5rem .6rem;background:#0a0a14;border:1px solid #1f2937;border-radius:7px"></div>
 
         <button class="tbtn gold" id="dp-btn" onclick="dpAnalyze()" disabled>🔍 Analyze Paragraphs (suggestions only — nothing modified)</button>
 
@@ -5244,19 +5250,79 @@ Output only the corrected/translated text for each item, numbered to match, one 
 //  gpt-5.4 for review, surfaces issues by severity, and applies
 //  selected fixes back into the SDLXLIFF → revised .sdlrpx.
 // ═══════════════════════════════════════════════════════════════
+
+// ── Shared price-estimate module (used by pr* and dp* cards) ────
+// Rates are aggregate $/1K words (input + output combined) — matches
+// the existing option-label notation elsewhere in the file. Numbers
+// are approximations; intent is to give the user a reasonable budget
+// hint before they fire off a model call.
+const ADMIN_PRICING = {
+  'gpt-5.5':       { perKWords: 0.06,  short: '5.5'  },
+  'gpt-5.4':       { perKWords: 0.03,  short: '5.4'  },
+  'gpt-5.4-mini':  { perKWords: 0.01,  short: 'mini' },
+  'gpt-5.4-nano':  { perKWords: 0.003, short: 'nano' },
+};
+const ADMIN_PRICING_ORDER = ['gpt-5.4-nano', 'gpt-5.4-mini', 'gpt-5.4', 'gpt-5.5'];
+
+function adminEstimateCost(words, modelKey) {
+  const p = ADMIN_PRICING[modelKey];
+  if (!p || !Number.isFinite(words)) return null;
+  return (words / 1000) * p.perKWords;
+}
+function adminFmtCost(usd) {
+  if (usd == null) return '—';
+  if (usd === 0)   return '$0';
+  if (usd < 0.005) return '<$0.01';
+  if (usd < 10)    return '$' + usd.toFixed(2);
+  return '$' + usd.toFixed(0);
+}
+function adminCountWords(text) {
+  return (text || '').trim().split(/\s+/).filter(Boolean).length;
+}
+// Renders a 4-cell side-by-side comparison of model costs for a given
+// word count. The currently-selected model is highlighted with ★ + a
+// brighter background.
+function adminBuildCostTable(words, selectedModel) {
+  if (!Number.isFinite(words) || words < 0) words = 0;
+  const cells = ADMIN_PRICING_ORDER.map(key => {
+    const p = ADMIN_PRICING[key];
+    const cost = adminEstimateCost(words, key);
+    const isSel = key === selectedModel;
+    const bg = isSel ? '#1e1b4b' : '#0a0a14';
+    const border = isSel ? '1px solid #4f46e5' : '1px solid #1f2937';
+    const labelColor = isSel ? '#a5b4fc' : '#94a3b8';
+    const costColor = isSel ? '#e2e8f0' : '#cbd5e1';
+    return `
+      <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:.15rem;padding:.4rem .3rem;background:${bg};border:${border};border-radius:5px">
+        <div style="font-size:.62rem;color:${labelColor};text-transform:uppercase;letter-spacing:.04em;font-weight:600">${isSel ? '★ ' : ''}${p.short}</div>
+        <div style="font-size:.86rem;color:${costColor};font-weight:700;font-family:monospace">${adminFmtCost(cost)}</div>
+        <div style="font-size:.58rem;color:#64748b">$${p.perKWords}/1K w</div>
+      </div>`;
+  }).join('');
+  return `
+    <div style="display:flex;gap:.35rem;align-items:stretch">${cells}</div>
+    <div style="margin-top:.35rem;font-size:.66rem;color:#64748b;text-align:center">Volume: <strong style="color:#cbd5e1">${words.toLocaleString()} words</strong> · estimates assume single-pass review · ★ = current model</div>`;
+}
+
 let prFile = null;
 let prAllIssues = [];   // [{ segIdx, mid, source, target, fileIdx, issues: [...] }]
 let prActiveFilter = 'all';
-let prRawSDLXLIFFs = []; // [{ relPath, content }] — captured during analysis for later apply
+let prRawSDLXLIFFs = []; // [{ relPath, content }] — captured at upload, reused on analyze + download
+let prSegsToReview = []; // [{ fileIdx, mid, unitId, source, target }] — same lifecycle as prRawSDLXLIFFs
+let prTotalWords = 0;    // source + target words across all reviewable segs (drives cost estimate)
 
 async function prOnFile(input) {
   prFile = input.files?.[0];
   const lbl = document.getElementById('pr-file-label');
   const btn = document.getElementById('pr-btn');
-  if (!prFile) { btn.disabled = true; return; }
+  prAllIssues = []; prRawSDLXLIFFs = []; prSegsToReview = []; prTotalWords = 0;
+  document.getElementById('pr-results').style.display = 'none';
+  document.getElementById('pr-error').style.display   = 'none';
+  prRenderCostEstimate();
+  if (!prFile) { btn.disabled = true; lbl.style.display = 'none'; return; }
   lbl.style.display = 'block';
-  lbl.textContent = `📦 ${prFile.name} (${(prFile.size/1024/1024).toFixed(2)} MB)`;
-  btn.disabled = false;
+  lbl.textContent = `📦 ${prFile.name} (${(prFile.size/1024/1024).toFixed(2)} MB) · ⏳ extracting segments…`;
+  btn.disabled = true;
   // Refresh glossary picker from current saved glossaries
   const sel = document.getElementById('pr-gloss');
   if (sel && typeof gmLoadStore === 'function') {
@@ -5266,6 +5332,54 @@ async function prOnFile(input) {
       store.glossaries.map(g => `<option value="${g.id}">${g.name.replace(/</g,'&lt;')} (${g.terms.length} terms)</option>`).join('');
     sel.value = prev || '';
   }
+  // Pre-extract: open the package, parse all SDLXLIFFs, build the
+  // segment list and compute the total word count. Drives the cost
+  // estimate and lets Analyze skip the re-parse.
+  try {
+    const onlyTranslated = document.getElementById('pr-only-translated').checked;
+    const buf = await prFile.arrayBuffer();
+    const zip = await JSZip.loadAsync(buf);
+    const xliffEntries = [];
+    zip.forEach((relPath, entry) => {
+      if (!entry.dir && /\.sdlxliff$/i.test(relPath)) xliffEntries.push({ relPath, entry });
+    });
+    if (xliffEntries.length === 0) throw new Error('No .sdlxliff files found in the package.');
+
+    let totalWords = 0;
+    for (let fi = 0; fi < xliffEntries.length; fi++) {
+      const { relPath, entry } = xliffEntries[fi];
+      const xml = await entry.async('string');
+      prRawSDLXLIFFs.push({ relPath, content: xml });
+      const segs = trExtractSegments(xml);
+      for (const s of segs) {
+        if (onlyTranslated && !s.targetText) continue;
+        if (!s.targetText) continue;
+        const src = (s.sourceText || '').replace(/\{\{TAG_\d+\}\}/g, ' ').replace(/\s+/g,' ').trim();
+        const tgt = (s.targetText || '').replace(/\{\{TAG_\d+\}\}/g, ' ').replace(/\s+/g,' ').trim();
+        if (!src || !tgt) continue;
+        prSegsToReview.push({ fileIdx: fi, mid: s.mid, unitId: s.unitId, source: src, target: tgt });
+        totalWords += adminCountWords(src) + adminCountWords(tgt);
+      }
+    }
+    prTotalWords = totalWords;
+    lbl.textContent = `📦 ${prFile.name} (${(prFile.size/1024/1024).toFixed(2)} MB) · ${prSegsToReview.length} segment${prSegsToReview.length===1?'':'s'} ready (${prTotalWords.toLocaleString()} words)`;
+    prRenderCostEstimate();
+    btn.disabled = prSegsToReview.length === 0;
+  } catch (e) {
+    lbl.textContent = `📦 ${prFile.name} · ❌ ${e.message}`;
+    btn.disabled = true;
+  }
+}
+
+// Update the cost-estimate panel: 4 model cards side-by-side, current
+// selection highlighted. Called on file upload + model picker change.
+function prRenderCostEstimate() {
+  const host = document.getElementById('pr-cost-estimate');
+  if (!host) return;
+  if (!prTotalWords) { host.style.display = 'none'; return; }
+  const model = document.getElementById('pr-model')?.value || 'gpt-5.4';
+  host.innerHTML = adminBuildCostTable(prTotalWords, model);
+  host.style.display = 'block';
 }
 
 // Drag-and-drop on the upload area
@@ -5356,7 +5470,7 @@ async function prAnalyze() {
 
   const model = document.getElementById('pr-model').value || 'gpt-5.4';
   const glossId = document.getElementById('pr-gloss').value;
-  const onlyTranslated = document.getElementById('pr-only-translated').checked;
+  // 'pr-only-translated' is read in prOnFile at extraction time
   const glossary = (glossId && typeof gmFind === 'function') ? (gmFind(glossId)?.terms || []) : [];
 
   const btn  = document.getElementById('pr-btn');
@@ -5370,36 +5484,8 @@ async function prAnalyze() {
   bar.style.width = '5%';
 
   try {
-    txt.textContent = 'Reading package…';
-    const buf = await prFile.arrayBuffer();
-    const zip = await JSZip.loadAsync(buf);
-
-    // Find all SDLXLIFF files in any locale folder
-    const xliffEntries = [];
-    zip.forEach((relPath, entry) => {
-      if (!entry.dir && /\.sdlxliff$/i.test(relPath)) xliffEntries.push({ relPath, entry });
-    });
-    if (xliffEntries.length === 0) throw new Error('No .sdlxliff files found in the package.');
-
-    // Extract source+target pairs from each file
-    prRawSDLXLIFFs = [];
-    const segsToReview = [];
-    for (let fi = 0; fi < xliffEntries.length; fi++) {
-      const { relPath, entry } = xliffEntries[fi];
-      const xml = await entry.async('string');
-      prRawSDLXLIFFs.push({ relPath, content: xml });
-      const segs = trExtractSegments(xml); // reuses Trados translator's parser
-      for (const s of segs) {
-        if (onlyTranslated && !s.targetText) continue;
-        if (!s.targetText) continue; // need both source and target to proofread
-        // Get plain source (without placeholders) for GPT context
-        const src = (s.sourceText || '').replace(/\{\{TAG_\d+\}\}/g, ' ').replace(/\s+/g,' ').trim();
-        const tgt = (s.targetText || '').replace(/\{\{TAG_\d+\}\}/g, ' ').replace(/\s+/g,' ').trim();
-        if (!src || !tgt) continue;
-        segsToReview.push({ fileIdx: fi, mid: s.mid, unitId: s.unitId, source: src, target: tgt });
-      }
-    }
-
+    // Segments were extracted at upload time (see prOnFile). Just reuse.
+    const segsToReview = prSegsToReview;
     if (segsToReview.length === 0) throw new Error('No translated segments found to review.');
 
     txt.textContent = `Reviewing ${segsToReview.length} translated segments with ${model}…`;
@@ -5983,23 +6069,60 @@ let dpFile = null;
 let dpParagraphs = [];   // [{ idx, text, reviewable }] — every paragraph from the source, in order
 let dpAllIssues  = [];   // [{ id, paraIdx, text, issues:[...], approved }]
 let dpActiveFilter = 'all';
+let dpTotalWords = 0;    // reviewable text word count (drives the cost estimate)
 
-function dpOnFile(input) {
+async function dpOnFile(input) {
   dpFile = input.files?.[0] || null;
   const lbl = document.getElementById('dp-file-label');
   const btn = document.getElementById('dp-btn');
-  if (dpFile) {
-    lbl.textContent = `📎 ${dpFile.name} (${(dpFile.size/1024/1024).toFixed(2)} MB)`;
-    btn.disabled = false;
-  } else {
-    lbl.textContent = '';
+  dpAllIssues = []; dpParagraphs = []; dpTotalWords = 0;
+  document.getElementById('dp-results').style.display = 'none';
+  document.getElementById('dp-error').style.display   = 'none';
+  dpRenderCostEstimate();
+  if (!dpFile) { lbl.textContent = ''; btn.disabled = true; return; }
+  lbl.textContent = `📎 ${dpFile.name} (${(dpFile.size/1024/1024).toFixed(2)} MB) · ⏳ extracting text…`;
+  btn.disabled = true;
+  // Pre-extract so the cost estimate is volume-accurate and Analyze
+  // doesn't have to re-parse the PDF/DOCX.
+  try {
+    const paragraphs = await dpExtractText(dpFile);
+    dpParagraphs = paragraphs.map((text, idx) => ({
+      idx,
+      text,
+      reviewable: !!(text && text.trim().length >= 3),
+    }));
+    const reviewable = dpParagraphs.filter(p => p.reviewable);
+    dpTotalWords = reviewable.reduce((sum, p) => sum + adminCountWords(p.text), 0);
+    lbl.textContent = `📎 ${dpFile.name} (${(dpFile.size/1024/1024).toFixed(2)} MB) · ${reviewable.length} paragraph${reviewable.length===1?'':'s'} ready (${dpTotalWords.toLocaleString()} words)`;
+    dpRenderCostEstimate();
+    btn.disabled = reviewable.length === 0;
+  } catch (e) {
+    lbl.textContent = `📎 ${dpFile.name} · ❌ ${e.message}`;
     btn.disabled = true;
   }
-  // Reset previous results
-  dpAllIssues = []; dpParagraphs = [];
-  document.getElementById('dp-results').style.display = 'none';
-  document.getElementById('dp-error').style.display = 'none';
 }
+
+function dpRenderCostEstimate() {
+  const host = document.getElementById('dp-cost-estimate');
+  if (!host) return;
+  if (!dpTotalWords) { host.style.display = 'none'; return; }
+  const model = document.getElementById('dp-model')?.value || 'gpt-5.4';
+  host.innerHTML = adminBuildCostTable(dpTotalWords, model);
+  host.style.display = 'block';
+}
+
+// Drag-and-drop on the upload area (mirrors the SDLXLIFF card)
+(function(){
+  const dz = document.getElementById('dp-drop');
+  if (!dz) return;
+  dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('drag-over'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+  dz.addEventListener('drop', e => {
+    e.preventDefault(); dz.classList.remove('drag-over');
+    const f = e.dataTransfer.files[0];
+    if (f) dpOnFile({ files: [f] });
+  });
+})();
 
 // ── Text extraction ─────────────────────────────────────────────
 
@@ -6155,22 +6278,9 @@ async function dpAnalyze() {
   bar.style.width = '5%';
 
   try {
-    txt.textContent = 'Extracting text…';
-    const paragraphs = await dpExtractText(dpFile);
-    if (!paragraphs.some(p => p && p.trim())) throw new Error('No text extracted from the file.');
-
-    // Build the index that drives both rendering and download. Every
-    // paragraph from the source is preserved (untouched paragraphs are
-    // still emitted into the output .docx); only non-empty ones with
-    // ≥3 chars are sent for review.
-    dpParagraphs = paragraphs.map((text, idx) => ({
-      idx,
-      text,
-      reviewable: !!(text && text.trim().length >= 3)
-    }));
-
+    // Paragraphs were pre-extracted at upload time (see dpOnFile).
     const toReview = dpParagraphs.filter(p => p.reviewable);
-    if (toReview.length === 0) throw new Error('No reviewable paragraphs found.');
+    if (toReview.length === 0) throw new Error('No reviewable paragraphs found — upload a .pdf or .docx first.');
 
     txt.textContent = `Reviewing ${toReview.length} paragraph(s) with ${model}…`;
     bar.style.width = '15%';
