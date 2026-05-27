@@ -5530,28 +5530,83 @@ function prFormatTradosDate(d) {
   return `${pad(d.getMonth()+1)}/${pad(d.getDate())}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-// Replace the inner content of a target <mrk mtype="seg" mid="N">…</mrk>
-// with Trados-native track-changes markup. The old Hebrew (whatever was
-// there) becomes the body of <mrk mtype="x-sdl-deleted">; the new Hebrew
-// becomes the body of <mrk mtype="x-sdl-added">. Each side gets its OWN
-// revid GUID. Both revids are pushed to the `revs` accumulator so the
-// caller can register them in <rev-defs>.
+// ── Trans-unit-scoped locators ───────────────────────────────
+// SDLXLIFF holds both source and target as <mrk mtype="seg" mid="N">…</mrk>
+// with the SAME mid — source under <seg-source>, target under <target>.
+// A naive content.replace(...) hits whichever comes first in the file,
+// which is the source — that's exactly how the proofreader was corrupting
+// the English source column instead of editing the Hebrew target.
+//
+// These two helpers locate the seg's TARGET-side mrk and its <sdl:seg>
+// confirmation element using the seg's unitId, so we can never collide
+// with either the source side or a same-mid mrk in another trans-unit.
+// Returns {start, end} character offsets into `content`, or null if the
+// element couldn't be located.
+
+function prFindTargetMrkRange(content, seg) {
+  const escUnitId = String(seg.unitId).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const unitOpenRe = new RegExp(`<trans-unit\\b[^>]*\\sid="${escUnitId}"[^>]*>`);
+  const um = content.match(unitOpenRe);
+  if (!um) return null;
+  const unitContentStart = um.index + um[0].length;
+  const unitClose = content.indexOf('</trans-unit>', unitContentStart);
+  if (unitClose === -1) return null;
+  // Locate <target> inside this trans-unit
+  const tgtOpenRe = /<target\b[^>]*>/g;
+  tgtOpenRe.lastIndex = unitContentStart;
+  const tm = tgtOpenRe.exec(content);
+  if (!tm || tm.index >= unitClose) return null;
+  const tgtContentStart = tm.index + tm[0].length;
+  const tgtClose = content.indexOf('</target>', tgtContentStart);
+  if (tgtClose === -1 || tgtClose >= unitClose) return null;
+  // Locate the seg-mrk with matching mid inside the target. We accept the
+  // open tag with any attribute spelling/ordering after `mid="N"`.
+  const mrkOpenRe = new RegExp(`<mrk\\s+mtype="seg"\\s+mid="${seg.mid}"[^>]*>`, 'g');
+  mrkOpenRe.lastIndex = tgtContentStart;
+  const mm = mrkOpenRe.exec(content);
+  if (!mm || mm.index >= tgtClose) return null;
+  const innerStart = mm.index + mm[0].length;
+  const innerEnd = content.indexOf('</mrk>', innerStart);
+  if (innerEnd === -1 || innerEnd >= tgtClose) return null;
+  return { openStart: mm.index, innerStart, innerEnd, closeEnd: innerEnd + '</mrk>'.length };
+}
+
+function prFindSegConfRange(content, seg) {
+  const escUnitId = String(seg.unitId).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const unitOpenRe = new RegExp(`<trans-unit\\b[^>]*\\sid="${escUnitId}"[^>]*>`);
+  const um = content.match(unitOpenRe);
+  if (!um) return null;
+  const unitContentStart = um.index + um[0].length;
+  const unitClose = content.indexOf('</trans-unit>', unitContentStart);
+  if (unitClose === -1) return null;
+  // Locate <sdl:seg id="N" .../> inside this trans-unit
+  const segRe = new RegExp(`(<sdl:seg\\s+id="${seg.mid}")([^/>]*)(\\s*\\/?>)`, 'g');
+  segRe.lastIndex = unitContentStart;
+  const m = segRe.exec(content);
+  if (!m || m.index >= unitClose) return null;
+  return { match: m };
+}
+
+// Replace the target-side seg-mrk's INNER content for `seg` with Trados-native
+// track-changes markup. The old target content becomes the body of
+// <mrk mtype="x-sdl-deleted">; the new Hebrew becomes the body of
+// <mrk mtype="x-sdl-added">. Each side gets its OWN revid GUID. Both revids
+// are pushed to the `revs` accumulator so the caller can register them in
+// <rev-defs>.
 function prInsertWithTrackChanges(content, seg, newHebrewText, revs) {
-  const origMrkRe = new RegExp(`(<mrk\\s+mtype="seg"\\s+mid="${seg.mid}"[^>]*>)([\\s\\S]*?)(<\\/mrk>)`);
-  const match = content.match(origMrkRe);
-  if (!match) {
-    // No existing filled mrk — fall back to ordinary insert (rare, would
-    // mean we tried to track-change an unfilled segment).
+  const range = prFindTargetMrkRange(content, seg);
+  if (!range) {
+    // Target mrk for this seg isn't a filled <mrk>…</mrk> — could be
+    // self-closing (unfilled) or the seg location lookup failed. Fall back
+    // to the translator's path which handles self-closing fill-in.
     return trInsertTranslation(content, seg, newHebrewText);
   }
-  const openTag  = match[1];
-  const origInner = match[2];          // raw XML inside the seg mrk (already escaped + may contain inline tags)
-  const closeTag = match[3];
 
   // Build the NEW Hebrew content the same way trInsertTranslation does:
   // - Restore any {{TAG_N}} placeholders from seg.tagMap
   // - XML-escape any literal < > & in the translation text
   const newInner = trPlaceholdersToXml(newHebrewText, seg.tagMap || []);
+  const origInner = content.substring(range.innerStart, range.innerEnd);
 
   const addId = prGenRevId();
   const delId = prGenRevId();
@@ -5563,21 +5618,39 @@ function prInsertWithTrackChanges(content, seg, newHebrewText, revs) {
   revs.push({ id: addId });             // insertion: no type
   revs.push({ id: delId, type: 'Delete' });
 
-  const out = content.replace(origMrkRe, `${openTag}${trackedContent}${closeTag}`);
+  // Splice the tracked content in by index — safer than regex .replace
+  // because it can't accidentally hit the source-side mrk.
+  let out =
+    content.substring(0, range.innerStart) +
+    trackedContent +
+    content.substring(range.innerEnd);
 
-  // Also stamp conf="Translated" + origin attributes on the <sdl:seg> (matches
-  // the existing translator behavior so Trados still treats the segment as
-  // translated — the changes will get accepted/rejected by the reviewer).
-  return out.replace(
-    new RegExp(`(<sdl:seg\\s+id="${seg.mid}")([^/>]*)(\\s*\\/?>)`),
-    (whole, open, attrs, close) => {
-      let a = attrs;
-      if (!/conf=/.test(a))          a += ' conf="Translated"';
-      if (!/\borigin=/.test(a))      a += ' origin="nmt"';
-      if (!/origin-system=/.test(a)) a += ' origin-system="GPT-5.x Proofreader"';
-      return `${open}${a}${close}`;
-    }
-  );
+  // Stamp conf="Translated" + origin attributes on the matching <sdl:seg>
+  // (also scoped to this trans-unit). Trados treats the segment as
+  // translated; the inline change still gets accepted/rejected by the
+  // reviewer through the Track Changes UI.
+  return prStampSegConf(out, seg, 'Translated');
+}
+
+// Set/refresh conf + origin attributes on the seg's <sdl:seg id="N"/>
+// confirmation element. Scoped to the seg's trans-unit so a same-mid <sdl:seg>
+// in another trans-unit is never touched. `confValue` is "Translated" or
+// "Draft".
+function prStampSegConf(content, seg, confValue) {
+  const found = prFindSegConfRange(content, seg);
+  if (!found) return content;
+  const m = found.match;
+  let attrs = m[2];
+  // conf
+  if (/conf="[^"]*"/.test(attrs)) attrs = attrs.replace(/conf="[^"]*"/, `conf="${confValue}"`);
+  else attrs += ` conf="${confValue}"`;
+  // origin (only stamp if missing — preserve existing origin like 'interactive')
+  if (!/\borigin=/.test(attrs)) attrs += ' origin="nmt"';
+  // origin-system: always set/refresh to identify the proofreader
+  if (/origin-system="[^"]*"/.test(attrs)) attrs = attrs.replace(/origin-system="[^"]*"/, 'origin-system="GPT-5.x Proofreader"');
+  else attrs += ' origin-system="GPT-5.x Proofreader"';
+  const newTag = m[1] + attrs + m[3];
+  return content.substring(0, m.index) + newTag + content.substring(m.index + m[0].length);
 }
 
 // Register the collected revisions in <doc-info><rev-defs>. Schema matches
@@ -5622,49 +5695,41 @@ function prAddRevDefs(content, revs, author) {
 // for every segment the Proofreader touches — they're all already
 // translated, that's why we're reviewing them.
 //
+// Scoped to the seg's trans-unit so it cannot collide with the source-side
+// mrk (same mid in <seg-source>) or a same-mid mrk in another trans-unit.
 // Also stamps conf="Translated" + origin attributes so Trados counts the
 // segment as translated and the audit trail survives.
 function prReplaceTargetText(content, seg, newHebrewText) {
   const newInner = trPlaceholdersToXml(newHebrewText, seg.tagMap || []);
-  // 1) Non-empty target — most common case for proofreading
-  const filledRe = new RegExp(`(<mrk\\s+mtype="seg"\\s+mid="${seg.mid}"[^>]*>)([\\s\\S]*?)(<\\/mrk>)`);
-  let out = content.replace(filledRe, `$1${newInner}$3`);
-  // 2) Self-closing target (only if not matched above)
-  if (out === content) {
-    out = content.replace(`<mrk mtype="seg" mid="${seg.mid}"/>`,
-      `<mrk mtype="seg" mid="${seg.mid}">${newInner}</mrk>`);
+  const range = prFindTargetMrkRange(content, seg);
+  if (!range) {
+    // No filled target mrk — defensive fallback to fill empty mrk via the
+    // translator's path (handles self-closing target case too)
+    return trInsertTranslation(content, seg, newHebrewText);
   }
-  // 3) Set/refresh confirmation attributes on the matching <sdl:seg>
-  out = out.replace(
-    new RegExp(`(<sdl:seg\\s+id="${seg.mid}")([^/>]*)(\\s*\\/?>)`),
-    (whole, open, attrs, close) => {
-      let a = attrs;
-      if (!/conf=/.test(a))          a += ' conf="Translated"';
-      if (!/\borigin=/.test(a))      a += ' origin="nmt"';
-      if (!/origin-system=/.test(a)) a += ' origin-system="GPT-5.x Proofreader"';
-      return `${open}${a}${close}`;
-    }
-  );
-  return out;
+  const out =
+    content.substring(0, range.innerStart) +
+    newInner +
+    content.substring(range.innerEnd);
+  return prStampSegConf(out, seg, 'Translated');
 }
 
 // Rewrite a single segment's <sdl:seg id="N" ...> conf attribute to Draft
 // (was "Translated"). This makes Trados Studio surface the segment with the
-// "draft" status icon and pop it into the Editor's review queue — closest we
-// can safely get to true track-changes without risking SDLXLIFF corruption.
-function prMarkSegmentAsDraft(xml, mid) {
-  return xml.replace(
-    new RegExp(`(<sdl:seg\\s+id="${mid}")([^/>]*)(\\s*\\/?>)`),
-    (whole, open, attrs, close) => {
-      // Replace existing conf="X" with conf="Draft"; add if missing
-      let newAttrs = attrs.replace(/conf="[^"]*"/, 'conf="Draft"');
-      if (newAttrs === attrs && !/conf=/.test(attrs)) newAttrs = attrs + ' conf="Draft"';
-      // Tag origin as proofreader so PMs can audit who/what changed it
-      if (!/origin-system=/.test(newAttrs)) newAttrs += ' origin-system="GPT-5.x Proofreader"';
-      else newAttrs = newAttrs.replace(/origin-system="[^"]*"/, 'origin-system="GPT-5.x Proofreader"');
-      return `${open}${newAttrs}${close}`;
-    }
-  );
+// "draft" status icon and pop it into the Editor's review queue. Scoped to
+// the seg's trans-unit so a same-mid <sdl:seg> in another trans-unit isn't
+// accidentally flipped.
+function prMarkSegmentAsDraft(xml, seg) {
+  const found = prFindSegConfRange(xml, seg);
+  if (!found) return xml;
+  const m = found.match;
+  let attrs = m[2];
+  if (/conf="[^"]*"/.test(attrs)) attrs = attrs.replace(/conf="[^"]*"/, 'conf="Draft"');
+  else attrs += ' conf="Draft"';
+  if (/origin-system="[^"]*"/.test(attrs)) attrs = attrs.replace(/origin-system="[^"]*"/, 'origin-system="GPT-5.x Proofreader"');
+  else attrs += ' origin-system="GPT-5.x Proofreader"';
+  const newTag = m[1] + attrs + m[3];
+  return xml.substring(0, m.index) + newTag + xml.substring(m.index + m[0].length);
 }
 
 async function prDownloadRevised() {
@@ -5718,7 +5783,7 @@ async function prDownloadRevised() {
           // Silent replace of existing target with new Hebrew
           content = prReplaceTargetText(content, seg, fix);
         }
-        if (markDraft) content = prMarkSegmentAsDraft(content, seg.mid);
+        if (markDraft) content = prMarkSegmentAsDraft(content, seg);
       }
 
       if (revsForThisFile.length > 0) {
