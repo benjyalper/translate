@@ -257,10 +257,19 @@
         grid-template-columns:60px 1fr !important;
       }
 
-      /* Let selects / text inputs shrink instead of forcing side-scroll */
+      /* CSS Grid min-width:auto trap — the real overflow culprit.
+         .tools-grid is a single column on mobile; grid items default to
+         min-width:auto, so the WIDEST card's content sets the column
+         width and every card inherits it, overflowing the viewport.
+         Force the grid items AND their descendants to be shrinkable, and
+         let long strings wrap. */
+      .tools-grid{min-width:0}
+      .tools-grid>.tool-card{min-width:0}
+      .tool-card{overflow-wrap:anywhere}
+      .tool-card *{min-width:0 !important}
       .tool-card select,
       .tool-card input[type="text"],
-      .tool-card textarea{min-width:0 !important;max-width:100%}
+      .tool-card textarea{max-width:100%}
 
       /* Cost-estimate 4-up may wrap if space is tight */
       #pr-cost-estimate>div:first-child,
