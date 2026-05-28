@@ -233,6 +233,40 @@
     .tools-grid{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem}
     @media(max-width:960px){.tools-grid{grid-template-columns:1fr}}
 
+    /* ── Mobile (phones): tighten padding, collapse multi-column
+       layouts, and let form controls shrink so nothing overflows the
+       viewport. Targets the inline grid styles used across the tool
+       cards via attribute selectors + !important (inline styles would
+       otherwise win). ─────────────────────────────────────── */
+    @media(max-width:640px){
+      #tools-panel{padding:1rem .7rem 2.5rem !important}
+      .main{padding:1rem 4vw !important}
+      .tool-card{padding:1.1rem 1rem !important;gap:.7rem}
+      .tool-title{font-size:.95rem}
+      .tool-sub{font-size:.74rem}
+
+      /* Collapse the inline 2-/3-column grids inside tool cards */
+      [style*="grid-template-columns:1fr 1fr"],
+      [style*="grid-template-columns:2fr 1fr"],
+      [style*="grid-template-columns:1.5fr 1fr"],
+      [style*="grid-template-columns:repeat(3"]{
+        grid-template-columns:1fr !important;
+      }
+      /* Keep the proofreader card's severity rail but make it narrower */
+      [style*="grid-template-columns:104px 1fr"]{
+        grid-template-columns:60px 1fr !important;
+      }
+
+      /* Let selects / text inputs shrink instead of forcing side-scroll */
+      .tool-card select,
+      .tool-card input[type="text"],
+      .tool-card textarea{min-width:0 !important;max-width:100%}
+
+      /* Cost-estimate 4-up may wrap if space is tight */
+      #pr-cost-estimate>div:first-child,
+      #dp-cost-estimate>div:first-child{flex-wrap:wrap}
+    }
+
     .tool-card{
       background:#13131a;border:1px solid #2a2a3a;border-radius:14px;
       padding:1.6rem;display:flex;flex-direction:column;gap:.9rem;
