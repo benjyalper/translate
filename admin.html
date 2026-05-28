@@ -1574,6 +1574,94 @@
         <div id="st-error" style="display:none;padding:.7rem 1rem;background:#1a0000;border:1px solid #7f1d1d;border-radius:8px;font-size:.82rem;color:#fca5a5;margin-top:.6rem"></div>
       </div><!-- /subtitle translator card -->
 
+      <!-- ── 🔍 SUBTITLE PROOFREADER (SRT / VTT) ─────────────── -->
+      <div class="tool-card" style="grid-column:1/-1">
+        <div class="tool-header">
+          <div class="tool-icon">🔍</div>
+          <div>
+            <div class="tool-title">Subtitle Proofreader (Hebrew)</div>
+            <div class="tool-sub">Upload a Hebrew .srt/.vtt → GPT reviews each cue + a technical QA pass flags reading-speed (CPS), line length, line count &amp; timing issues → approve fixes → export corrected SRT/VTT (timecodes preserved). Add the English source for a bilingual accuracy check.</div>
+          </div>
+        </div>
+        <div class="tool-divider"></div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.7rem">
+          <div>
+            <div class="tdrop" id="sp-he-drop" style="padding:1.1rem">
+              <input type="file" id="sp-he-file" accept=".srt,.vtt,.sbv,.txt" onchange="spOnHeFile(this)"/>
+              <div class="tdrop-icon">🔍</div>
+              <div class="tdrop-text">Hebrew subtitles (.srt / .vtt) — <strong>required</strong></div>
+            </div>
+            <div class="tdrop-sel" id="sp-he-label"></div>
+          </div>
+          <div>
+            <div class="tdrop" id="sp-en-drop" style="padding:1.1rem">
+              <input type="file" id="sp-en-file" accept=".srt,.vtt,.sbv,.txt" onchange="spOnEnFile(this)"/>
+              <div class="tdrop-icon">🇬🇧</div>
+              <div class="tdrop-text">English source (.srt / .vtt) — <em>optional, enables bilingual check</em></div>
+            </div>
+            <div class="tdrop-sel" id="sp-en-label"></div>
+          </div>
+        </div>
+
+        <div class="tlang-row" style="margin-top:.5rem;align-items:center;flex-wrap:wrap;gap:.5rem">
+          <span class="tlang-lbl">Model:</span>
+          <select id="sp-model" onchange="spRenderCostEstimate()" style="padding:.4rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.78rem">
+            <option value="gpt-5.4" selected>gpt-5.4 (recommended)</option>
+            <option value="gpt-5.5">gpt-5.5 (premium · 2× cost)</option>
+            <option value="gpt-5.4-mini">gpt-5.4-mini (cheap drafts)</option>
+          </select>
+          <label style="font-size:.74rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem;margin-left:.6rem">
+            <input type="checkbox" id="sp-lang-review" checked style="width:.95rem;height:.95rem;cursor:pointer"/>
+            <span>GPT language review</span>
+          </label>
+        </div>
+
+        <!-- Subtitle-QA limits -->
+        <div class="tlang-row" style="margin-top:.4rem;align-items:center;flex-wrap:wrap;gap:.5rem .9rem">
+          <span class="tlang-lbl">QA limits:</span>
+          <label style="font-size:.72rem;color:#cbd5e1;display:flex;align-items:center;gap:.3rem">Max CPS
+            <input type="number" id="sp-cps" value="21" min="5" max="40" step="1" style="width:3.4rem;padding:.25rem .35rem;background:#0f0f17;border:1px solid var(--border);border-radius:5px;color:#e2e8f0;font-size:.74rem"/>
+          </label>
+          <label style="font-size:.72rem;color:#cbd5e1;display:flex;align-items:center;gap:.3rem">Max chars/line
+            <input type="number" id="sp-cpl" value="42" min="20" max="60" step="1" style="width:3.4rem;padding:.25rem .35rem;background:#0f0f17;border:1px solid var(--border);border-radius:5px;color:#e2e8f0;font-size:.74rem"/>
+          </label>
+          <label style="font-size:.72rem;color:#cbd5e1;display:flex;align-items:center;gap:.3rem">Max lines
+            <input type="number" id="sp-maxlines" value="2" min="1" max="4" step="1" style="width:3rem;padding:.25rem .35rem;background:#0f0f17;border:1px solid var(--border);border-radius:5px;color:#e2e8f0;font-size:.74rem"/>
+          </label>
+        </div>
+
+        <div id="sp-cost-estimate" style="display:none;margin-top:.5rem;padding:.5rem .6rem;background:#0a0a14;border:1px solid #1f2937;border-radius:7px"></div>
+
+        <button class="tbtn gold" id="sp-btn" onclick="spAnalyze()" disabled>🔍 Proofread Subtitles</button>
+
+        <div class="tprog" id="sp-prog">
+          <div class="tprog-text" id="sp-prog-text">Working…</div>
+          <div class="tprog-bar-outer"><div class="tprog-bar-inner" id="sp-prog-bar"></div></div>
+        </div>
+
+        <div id="sp-results" style="display:none;margin-top:.8rem">
+          <div class="tres-badges" id="sp-badges" style="margin-bottom:.5rem"></div>
+          <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.5rem;font-size:.74rem">
+            <button class="tbtn sp-filter active" data-f="all" onclick="spSetFilter('all',this)" style="width:auto;padding:.35rem .8rem;font-size:.7rem;background:#1e1b4b;color:#a5b4fc">All <span id="sp-cnt-all">0</span></button>
+            <button class="tbtn sp-filter" data-f="critical" onclick="spSetFilter('critical',this)" style="width:auto;padding:.35rem .8rem;font-size:.7rem;background:#0a0a14;color:#fca5a5;border:1px solid #7f1d1d">🔴 <span id="sp-cnt-critical">0</span></button>
+            <button class="tbtn sp-filter" data-f="major" onclick="spSetFilter('major',this)" style="width:auto;padding:.35rem .8rem;font-size:.7rem;background:#0a0a14;color:#fcd34d;border:1px solid #92400e">🟡 <span id="sp-cnt-major">0</span></button>
+            <button class="tbtn sp-filter" data-f="minor" onclick="spSetFilter('minor',this)" style="width:auto;padding:.35rem .8rem;font-size:.7rem;background:#0a0a14;color:#94a3b8;border:1px solid #475569">⚪ <span id="sp-cnt-minor">0</span></button>
+            <button class="tbtn" style="margin-left:auto;width:auto;padding:.35rem .8rem;font-size:.7rem;background:#1e1b4b;color:#a5b4fc" onclick="spApproveAllVisible(true)">✓ Approve all visible</button>
+          </div>
+          <div style="max-height:560px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:.5rem;background:#0a0a14">
+            <div id="sp-list" style="display:flex;flex-direction:column;gap:.55rem"></div>
+          </div>
+          <div style="margin-top:.7rem;display:flex;gap:.7rem;flex-wrap:wrap;align-items:center">
+            <button class="tbtn gold" id="sp-dl-srt" onclick="spDownload('srt')" disabled>⬇ Download corrected .srt</button>
+            <button class="tbtn" id="sp-dl-vtt" onclick="spDownload('vtt')" disabled style="width:auto;padding:.55rem 1.1rem;font-size:.78rem;background:#1e1b4b;color:#a5b4fc">⬇ .vtt</button>
+            <span style="font-size:.7rem;color:#64748b;margin-left:auto">📌 Approved language fixes are applied; QA flags are advisory — edit cues inline as needed.</span>
+          </div>
+        </div>
+
+        <div id="sp-error" style="display:none;padding:.7rem 1rem;background:#1a0000;border:1px solid #7f1d1d;border-radius:8px;font-size:.82rem;color:#fca5a5;margin-top:.6rem"></div>
+      </div><!-- /subtitle proofreader card -->
+
       <!-- ── ✉️ EMAIL RESPONSE GENERATOR ────────────────────── -->
       <div class="tool-card" style="grid-column:1/-1">
         <div class="tool-header">
@@ -6998,6 +7086,322 @@ function stDownload(fmt) {
     if (f) stOnFile({ files: [f] });
   });
 })();
+
+// ═══════════════════════════════════════════════════════════════
+// ─── 🔍 SUBTITLE PROOFREADER (SRT / VTT) ───────────────────────
+// ═══════════════════════════════════════════════════════════════
+// Reuses the subtitle parser (stParseSRT/stParseVTT). Runs two passes
+// per Hebrew cue:
+//   1. Technical QA (local, free): reading speed (CPS), chars/line, line
+//      count, duration + overlap with the next cue.
+//   2. Language review (GPT): grammar/spelling/terminology/style, and
+//      accuracy vs the English source when a source file is supplied.
+// Both feed the same per-cue issue list. Approved language fixes update
+// the Hebrew; QA flags are advisory. Export keeps timecodes verbatim.
+
+let spHeFile = null, spEnFile = null;
+let spHeCues = [], spEnCues = [];
+let spFormat = 'srt';
+let spTotalWords = 0;
+let spActiveFilter = 'all';
+
+function spParseFileInto(file, cb) {
+  file.text().then(txt => {
+    const fmt = stDetectFormat(txt, file.name);
+    const cues = (fmt === 'vtt') ? stParseVTT(txt) : stParseSRT(txt);
+    cb(null, cues, fmt);
+  }).catch(e => cb(e));
+}
+
+function spOnHeFile(input) {
+  spHeFile = input.files?.[0] || null;
+  const lbl = document.getElementById('sp-he-label');
+  spHeCues = []; spTotalWords = 0;
+  document.getElementById('sp-results').style.display = 'none';
+  document.getElementById('sp-error').style.display   = 'none';
+  document.getElementById('sp-dl-srt').disabled = true;
+  document.getElementById('sp-dl-vtt').disabled = true;
+  spRenderCostEstimate();
+  if (!spHeFile) { lbl.style.display='none'; document.getElementById('sp-btn').disabled = true; return; }
+  lbl.style.display = 'block';
+  lbl.textContent = `🔍 ${spHeFile.name} · ⏳ parsing…`;
+  spParseFileInto(spHeFile, (err, cues, fmt) => {
+    if (err || !cues.length) { lbl.textContent = `🔍 ${spHeFile.name} · ❌ ${err ? err.message : 'no cues found'}`; document.getElementById('sp-btn').disabled = true; return; }
+    spHeCues = cues; spFormat = fmt;
+    spTotalWords = cues.reduce((s, c) => s + adminCountWords(c.text), 0);
+    lbl.textContent = `🔍 ${spHeFile.name} · ${cues.length} cues (${fmt.toUpperCase()}, ${spTotalWords.toLocaleString()} words)`;
+    spRenderCostEstimate();
+    document.getElementById('sp-btn').disabled = false;
+  });
+}
+
+function spOnEnFile(input) {
+  spEnFile = input.files?.[0] || null;
+  const lbl = document.getElementById('sp-en-label');
+  spEnCues = [];
+  if (!spEnFile) { lbl.style.display='none'; return; }
+  lbl.style.display = 'block';
+  lbl.textContent = `🇬🇧 ${spEnFile.name} · ⏳ parsing…`;
+  spParseFileInto(spEnFile, (err, cues) => {
+    if (err || !cues.length) { lbl.textContent = `🇬🇧 ${spEnFile.name} · ❌ ${err ? err.message : 'no cues found'}`; return; }
+    spEnCues = cues;
+    lbl.textContent = `🇬🇧 ${spEnFile.name} · ${cues.length} cues (bilingual check enabled)`;
+  });
+}
+
+function spRenderCostEstimate() {
+  const host = document.getElementById('sp-cost-estimate');
+  if (!host) return;
+  if (!spTotalWords) { host.style.display = 'none'; return; }
+  const model = document.getElementById('sp-model')?.value || 'gpt-5.4';
+  host.innerHTML = adminBuildCostTable(spTotalWords, model);
+  host.style.display = 'block';
+}
+
+// HH:MM:SS,mmm or HH:MM:SS.mmm → seconds
+function spSecondsFromTC(tc) {
+  const m = (tc || '').match(/(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})/);
+  if (!m) return 0;
+  return (+m[1]) * 3600 + (+m[2]) * 60 + (+m[3]) + (+(m[4].padEnd(3, '0'))) / 1000;
+}
+
+// Local technical-QA pass for one cue. Returns issue objects shaped like
+// the GPT ones (severity/category/description) but with no suggestion.
+function spRunQA(cue, lim, nextCue) {
+  const issues = [];
+  const dur = spSecondsFromTC(cue.end) - spSecondsFromTC(cue.start);
+  const text = cue.he || '';
+  const visible = text.replace(/\n/g, '');
+  const lines = text.split('\n');
+  if (dur <= 0) {
+    issues.push({ severity: 'critical', category: 'timing', description: `Invalid duration (${dur.toFixed(2)}s) — start/end missing or reversed.`, suggestion: '' });
+  } else {
+    const cps = visible.length / dur;
+    if (cps > lim.cps) issues.push({ severity: cps > lim.cps * 1.3 ? 'major' : 'minor', category: 'reading-speed', description: `Too fast: ${cps.toFixed(1)} CPS (limit ${lim.cps}) — ${visible.length} chars in ${dur.toFixed(2)}s.`, suggestion: '' });
+    if (dur < lim.minDur) issues.push({ severity: 'minor', category: 'timing', description: `Very short: ${dur.toFixed(2)}s (min ${lim.minDur}s).`, suggestion: '' });
+    if (dur > lim.maxDur) issues.push({ severity: 'minor', category: 'timing', description: `Very long: ${dur.toFixed(2)}s (max ${lim.maxDur}s).`, suggestion: '' });
+  }
+  lines.forEach((ln, i) => { if (ln.length > lim.cpl) issues.push({ severity: 'minor', category: 'line-length', description: `Line ${i + 1}: ${ln.length} chars (max ${lim.cpl}).`, suggestion: '' }); });
+  if (lines.length > lim.maxLines) issues.push({ severity: 'minor', category: 'line-count', description: `${lines.length} lines (max ${lim.maxLines}).`, suggestion: '' });
+  if (nextCue) {
+    const gap = spSecondsFromTC(nextCue.start) - spSecondsFromTC(cue.end);
+    if (gap < 0) issues.push({ severity: 'major', category: 'timing', description: `Overlaps the next cue by ${(-gap).toFixed(2)}s.`, suggestion: '' });
+  }
+  return issues;
+}
+
+// GPT language review for a batch. `pairs` = [{he, en, budget}]. Returns
+// a JSON array of {n, issues:[{severity,category,description,suggestion}]}.
+async function spReviewBatch(pairs, model, apiKey, bilingual) {
+  const numbered = pairs.map((p, i) => {
+    let s = `${i + 1}.`;
+    if (bilingual && p.en) s += `\nEN: ${p.en.replace(/\n/g, ' / ')}`;
+    s += `\nHE: ${(p.he || '').replace(/\n/g, ' / ')}`;
+    if (p.budget) s += `\n(max ~${p.budget} chars for reading speed)`;
+    return s;
+  }).join('\n\n');
+
+  const sys =
+`You are a senior Hebrew subtitle proofreader${bilingual ? ' (reviewing English→Hebrew subtitles)' : ''}. Review each numbered Hebrew subtitle cue for genuine quality issues — not nitpicks.
+
+CATEGORIES: grammar, spelling, terminology, style, punctuation${bilingual ? ', accuracy (HE doesn\'t match EN meaning), omission (EN content missing from HE), addition (HE has content not in EN)' : ''}.
+SEVERITY: critical (changes meaning / unreadable) | major (clear error) | minor (polish).
+
+For EACH numbered cue return exactly one JSON object:
+  { "n": <number>, "issues": [ { "severity": "...", "category": "...", "description": "<short English explanation>", "suggestion": "<corrected FULL Hebrew cue, keeping line breaks as ' / '>" } ] }
+If a cue is fine: { "n": <number>, "issues": [] }
+
+When a max-chars budget is given, keep the suggested Hebrew within it (tighten wording) so the subtitle reads comfortably.
+Output a JSON ARRAY of exactly ${pairs.length} objects, in order. ONLY the JSON array — no markdown, no commentary.`;
+
+  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, temperature: 0.2, messages: [ { role: 'system', content: sys }, { role: 'user', content: numbered } ] })
+  });
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error?.message || 'GPT error ' + r.status);
+  let raw = (data.choices?.[0]?.message?.content || '').trim();
+  raw = raw.replace(/^```[a-z]*\n?/i, '').replace(/```\s*$/, '').trim();
+  const arr = JSON.parse(raw);
+  if (!Array.isArray(arr)) throw new Error('Expected JSON array');
+  return arr;
+}
+
+async function spAnalyze() {
+  if (!spHeFile || !spHeCues.length) return;
+  const doLang = document.getElementById('sp-lang-review').checked;
+  const apiKey = doLang ? getApiKey() : null;
+  if (doLang && !apiKey) { promptApiKey(); return; }
+
+  const model = document.getElementById('sp-model').value || 'gpt-5.4';
+  const lim = {
+    cps: parseFloat(document.getElementById('sp-cps').value) || 21,
+    cpl: parseInt(document.getElementById('sp-cpl').value) || 42,
+    maxLines: parseInt(document.getElementById('sp-maxlines').value) || 2,
+    minDur: 0.83, maxDur: 7,
+  };
+  const bilingual = spEnCues.length > 0;
+
+  const btn = document.getElementById('sp-btn');
+  const prog = document.getElementById('sp-prog');
+  const bar = document.getElementById('sp-prog-bar');
+  const txt = document.getElementById('sp-prog-text');
+  const err = document.getElementById('sp-error');
+  const res = document.getElementById('sp-results');
+  err.style.display = 'none'; res.style.display = 'none';
+  btn.disabled = true; prog.classList.add('show'); bar.style.width = '5%';
+
+  try {
+    // 1) Local technical QA — instant
+    txt.textContent = 'Running subtitle QA…';
+    spHeCues.forEach((c, i) => {
+      c.he = c.he || c.text;            // proofread target starts as the loaded text
+      c.issues = spRunQA(c, lim, spHeCues[i + 1]);
+      c.approved = false;
+    });
+    bar.style.width = '15%';
+
+    // 2) GPT language review (optional)
+    if (doLang) {
+      const BATCH = 15;
+      for (let i = 0; i < spHeCues.length; i += BATCH) {
+        const slice = spHeCues.slice(i, i + BATCH);
+        txt.textContent = `Language review ${i + 1}–${Math.min(i + BATCH, spHeCues.length)} of ${spHeCues.length} (${model})…`;
+        bar.style.width = (15 + (i / spHeCues.length) * 80) + '%';
+        const pairs = slice.map((c, k) => {
+          const dur = spSecondsFromTC(c.end) - spSecondsFromTC(c.start);
+          const budget = dur > 0 ? Math.floor(dur * lim.cps) : 0;
+          return { he: c.text, en: bilingual ? (spEnCues[i + k]?.text || '') : '', budget };
+        });
+        let out;
+        try { out = await spReviewBatch(pairs, model, apiKey, bilingual); }
+        catch (e) { console.warn('[sp] batch failed:', e.message); out = slice.map((_, k) => ({ n: k + 1, issues: [] })); }
+        for (let k = 0; k < slice.length; k++) {
+          const r = out.find(x => x.n === k + 1) || { issues: [] };
+          (r.issues || []).forEach(iss => {
+            if (iss.suggestion) iss.suggestion = String(iss.suggestion).replace(/ \/ /g, '\n'); // restore line breaks
+            slice[k].issues.push(iss);
+          });
+        }
+        if (i + BATCH < spHeCues.length) await new Promise(r => setTimeout(r, 200));
+      }
+    }
+
+    bar.style.width = '100%'; txt.textContent = '✅ Done!';
+    setTimeout(() => prog.classList.remove('show'), 1200);
+    spRenderResults();
+    document.getElementById('sp-dl-srt').disabled = false;
+    document.getElementById('sp-dl-vtt').disabled = false;
+  } catch (e) {
+    prog.classList.remove('show');
+    err.style.display = 'block';
+    err.textContent = '❌ ' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function spSetFilter(f, btn) {
+  spActiveFilter = f;
+  document.querySelectorAll('.sp-filter').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  spRenderResults();
+}
+function spApprove(idx) { const c = spHeCues[idx]; if (c) { c.approved = true;  const s = (c.issues.find(i => i.suggestion) || {}).suggestion; if (s) c.he = s; spRenderResults(); } }
+function spUnapprove(idx) { const c = spHeCues[idx]; if (c) { c.approved = false; spRenderResults(); } }
+function spEditCue(idx, val) { if (spHeCues[idx]) spHeCues[idx].he = val; }
+function spApproveAllVisible(state) {
+  spHeCues.forEach((c, idx) => {
+    if (!c.issues || !c.issues.length) return;
+    const maxSev = prMaxSeverity(c.issues);
+    if (spActiveFilter !== 'all' && maxSev !== spActiveFilter) return;
+    if (state) { c.approved = true; const s = (c.issues.find(i => i.suggestion) || {}).suggestion; if (s) c.he = s; }
+    else c.approved = false;
+  });
+  spRenderResults();
+}
+
+function spRenderResults() {
+  document.getElementById('sp-results').style.display = 'block';
+  const flagged = spHeCues.filter(c => c.issues && c.issues.length);
+  let cCrit = 0, cMaj = 0, cMin = 0;
+  flagged.forEach(c => { const m = prMaxSeverity(c.issues); if (m === 'critical') cCrit++; else if (m === 'major') cMaj++; else cMin++; });
+  document.getElementById('sp-cnt-all').textContent = flagged.length;
+  document.getElementById('sp-cnt-critical').textContent = cCrit;
+  document.getElementById('sp-cnt-major').textContent = cMaj;
+  document.getElementById('sp-cnt-minor').textContent = cMin;
+  document.getElementById('sp-badges').innerHTML =
+    `<span class="tres-badge tb-seg">🎬 ${spHeCues.length} cues</span>` +
+    `<span class="tres-badge tb-lang">⚠️ ${flagged.length} with issues</span>` +
+    `<span class="tres-badge tb-lang">${spEnCues.length ? 'bilingual' : 'monolingual'}</span>`;
+
+  const list = flagged.filter(c => spActiveFilter === 'all' || prMaxSeverity(c.issues) === spActiveFilter);
+  const host = document.getElementById('sp-list');
+  if (!list.length) { host.innerHTML = '<div style="padding:1.2rem;text-align:center;color:#64748b;font-size:.78rem">No issues at this level.</div>'; return; }
+
+  host.innerHTML = list.map(c => {
+    const idx = spHeCues.indexOf(c);
+    const sevChips = ['critical','major','minor'].filter(s => c.issues.some(i => i.severity === s)).map(s => prSeverityBadge(s)).join('');
+    const issuesHTML = c.issues.map(i => `
+      <div style="display:flex;gap:.4rem;align-items:flex-start;padding:.15rem 0;font-size:.73rem;color:#cbd5e1;line-height:1.4">
+        <span style="flex:0 0 auto;padding:.03rem .35rem;background:#1e1b4b;color:#a5b4fc;border-radius:3px;font-size:.62rem">${esc(i.category||'')}</span>
+        <span>${esc(i.description||'')}</span>
+      </div>`).join('');
+    const sugg = (c.issues.find(i => i.suggestion) || {}).suggestion || '';
+    const hasFix = sugg && sugg.trim() !== (c.text||'').trim();
+    let action = '';
+    if (hasFix) action = c.approved
+      ? `<button class="tbtn" onclick="spUnapprove(${idx})" style="width:auto;padding:.4rem .8rem;font-size:.72rem;background:#0a1a0a;color:#34d399;border:1px solid #14532d">✓ Applied · undo</button>`
+      : `<button class="tbtn" onclick="spApprove(${idx})" style="width:auto;padding:.4rem .8rem;font-size:.72rem;background:#1e1b4b;color:#a5b4fc">✓ Apply suggested fix</button>`;
+    return `
+      <div style="border:1px solid ${c.approved?'#14532d':'#1f2937'};border-radius:8px;background:${c.approved?'rgba(52,211,153,0.04)':'#0f0f17'};padding:.55rem .7rem">
+        <div style="display:flex;justify-content:space-between;gap:.6rem;margin-bottom:.35rem">
+          <span style="font-size:.66rem;color:#64748b;font-family:monospace">#${esc(c.number)} · ${esc(c.start)} → ${esc(c.end)}</span>
+          <span style="display:flex;gap:.25rem">${sevChips}</span>
+        </div>
+        ${spEnCues.length ? `<div style="font-size:.72rem;color:#94a3b8;margin-bottom:.25rem"><strong style="color:#cbd5e1">EN:</strong> ${esc((spEnCues[idx]||{}).text||'')}</div>` : ''}
+        <div style="margin:.2rem 0 .35rem">${issuesHTML}</div>
+        ${hasFix ? `<div style="font-size:.62rem;color:#34d399;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.15rem">Suggested</div><div dir="rtl" style="font-size:.82rem;color:#bbf7d0;white-space:pre-wrap;line-height:1.4;margin-bottom:.4rem">${esc(sugg)}</div>` : ''}
+        <div style="font-size:.62rem;color:#fcd34d;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.15rem">Current (editable)</div>
+        <textarea oninput="spEditCue(${idx}, this.value)" dir="rtl" style="width:100%;font-size:.82rem;color:#fef3c7;background:#0a0a14;border:1px solid #1f2937;border-radius:5px;padding:.35rem .5rem;line-height:1.4;resize:vertical;min-height:2.4rem;font-family:inherit">${esc(c.he)}</textarea>
+        <div style="margin-top:.4rem">${action}</div>
+      </div>`;
+  }).join('');
+}
+
+function spBuildSRT() {
+  return spHeCues.map((c, i) => `${i + 1}\n${stTimecode(c.start,'srt')} --> ${stTimecode(c.end,'srt')}\n${c.he || c.text}`).join('\n\n') + '\n';
+}
+function spBuildVTT() {
+  const body = spHeCues.map(c => { const s = c.settings ? ' ' + c.settings : ''; return `${stTimecode(c.start,'vtt')} --> ${stTimecode(c.end,'vtt')}${s}\n${c.he || c.text}`; }).join('\n\n');
+  return 'WEBVTT\n\n' + body + '\n';
+}
+function spDownload(fmt) {
+  if (!spHeCues.length) { showAdminToast('Nothing to export yet.'); return; }
+  const content = fmt === 'vtt' ? spBuildVTT() : spBuildSRT();
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  const base = (spHeFile?.name || 'subtitles').replace(/\.(srt|vtt|sbv|txt)$/i, '');
+  a.download = `${base}_PROOFED.${fmt}`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+  showAdminToast(`✅ Downloaded ${a.download}`);
+}
+
+// Drag-and-drop for the two proofreader drop zones
+['sp-he-drop','sp-en-drop'].forEach(function(zid){
+  const dz = document.getElementById(zid);
+  if (!dz) return;
+  dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('drag-over'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+  dz.addEventListener('drop', e => {
+    e.preventDefault(); dz.classList.remove('drag-over');
+    const f = e.dataTransfer.files[0]; if (!f) return;
+    if (zid === 'sp-he-drop') spOnHeFile({ files: [f] }); else spOnEnFile({ files: [f] });
+  });
+});
 
 // ─── GEL Evaluation Form generator ──────────────────────────
 // Maps the Proofreader's issue findings (by category × severity) into
