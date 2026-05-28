@@ -714,9 +714,21 @@ function getPool() {
   if (!process.env.DATABASE_URL) return null;
   if (!_pgPool) {
     const { Pool } = require('pg');
+    const url = process.env.DATABASE_URL;
+    // SSL rules differ by host:
+    //  - Internal Railway network (postgres.railway.internal) does NOT use
+    //    SSL — forcing it errors with "server does not support SSL connections".
+    //  - Public proxy (*.rlwy.net / *.proxy.rlwy.net) terminates SSL, so we
+    //    must enable it (with relaxed cert checking).
+    // Override with PGSSL=force | off if a deployment needs it.
+    const isInternal = /\.railway\.internal/i.test(url || '');
+    let ssl;
+    if (process.env.PGSSL === 'off')        ssl = false;
+    else if (process.env.PGSSL === 'force') ssl = { rejectUnauthorized: false };
+    else ssl = isInternal ? false : { rejectUnauthorized: false };
     _pgPool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: { rejectUnauthorized: false },   // Railway PG proxy uses SSL
+      connectionString: url,
+      ssl,
       connectionTimeoutMillis: 10000,
       max: 5,
     });
