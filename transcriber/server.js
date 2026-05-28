@@ -29,8 +29,8 @@ const UPLOADS_DIR = path.join(__dirname, 'uploads');
 // ── CORS (allow admin panel on any local port) ────────────────
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Admin-Token');
   if (req.method === 'OPTIONS') return res.sendStatus(200);
   next();
 });
@@ -693,7 +693,131 @@ app.post('/api/assist-apply', async (req, res) => {
 });
 
 // ── GET /api/status ───────────────────────────────────────────
-app.get('/api/status', (req, res) => res.json({ ok: true, version: '2.0' }));
+app.get('/api/status', (req, res) => res.json({
+  ok: true,
+  version: '2.1',
+  firmsDb: !!process.env.DATABASE_URL,      // is cross-device sync available?
+  firmsAuth: !!process.env.ADMIN_TOKEN,     // is it password-protected?
+}));
+
+// ─────────────────────────────────────────────────────────────
+//  CLIENT / FIRM MEMORY — Postgres-backed cross-device sync
+// ─────────────────────────────────────────────────────────────
+// Backs the Email tool's per-firm correspondence memory so it syncs
+// across devices (laptop + iPhone). The browser never touches Postgres
+// directly — it calls these endpoints, which read DATABASE_URL +
+// ADMIN_TOKEN from the environment (never hardcoded).
+
+let _pgPool = null;
+let _pgInitPromise = null;
+function getPool() {
+  if (!process.env.DATABASE_URL) return null;
+  if (!_pgPool) {
+    const { Pool } = require('pg');
+    _pgPool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false },   // Railway PG proxy uses SSL
+      connectionTimeoutMillis: 10000,
+      max: 5,
+    });
+    _pgPool.on('error', err => console.error('[pg] idle client error:', err.message));
+  }
+  return _pgPool;
+}
+async function ensureFirmsTable() {
+  const pool = getPool();
+  if (!pool) return;
+  if (!_pgInitPromise) {
+    _pgInitPromise = pool.query(`
+      CREATE TABLE IF NOT EXISTS firms (
+        id         TEXT PRIMARY KEY,
+        name       TEXT,
+        data       JSONB NOT NULL,
+        updated_at BIGINT
+      )`).catch(e => { _pgInitPromise = null; throw e; });
+  }
+  return _pgInitPromise;
+}
+
+// Token gate. If ADMIN_TOKEN is set, require a matching X-Admin-Token
+// header. If unset, allow but warn loudly (dev only — set it on Railway).
+function requireAdminToken(req, res, next) {
+  const expected = process.env.ADMIN_TOKEN;
+  if (!expected) {
+    console.warn('[firms] ADMIN_TOKEN not set — endpoints are UNPROTECTED. Set it on Railway.');
+    return next();
+  }
+  if (req.headers['x-admin-token'] !== expected) {
+    return res.status(401).json({ error: 'Unauthorized — bad or missing admin token.' });
+  }
+  next();
+}
+function firmsDbGuard(res) {
+  if (!getPool()) {
+    res.status(503).json({ error: 'Database not configured (DATABASE_URL missing on the server).' });
+    return false;
+  }
+  return true;
+}
+
+// GET all firms → { firms: [ ...firmData ] }
+app.get('/api/firms', requireAdminToken, async (req, res) => {
+  if (!firmsDbGuard(res)) return;
+  try {
+    await ensureFirmsTable();
+    const r = await getPool().query('SELECT data FROM firms ORDER BY updated_at DESC NULLS LAST');
+    res.json({ firms: r.rows.map(row => row.data) });
+  } catch (e) {
+    console.error('[firms] GET failed:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT { firms: [...] } → upsert each. Does NOT delete firms missing from
+// the payload (removals go through DELETE) so two devices can't wipe each
+// other's additions on a stale full-sync.
+app.put('/api/firms', requireAdminToken, async (req, res) => {
+  if (!firmsDbGuard(res)) return;
+  const firms = Array.isArray(req.body && req.body.firms) ? req.body.firms : null;
+  if (!firms) return res.status(400).json({ error: 'Body must be { firms: [...] }' });
+  try {
+    await ensureFirmsTable();
+    const client = await getPool().connect();
+    try {
+      await client.query('BEGIN');
+      for (const f of firms) {
+        if (!f || !f.id) continue;
+        await client.query(
+          `INSERT INTO firms (id, name, data, updated_at) VALUES ($1,$2,$3,$4)
+           ON CONFLICT (id) DO UPDATE SET name=$2, data=$3, updated_at=$4`,
+          [f.id, f.name || '', JSON.stringify(f), f.updatedAt || Date.now()]
+        );
+      }
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK'); throw e;
+    } finally {
+      client.release();
+    }
+    res.json({ ok: true, count: firms.length });
+  } catch (e) {
+    console.error('[firms] PUT failed:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /api/firms/:id → remove one firm
+app.delete('/api/firms/:id', requireAdminToken, async (req, res) => {
+  if (!firmsDbGuard(res)) return;
+  try {
+    await ensureFirmsTable();
+    await getPool().query('DELETE FROM firms WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[firms] DELETE failed:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // ── Start ─────────────────────────────────────────────────────
 app.listen(PORT, () => {

@@ -1572,7 +1572,7 @@
           <div class="tool-icon">📁</div>
           <div>
             <div class="tool-title">Client / Firm Memory</div>
-            <div class="tool-sub">Correspondence history per agency · a GPT-distilled running memory informs future replies · stored in your browser (this device)</div>
+            <div class="tool-sub">Correspondence history per agency · a GPT-distilled running memory informs future replies · syncs across devices when sync is connected</div>
           </div>
         </div>
         <div class="tool-divider"></div>
@@ -1582,7 +1582,7 @@
           <label class="tbtn" style="width:auto;padding:.45rem .9rem;font-size:.74rem;background:#0a0a14;color:#94a3b8;border:1px solid #1f2937;cursor:pointer">⬆ Import
             <input type="file" id="er-firms-import" accept=".json" style="display:none" onchange="erFirmsImport(this)"/>
           </label>
-          <span style="font-size:.7rem;color:#64748b;margin-left:auto">💾 Lives in this browser only</span>
+          <span id="er-sync-badge" onclick="erSyncBadgeClick()" title="Click to connect / refresh sync" style="margin-left:auto;font-size:.72rem;color:#64748b;cursor:pointer;padding:.3rem .6rem;border:1px solid #1f2937;border-radius:6px">💾 Local only</span>
         </div>
         <div id="er-firms-empty" style="font-size:.78rem;color:#64748b;padding:.6rem 0">No firms yet — generate an email with a client selected, or click "+ Add firm".</div>
         <div id="er-firms-list" style="display:flex;flex-direction:column;gap:.5rem"></div>
@@ -7931,9 +7931,13 @@ function erOpenMail() {
 // regenerates the summary after each exchange.
 
 const ER_FIRMS_KEY = 'er_firms_v1';
+const ER_TOKEN_KEY = 'er_admin_token';
 const ER_MAX_THREADS = 30;     // cap raw threads per firm (older folded into memory)
 const ER_THREAD_CAP  = 4000;   // cap each stored body length
 let erCurrentFirmId = null;    // firm resolved during the last generate
+let erSyncAvailable = false;   // server has DATABASE_URL configured?
+let erSyncState = 'local';     // 'local' | 'syncing' | 'synced' | 'auth' | 'error'
+let _erPushTimer = null;       // debounce handle for cloud pushes
 
 function erFirmsLoad() {
   try {
@@ -7946,6 +7950,7 @@ function erFirmsLoad() {
 function erFirmsSave(store) {
   try { localStorage.setItem(ER_FIRMS_KEY, JSON.stringify(store)); }
   catch (e) { showAdminToast('❌ Could not save client memory: ' + e.message); }
+  erPushToServer(store);   // fire-and-forget cloud sync (no-op if sync off)
 }
 function erFirmFind(id) { return erFirmsLoad().firms.find(f => f.id === id) || null; }
 function erGenId() { return 'firm_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
@@ -7969,7 +7974,12 @@ function erFirmCreate(name, domain) {
 function erFirmDelete(id) {
   const store = erFirmsLoad();
   store.firms = store.firms.filter(f => f.id !== id);
-  erFirmsSave(store);
+  // Write locally + upsert remaining. PUT won't remove the deleted row on
+  // the server, so issue an explicit DELETE too.
+  try { localStorage.setItem(ER_FIRMS_KEY, JSON.stringify(store)); } catch (e) {}
+  if (erSyncAvailable) {
+    erApiDeleteFirm(id).catch(err => console.warn('[er] server delete failed:', err.message));
+  }
   erRenderFirms(); erRefreshFirmSelect();
 }
 function erFirmRename(id) {
@@ -8219,9 +8229,121 @@ async function erFirmsImport(input) {
   input.value = '';
 }
 
-// Initialise the firm UI on load
-erRefreshFirmSelect();
-erRenderFirms();
+// ── Cross-device sync (Postgres via /api/firms) ─────────────────
+// localStorage stays the working copy (fast + offline). The server is
+// the shared source of truth. On load we pull + merge; on every save we
+// debounce-push. Protected by a shared token (ADMIN_TOKEN) the user
+// enters once per device.
+
+function erGetToken() { return localStorage.getItem(ER_TOKEN_KEY) || ''; }
+function erApiHeaders() { return { 'Content-Type': 'application/json', 'X-Admin-Token': erGetToken() }; }
+
+async function erApiGetFirms() {
+  const r = await fetch('/api/firms', { headers: erApiHeaders() });
+  if (!r.ok) { const e = new Error('HTTP ' + r.status); e.code = r.status; throw e; }
+  return (await r.json()).firms || [];
+}
+async function erApiPutFirms(firms) {
+  const r = await fetch('/api/firms', { method: 'PUT', headers: erApiHeaders(), body: JSON.stringify({ firms }) });
+  if (!r.ok) { const e = new Error('HTTP ' + r.status); e.code = r.status; throw e; }
+  return r.json();
+}
+async function erApiDeleteFirm(id) {
+  const r = await fetch('/api/firms/' + encodeURIComponent(id), { method: 'DELETE', headers: erApiHeaders() });
+  if (!r.ok) { const e = new Error('HTTP ' + r.status); e.code = r.status; throw e; }
+  return r.json();
+}
+
+function erUpdateSyncBadge() {
+  const b = document.getElementById('er-sync-badge');
+  if (!b) return;
+  const map = {
+    local:   ['💾 Local only',     '#64748b', '#1f2937'],
+    syncing: ['⏳ Syncing…',        '#a5b4fc', '#1e1b4b'],
+    synced:  ['☁️ Synced',          '#34d399', '#14532d'],
+    auth:    ['🔒 Connect sync',    '#fcd34d', '#92400e'],
+    error:   ['⚠️ Sync error · retry', '#fca5a5', '#7f1d1d'],
+  };
+  const [text, color, border] = map[erSyncState] || map.local;
+  b.textContent = text;
+  b.style.color = color;
+  b.style.borderColor = border;
+}
+
+// Push the whole store to the server (debounced). No-op if sync isn't
+// available. On 401 we flip to the "connect" state so the user is asked
+// for the token.
+function erPushToServer(store) {
+  if (!erSyncAvailable) return;
+  clearTimeout(_erPushTimer);
+  _erPushTimer = setTimeout(() => {
+    erSyncState = 'syncing'; erUpdateSyncBadge();
+    erApiPutFirms((store || erFirmsLoad()).firms)
+      .then(() => { erSyncState = 'synced'; erUpdateSyncBadge(); })
+      .catch(err => {
+        erSyncState = (err.code === 401) ? 'auth' : 'error';
+        erUpdateSyncBadge();
+        console.warn('[er] push failed:', err.message);
+      });
+  }, 800);
+}
+
+// Merge server firms into the local store (newer updatedAt wins), then
+// push back any local-only additions so both sides converge.
+async function erPullFromServer() {
+  erSyncState = 'syncing'; erUpdateSyncBadge();
+  try {
+    const serverFirms = await erApiGetFirms();
+    const local = erFirmsLoad().firms;
+    const byId = new Map();
+    for (const f of local) byId.set(f.id, f);
+    for (const f of serverFirms) {
+      const ex = byId.get(f.id);
+      if (!ex || (f.updatedAt || 0) >= (ex.updatedAt || 0)) byId.set(f.id, f);
+    }
+    const merged = [...byId.values()];
+    localStorage.setItem(ER_FIRMS_KEY, JSON.stringify({ firms: merged }));
+    erRenderFirms(); erRefreshFirmSelect();
+    // Converge: push merged set up (covers local-only firms)
+    await erApiPutFirms(merged);
+    erSyncState = 'synced'; erUpdateSyncBadge();
+  } catch (err) {
+    erSyncState = (err.code === 401) ? 'auth' : 'error';
+    erUpdateSyncBadge();
+    console.warn('[er] pull failed:', err.message);
+  }
+}
+
+function erSyncBadgeClick() {
+  if (!erSyncAvailable) {
+    showAdminToast('Cloud sync isn\'t enabled on the server (DATABASE_URL not set).');
+    return;
+  }
+  // Always (re)prompt for the token on click, then pull.
+  const t = prompt('Sync access password (the ADMIN_TOKEN set on Railway).\n\nStored only in this browser. Enter it once per device.', erGetToken());
+  if (t == null) return;
+  localStorage.setItem(ER_TOKEN_KEY, t.trim());
+  erPullFromServer();
+}
+
+async function erInitSync() {
+  erRefreshFirmSelect();
+  erRenderFirms();
+  try {
+    const st = await fetch('/api/status').then(r => r.json());
+    erSyncAvailable = !!st.firmsDb;
+  } catch { erSyncAvailable = false; }
+  if (!erSyncAvailable) { erSyncState = 'local'; erUpdateSyncBadge(); return; }
+  // DB is available. Pull now (will prompt for token via 'auth' state if
+  // the server requires one and ours is missing/wrong).
+  await erPullFromServer();
+  if (erSyncState === 'auth') {
+    showAdminToast('🔒 Click the sync badge to enter your access password.');
+  }
+}
+
+// Initialise the firm UI + sync on load
+erInitSync();
 </script>
 </body>
 </html>
