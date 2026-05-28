@@ -1528,6 +1528,19 @@
           </div>
         </div>
 
+        <!-- Client / firm memory selector -->
+        <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.7rem;padding:.55rem .75rem;background:#0a0a14;border:1px solid #1f2937;border-radius:8px">
+          <span style="font-size:.78rem;color:#a5b4fc;font-weight:600">📁 Client:</span>
+          <select id="er-firm" onchange="erOnFirmChange()" style="padding:.4rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.78rem;min-width:200px">
+            <option value="__auto__">— Auto-detect from email —</option>
+            <option value="__new__">+ New firm…</option>
+          </select>
+          <span id="er-firm-status" style="font-size:.72rem;color:#94a3b8"></span>
+          <label style="font-size:.74rem;color:#cbd5e1;display:flex;align-items:center;gap:.35rem;margin-left:auto">
+            <input type="checkbox" id="er-remember" checked style="width:.95rem;height:.95rem;cursor:pointer"/> Remember this exchange &amp; learn from it
+          </label>
+        </div>
+
         <button class="tbtn gold" id="er-btn" onclick="erGenerate()">✨ Generate Response</button>
 
         <!-- Progress -->
@@ -1552,6 +1565,28 @@
         <!-- Error -->
         <div id="er-error" style="display:none;padding:.7rem 1rem;background:#1a0000;border:1px solid #7f1d1d;border-radius:8px;font-size:.82rem;color:#fca5a5;margin-top:.6rem"></div>
       </div><!-- /email-response card -->
+
+      <!-- ── 📁 CLIENT / FIRM MEMORY ─────────────────────────── -->
+      <div class="tool-card" style="grid-column:1/-1">
+        <div class="tool-header">
+          <div class="tool-icon">📁</div>
+          <div>
+            <div class="tool-title">Client / Firm Memory</div>
+            <div class="tool-sub">Correspondence history per agency · a GPT-distilled running memory informs future replies · stored in your browser (this device)</div>
+          </div>
+        </div>
+        <div class="tool-divider"></div>
+        <div style="display:flex;gap:.6rem;margin-bottom:.7rem;flex-wrap:wrap;align-items:center">
+          <button class="tbtn" onclick="erFirmAddPrompt()" style="width:auto;padding:.45rem .9rem;font-size:.76rem;background:#1e1b4b;color:#a5b4fc">+ Add firm</button>
+          <button class="tbtn" onclick="erFirmsExport()" style="width:auto;padding:.45rem .9rem;font-size:.74rem;background:#0a0a14;color:#94a3b8;border:1px solid #1f2937">⬇ Export all (JSON)</button>
+          <label class="tbtn" style="width:auto;padding:.45rem .9rem;font-size:.74rem;background:#0a0a14;color:#94a3b8;border:1px solid #1f2937;cursor:pointer">⬆ Import
+            <input type="file" id="er-firms-import" accept=".json" style="display:none" onchange="erFirmsImport(this)"/>
+          </label>
+          <span style="font-size:.7rem;color:#64748b;margin-left:auto">💾 Lives in this browser only</span>
+        </div>
+        <div id="er-firms-empty" style="font-size:.78rem;color:#64748b;padding:.6rem 0">No firms yet — generate an email with a client selected, or click "+ Add firm".</div>
+        <div id="er-firms-list" style="display:flex;flex-direction:column;gap:.5rem"></div>
+      </div><!-- /client-memory card -->
 
     </div><!-- /.tools-grid -->
   </div><!-- /#tools-panel -->
@@ -7689,7 +7724,7 @@ async function erOnFile(input) {
   }
 }
 
-function erBuildSystemPrompt(style, length, includeRate, includeCV, includeLink) {
+function erBuildSystemPrompt(style, length, includeRate, includeCV, includeLink, firmCtx) {
   const lengthGuide = {
     short:  '4–6 short lines, very tight',
     medium: '8–14 lines, comfortable but efficient',
@@ -7702,7 +7737,24 @@ function erBuildSystemPrompt(style, length, includeRate, includeCV, includeLink)
     'formal':            'Formal agency-style register. Use "Dear …" salutation.',
   }[style] || 'Warm, professional, human.';
 
-  return `You are drafting an email reply on behalf of Benjy Alper, a Hebrew-English freelance translator. Match the tone and structure of the examples below.
+  // Firm-history block — injected only when we have prior context for the
+  // client. Keeps the model from re-introducing Benjy, re-negotiating
+  // settled rates, or contradicting earlier agreements.
+  let firmBlock = '';
+  if (firmCtx && (firmCtx.memory || (firmCtx.threads && firmCtx.threads.length))) {
+    firmBlock = `\n\nCLIENT HISTORY — you have corresponded with ${firmCtx.name || 'this client'} before. Use this naturally: don't re-introduce yourself from scratch, honor any agreed rates/terms, reference ongoing work where relevant, and don't ask for info they've already given.`;
+    if (firmCtx.memory) {
+      firmBlock += `\n\nWHAT YOU KNOW ABOUT THIS CLIENT:\n${firmCtx.memory}`;
+    }
+    if (firmCtx.threads && firmCtx.threads.length) {
+      const recent = firmCtx.threads.slice(-4).map(t =>
+        `[${t.direction === 'in' ? 'THEM' : 'YOU'}, ${new Date(t.ts).toISOString().slice(0,10)}] ${(t.body||'').slice(0, 600)}`
+      ).join('\n---\n');
+      firmBlock += `\n\nRECENT MESSAGES (oldest → newest):\n${recent}`;
+    }
+  }
+
+  return `You are drafting an email reply on behalf of Benjy Alper, a Hebrew-English freelance translator. Match the tone and structure of the examples below.${firmBlock}
 
 APPLICANT PROFILE (use only what's relevant — don't dump everything):
 - Name: ${ER_PROFILE.name}
@@ -7769,7 +7821,12 @@ async function erGenerate() {
   txt.textContent = 'Drafting reply with ' + model + '…';
 
   try {
-    const systemPrompt = erBuildSystemPrompt(style, length, includeRate, includeCV, includeLink);
+    // Resolve which firm this exchange belongs to (explicit selection or
+    // auto-detect from the email). May be null (no client memory in play).
+    const firm = erResolveFirmForGenerate(input);
+    erCurrentFirmId = firm ? firm.id : null;
+
+    const systemPrompt = erBuildSystemPrompt(style, length, includeRate, includeCV, includeLink, firm);
 
     const r = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -7799,6 +7856,17 @@ async function erGenerate() {
     txt.textContent = '✓ Done';
     document.getElementById('er-output').value = reply;
     out.style.display = 'block';
+
+    // Remember the exchange + refresh the firm's distilled memory (async,
+    // non-blocking — the reply is already shown).
+    if (document.getElementById('er-remember').checked && firm) {
+      erRecordExchange(firm.id, input, reply);
+      txt.textContent = '✓ Done · 🧠 updating client memory…';
+      erDistillFirmMemory(firm.id, apiKey).then(() => {
+        erRenderFirms();
+        erRefreshFirmSelect();
+      }).catch(err => console.warn('[er] distill failed:', err.message));
+    }
     setTimeout(() => prog.classList.remove('show'), 1500);
   } catch (e) {
     prog.classList.remove('show');
@@ -7845,6 +7913,315 @@ function erOpenMail() {
             + '&body='   + encodeURIComponent(body);
   window.location.href = url;
 }
+
+// ═══════════════════════════════════════════════════════════════
+// ─── 📁 CLIENT / FIRM MEMORY ───────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+// Per-firm correspondence tracker with a GPT-distilled running memory.
+// All state lives in localStorage under ER_FIRMS_KEY — no server.
+//
+// Firm shape:
+//   { id, name, domains:[], contacts:[], memory:'', threads:[
+//       { ts, direction:'in'|'out', body }
+//     ], createdAt, updatedAt }
+//
+// Two-layer memory keeps prompts compact regardless of relationship
+// length: a short distilled `memory` summary (durable facts) plus the
+// last few raw `threads` for immediate context. erDistillFirmMemory
+// regenerates the summary after each exchange.
+
+const ER_FIRMS_KEY = 'er_firms_v1';
+const ER_MAX_THREADS = 30;     // cap raw threads per firm (older folded into memory)
+const ER_THREAD_CAP  = 4000;   // cap each stored body length
+let erCurrentFirmId = null;    // firm resolved during the last generate
+
+function erFirmsLoad() {
+  try {
+    const raw = localStorage.getItem(ER_FIRMS_KEY);
+    const obj = raw ? JSON.parse(raw) : null;
+    if (obj && Array.isArray(obj.firms)) return obj;
+  } catch (e) { console.warn('[er] firms load failed:', e.message); }
+  return { firms: [] };
+}
+function erFirmsSave(store) {
+  try { localStorage.setItem(ER_FIRMS_KEY, JSON.stringify(store)); }
+  catch (e) { showAdminToast('❌ Could not save client memory: ' + e.message); }
+}
+function erFirmFind(id) { return erFirmsLoad().firms.find(f => f.id === id) || null; }
+function erGenId() { return 'firm_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+
+function erFirmCreate(name, domain) {
+  const store = erFirmsLoad();
+  const firm = {
+    id: erGenId(),
+    name: (name || 'Unnamed client').trim(),
+    domains: domain ? [domain.toLowerCase()] : [],
+    contacts: [],
+    memory: '',
+    threads: [],
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  store.firms.push(firm);
+  erFirmsSave(store);
+  return firm;
+}
+function erFirmDelete(id) {
+  const store = erFirmsLoad();
+  store.firms = store.firms.filter(f => f.id !== id);
+  erFirmsSave(store);
+  erRenderFirms(); erRefreshFirmSelect();
+}
+function erFirmRename(id) {
+  const firm = erFirmFind(id);
+  if (!firm) return;
+  const name = prompt('Rename client:', firm.name);
+  if (name == null) return;
+  const store = erFirmsLoad();
+  const f = store.firms.find(x => x.id === id);
+  if (f) { f.name = name.trim() || f.name; f.updatedAt = Date.now(); erFirmsSave(store); }
+  erRenderFirms(); erRefreshFirmSelect();
+}
+function erFirmAddPrompt() {
+  const name = prompt('New client / firm name (e.g. VerboLabs, Terra, GEL):', '');
+  if (!name || !name.trim()) return;
+  const domain = prompt('Their email domain (optional, e.g. verbolabs.com):', '') || '';
+  erFirmCreate(name.trim(), domain.trim());
+  erRenderFirms(); erRefreshFirmSelect();
+  showAdminToast('✅ Added ' + name.trim());
+}
+
+// ── Firm detection from an incoming email ───────────────────────
+// 1) email domain → match an existing firm's domains
+// 2) firm name appears as a word in the text
+// Returns { firm, suggestedName, domain } — firm may be null.
+function erDetectFirm(text) {
+  const store = erFirmsLoad();
+  const lower = (text || '').toLowerCase();
+
+  // Pull the first non-generic email domain from the text
+  const emailMatch = (text || '').match(/[\w.+-]+@([\w-]+\.[\w.-]+)/);
+  const GENERIC = /^(gmail|hotmail|outlook|yahoo|icloud|proton|me|live|aol)\./i;
+  let domain = '';
+  if (emailMatch && !GENERIC.test(emailMatch[1])) domain = emailMatch[1].toLowerCase();
+
+  // 1) domain match
+  if (domain) {
+    const byDomain = store.firms.find(f => (f.domains || []).includes(domain));
+    if (byDomain) return { firm: byDomain, suggestedName: byDomain.name, domain };
+  }
+  // 2) name match (longest first to avoid partials)
+  const byName = [...store.firms].sort((a,b) => b.name.length - a.name.length)
+    .find(f => f.name && f.name.length >= 3 && lower.includes(f.name.toLowerCase()));
+  if (byName) return { firm: byName, suggestedName: byName.name, domain };
+
+  // No existing firm — suggest a name from the domain (verbolabs.com → Verbolabs)
+  let suggestedName = '';
+  if (domain) {
+    suggestedName = domain.split('.')[0].replace(/[-_]/g, ' ')
+      .replace(/\b\w/g, c => c.toUpperCase());
+  }
+  return { firm: null, suggestedName, domain };
+}
+
+// Decide the firm for a generate call, honoring the dropdown selection.
+function erResolveFirmForGenerate(input) {
+  const sel = document.getElementById('er-firm').value;
+  if (sel && sel !== '__auto__' && sel !== '__new__') {
+    return erFirmFind(sel);
+  }
+  // Auto-detect path
+  const det = erDetectFirm(input);
+  if (det.firm) return det.firm;
+  // No match — auto-create if we have a sensible suggested name AND the
+  // user left "remember" on (otherwise don't pollute storage).
+  if (det.suggestedName && document.getElementById('er-remember').checked) {
+    return erFirmCreate(det.suggestedName, det.domain);
+  }
+  return null;
+}
+
+// ── Recording + memory distillation ─────────────────────────────
+function erRecordExchange(firmId, incoming, reply) {
+  const store = erFirmsLoad();
+  const firm = store.firms.find(f => f.id === firmId);
+  if (!firm) return;
+  const now = Date.now();
+  firm.threads.push({ ts: now, direction: 'in',  body: (incoming || '').slice(0, ER_THREAD_CAP) });
+  firm.threads.push({ ts: now, direction: 'out', body: (reply || '').slice(0, ER_THREAD_CAP) });
+  if (firm.threads.length > ER_MAX_THREADS) firm.threads = firm.threads.slice(-ER_MAX_THREADS);
+  // Capture a contact name + domain if visible
+  const dm = (incoming || '').match(/[\w.+-]+@([\w-]+\.[\w.-]+)/);
+  if (dm && !/^(gmail|hotmail|outlook|yahoo|icloud|proton|me|live|aol)\./i.test(dm[1])) {
+    const d = dm[1].toLowerCase();
+    if (!firm.domains.includes(d)) firm.domains.push(d);
+  }
+  firm.updatedAt = now;
+  erFirmsSave(store);
+}
+
+// Regenerate the firm's distilled memory. Uses a cheap model by default
+// (mini) — quality is fine for fact extraction and keeps cost negligible.
+async function erDistillFirmMemory(firmId, apiKey, model) {
+  const firm = erFirmFind(firmId);
+  if (!firm) return;
+  model = model || 'gpt-5.4-mini';
+  // Feed the existing memory + the last few exchanges
+  const recent = firm.threads.slice(-6).map(t =>
+    `[${t.direction === 'in' ? 'THEM' : 'YOU'}] ${(t.body||'').slice(0, 1200)}`
+  ).join('\n---\n');
+  const sys =
+`You maintain a concise running memory about a translation client/agency for a freelance translator (Benjy Alper). Given the EXISTING MEMORY and the LATEST EXCHANGE, output an UPDATED memory: a compact bulleted list of durable, reusable facts that would help draft future replies — agreed rates, payment terms, contact name(s), the language pairs / domains they need, CAT tools or glossaries required, stated preferences, ongoing projects, and deadlines. Drop stale or superseded facts. Keep it under 180 words. Output ONLY the memory text (bullet lines), no preamble, no markdown headers.`;
+  const user = `EXISTING MEMORY:\n${firm.memory || '(none yet)'}\n\nLATEST EXCHANGE:\n${recent}`;
+
+  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      messages: [ { role: 'system', content: sys }, { role: 'user', content: user } ],
+      temperature: 0.2,
+      max_completion_tokens: 400,
+    }),
+  });
+  if (!r.ok) { const j = await r.json().catch(()=>({})); throw new Error(j.error?.message || ('OpenAI ' + r.status)); }
+  const j = await r.json();
+  let mem = (j.choices?.[0]?.message?.content || '').trim();
+  mem = mem.replace(/^```[a-z]*\n?/i, '').replace(/```$/,'').trim();
+  if (!mem) return;
+  const store = erFirmsLoad();
+  const f = store.firms.find(x => x.id === firmId);
+  if (f) { f.memory = mem; f.updatedAt = Date.now(); erFirmsSave(store); }
+}
+
+// ── Firm selector (dropdown in the email card) ──────────────────
+function erRefreshFirmSelect() {
+  const sel = document.getElementById('er-firm');
+  if (!sel) return;
+  const prev = sel.value;
+  const firms = erFirmsLoad().firms.sort((a,b) => (b.updatedAt||0) - (a.updatedAt||0));
+  sel.innerHTML =
+    '<option value="__auto__">— Auto-detect from email —</option>' +
+    firms.map(f => `<option value="${f.id}">${esc(f.name)} (${f.threads.length/2|0} exchange${(f.threads.length/2|0)===1?'':'s'})</option>`).join('') +
+    '<option value="__new__">+ New firm…</option>';
+  // Restore selection if still valid
+  if ([...sel.options].some(o => o.value === prev)) sel.value = prev;
+}
+function erOnFirmChange() {
+  const sel = document.getElementById('er-firm');
+  const status = document.getElementById('er-firm-status');
+  if (sel.value === '__new__') {
+    sel.value = '__auto__';
+    erFirmAddPrompt();
+    return;
+  }
+  if (sel.value === '__auto__') {
+    status.textContent = '';
+    return;
+  }
+  const firm = erFirmFind(sel.value);
+  if (firm) {
+    status.textContent = firm.memory
+      ? `🧠 ${(firm.threads.length/2|0)} exchanges · memory loaded`
+      : `${(firm.threads.length/2|0)} exchanges · no memory yet`;
+  }
+}
+
+// ── Firm cards (the collapsible history list) ───────────────────
+function erToggleFirm(id) {
+  const body = document.getElementById('er-firm-body-' + id);
+  const arrow = document.getElementById('er-firm-arrow-' + id);
+  if (!body) return;
+  const open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'block';
+  if (arrow) arrow.textContent = open ? '▸' : '▾';
+}
+
+function erRenderFirms() {
+  const list = document.getElementById('er-firms-list');
+  const empty = document.getElementById('er-firms-empty');
+  if (!list) return;
+  const firms = erFirmsLoad().firms.sort((a,b) => (b.updatedAt||0) - (a.updatedAt||0));
+  empty.style.display = firms.length ? 'none' : 'block';
+
+  list.innerHTML = firms.map(f => {
+    const exchanges = f.threads.length / 2 | 0;
+    const last = f.updatedAt ? new Date(f.updatedAt).toISOString().slice(0,10) : '—';
+    const threadsHTML = f.threads.length
+      ? f.threads.slice().reverse().map(t => {
+          const isIn = t.direction === 'in';
+          return `
+            <div style="padding:.4rem .55rem;border-radius:6px;background:${isIn ? 'rgba(252,211,77,0.05)' : 'rgba(52,211,153,0.05)'};border:1px solid #1f2937;margin-top:.35rem">
+              <div style="font-size:.62rem;text-transform:uppercase;letter-spacing:.04em;color:${isIn ? '#fcd34d' : '#34d399'};font-weight:700;margin-bottom:.2rem">${isIn ? '⬇ Them' : '⬆ You'} · ${new Date(t.ts).toISOString().slice(0,16).replace('T',' ')}</div>
+              <div style="font-size:.74rem;color:#cbd5e1;white-space:pre-wrap;line-height:1.4;max-height:7rem;overflow-y:auto">${esc(t.body || '')}</div>
+            </div>`;
+        }).join('')
+      : '<div style="font-size:.72rem;color:#64748b;padding:.4rem 0">No correspondence recorded yet.</div>';
+
+    return `
+      <div style="border:1px solid #1f2937;border-radius:8px;overflow:hidden;background:#0f0f17">
+        <div onclick="erToggleFirm('${f.id}')" style="display:flex;align-items:center;gap:.6rem;padding:.6rem .75rem;cursor:pointer;background:#0a0a14">
+          <span id="er-firm-arrow-${f.id}" style="color:#a5b4fc;font-size:.8rem;width:1rem">▸</span>
+          <span style="font-size:.86rem;color:#e2e8f0;font-weight:600">${esc(f.name)}</span>
+          <span style="font-size:.7rem;color:#64748b">${exchanges} exchange${exchanges===1?'':'s'} · last ${last}</span>
+          ${f.memory ? '<span style="font-size:.62rem;color:#34d399;background:rgba(52,211,153,0.1);padding:.1rem .4rem;border-radius:3px">🧠 memory</span>' : ''}
+          <span style="margin-left:auto;display:flex;gap:.3rem" onclick="event.stopPropagation()">
+            <button class="tbtn" onclick="erFirmRename('${f.id}')" style="width:auto;padding:.2rem .5rem;font-size:.66rem;background:#1e1b4b;color:#a5b4fc">Rename</button>
+            <button class="tbtn" onclick="erFirmConfirmDelete('${f.id}')" style="width:auto;padding:.2rem .5rem;font-size:.66rem;background:#1a0000;color:#fca5a5;border:1px solid #7f1d1d">Delete</button>
+          </span>
+        </div>
+        <div id="er-firm-body-${f.id}" style="display:none;padding:.65rem .75rem;border-top:1px solid #1f2937">
+          <div style="font-size:.66rem;text-transform:uppercase;letter-spacing:.05em;color:#a5b4fc;font-weight:700;margin-bottom:.3rem">🧠 Distilled memory</div>
+          <div style="font-size:.76rem;color:#cbd5e1;white-space:pre-wrap;line-height:1.5;background:#0a0a14;border:1px solid #1f2937;border-radius:6px;padding:.5rem .6rem">${f.memory ? esc(f.memory) : '<span style="color:#64748b">No memory distilled yet — generate a reply for this client with "Remember" on.</span>'}</div>
+          ${f.domains && f.domains.length ? `<div style="font-size:.68rem;color:#64748b;margin-top:.4rem">Domains: ${f.domains.map(esc).join(', ')}</div>` : ''}
+          <div style="font-size:.66rem;text-transform:uppercase;letter-spacing:.05em;color:#a5b4fc;font-weight:700;margin:.6rem 0 .2rem">📨 Correspondence (newest first)</div>
+          ${threadsHTML}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function erFirmConfirmDelete(id) {
+  const firm = erFirmFind(id);
+  if (!firm) return;
+  if (confirm(`Delete "${firm.name}" and its entire history? This cannot be undone.`)) {
+    erFirmDelete(id);
+    showAdminToast('🗑 Deleted ' + firm.name);
+  }
+}
+
+// ── Import / export (manual backup since storage is browser-local) ──
+function erFirmsExport() {
+  const data = JSON.stringify(erFirmsLoad(), null, 2);
+  const blob = new Blob([data], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'client-memory-' + new Date().toISOString().slice(0,10) + '.json';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+async function erFirmsImport(input) {
+  const file = input.files?.[0];
+  if (!file) return;
+  try {
+    const obj = JSON.parse(await file.text());
+    if (!obj || !Array.isArray(obj.firms)) throw new Error('Not a valid client-memory export.');
+    // Merge by id; imported wins on conflict
+    const cur = erFirmsLoad();
+    const byId = new Map(cur.firms.map(f => [f.id, f]));
+    for (const f of obj.firms) byId.set(f.id, f);
+    erFirmsSave({ firms: [...byId.values()] });
+    erRenderFirms(); erRefreshFirmSelect();
+    showAdminToast(`✅ Imported — ${obj.firms.length} firm(s) merged.`);
+  } catch (e) {
+    showAdminToast('❌ Import failed: ' + e.message);
+  }
+  input.value = '';
+}
+
+// Initialise the firm UI on load
+erRefreshFirmSelect();
+erRenderFirms();
 </script>
 </body>
 </html>
