@@ -1519,6 +1519,61 @@
         <div id="dp-error" style="display:none;padding:.7rem 1rem;background:#1a0000;border:1px solid #7f1d1d;border-radius:8px;font-size:.82rem;color:#fca5a5;margin-top:.6rem"></div>
       </div><!-- /document proofreader card -->
 
+      <!-- ── 🎬 SUBTITLE TRANSLATOR (SRT / VTT → Hebrew) ─────── -->
+      <div class="tool-card" style="grid-column:1/-1">
+        <div class="tool-header">
+          <div class="tool-icon">🎬</div>
+          <div>
+            <div class="tool-title">Subtitle Translator (EN → HE)</div>
+            <div class="tool-sub">Upload .srt or .vtt → GPT translates each cue to Hebrew while keeping every timecode and cue number byte-identical → download a translated .srt / .vtt</div>
+          </div>
+        </div>
+        <div class="tool-divider"></div>
+
+        <div class="tdrop" id="st-drop">
+          <input type="file" id="st-file" accept=".srt,.vtt,.sbv,.txt" onchange="stOnFile(this)"/>
+          <div class="tdrop-icon">🎬</div>
+          <div class="tdrop-text">Drop a .srt or .vtt subtitle file<br><small>English → Hebrew · timecodes preserved exactly</small></div>
+        </div>
+        <div class="tdrop-sel" id="st-file-label"></div>
+
+        <div class="tlang-row" style="margin-top:.5rem;align-items:center;flex-wrap:wrap;gap:.5rem">
+          <span class="tlang-lbl">Model:</span>
+          <select id="st-model" onchange="stRenderCostEstimate()" style="padding:.4rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.78rem">
+            <option value="gpt-5.4" selected>gpt-5.4 (recommended)</option>
+            <option value="gpt-5.5">gpt-5.5 (premium · 2× cost)</option>
+            <option value="gpt-5.4-mini">gpt-5.4-mini (cheap drafts)</option>
+          </select>
+          <label style="font-size:.74rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem;margin-left:.8rem">
+            <input type="checkbox" id="st-readingspeed" checked style="width:.95rem;height:.95rem;cursor:pointer"/>
+            <span>Keep Hebrew concise for subtitle reading speed</span>
+          </label>
+        </div>
+
+        <div id="st-cost-estimate" style="display:none;margin-top:.5rem;padding:.5rem .6rem;background:#0a0a14;border:1px solid #1f2937;border-radius:7px"></div>
+
+        <button class="tbtn gold" id="st-btn" onclick="stTranslate()" disabled>🌐 Translate Subtitles to Hebrew</button>
+
+        <div class="tprog" id="st-prog">
+          <div class="tprog-text" id="st-prog-text">Working…</div>
+          <div class="tprog-bar-outer"><div class="tprog-bar-inner" id="st-prog-bar"></div></div>
+        </div>
+
+        <div id="st-results" style="display:none;margin-top:.8rem">
+          <div class="tres-badges" id="st-badges" style="margin-bottom:.5rem"></div>
+          <div style="max-height:520px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:.5rem;background:#0a0a14">
+            <div id="st-list" style="display:flex;flex-direction:column;gap:.4rem"></div>
+          </div>
+          <div style="margin-top:.7rem;display:flex;gap:.7rem;flex-wrap:wrap;align-items:center">
+            <button class="tbtn gold" id="st-dl-srt" onclick="stDownload('srt')" disabled>⬇ Download .srt</button>
+            <button class="tbtn" id="st-dl-vtt" onclick="stDownload('vtt')" disabled style="width:auto;padding:.55rem 1.1rem;font-size:.78rem;background:#1e1b4b;color:#a5b4fc">⬇ Download .vtt</button>
+            <span style="font-size:.7rem;color:#64748b;margin-left:auto">📌 Timecodes copied verbatim — only the text is translated. Edit cells below before downloading if needed.</span>
+          </div>
+        </div>
+
+        <div id="st-error" style="display:none;padding:.7rem 1rem;background:#1a0000;border:1px solid #7f1d1d;border-radius:8px;font-size:.82rem;color:#fca5a5;margin-top:.6rem"></div>
+      </div><!-- /subtitle translator card -->
+
       <!-- ── ✉️ EMAIL RESPONSE GENERATOR ────────────────────── -->
       <div class="tool-card" style="grid-column:1/-1">
         <div class="tool-header">
@@ -6686,6 +6741,263 @@ async function dpDownloadRevised() {
     document.getElementById('dp-error').textContent = '❌ ' + e.message;
   }
 }
+
+// ═══════════════════════════════════════════════════════════════
+// ─── 🎬 SUBTITLE TRANSLATOR (SRT / VTT → Hebrew) ───────────────
+// ═══════════════════════════════════════════════════════════════
+// Parses SubRip (.srt) or WebVTT (.vtt), translates each cue's text
+// EN→HE via GPT in batches, and reassembles the file with every cue
+// number, timecode and cue setting copied verbatim. Only the text
+// changes. Output downloadable as .srt or .vtt.
+
+let stFile = null;
+let stCues = [];         // [{ number, start, end, settings, text, he }]
+let stFormat = 'srt';    // detected input format ('srt' | 'vtt')
+let stTotalWords = 0;
+
+function stOnFile(input) {
+  stFile = input.files?.[0] || null;
+  const lbl = document.getElementById('st-file-label');
+  const btn = document.getElementById('st-btn');
+  stCues = []; stTotalWords = 0;
+  document.getElementById('st-results').style.display = 'none';
+  document.getElementById('st-error').style.display   = 'none';
+  document.getElementById('st-dl-srt').disabled = true;
+  document.getElementById('st-dl-vtt').disabled = true;
+  stRenderCostEstimate();
+  if (!stFile) { lbl.style.display='none'; btn.disabled = true; return; }
+  lbl.style.display = 'block';
+  lbl.textContent = `🎬 ${stFile.name} · ⏳ parsing…`;
+  btn.disabled = true;
+  stFile.text().then(txt => {
+    stFormat = stDetectFormat(txt, stFile.name);
+    stCues = (stFormat === 'vtt') ? stParseVTT(txt) : stParseSRT(txt);
+    if (!stCues.length) throw new Error('No subtitle cues found — is this a valid .srt / .vtt file?');
+    stTotalWords = stCues.reduce((s, c) => s + adminCountWords(c.text), 0);
+    lbl.textContent = `🎬 ${stFile.name} · ${stCues.length} cue${stCues.length===1?'':'s'} (${stFormat.toUpperCase()}, ${stTotalWords.toLocaleString()} words)`;
+    stRenderCostEstimate();
+    btn.disabled = false;
+  }).catch(e => {
+    lbl.textContent = `🎬 ${stFile.name} · ❌ ${e.message}`;
+    btn.disabled = true;
+  });
+}
+
+function stDetectFormat(text, name) {
+  if (/^﻿?WEBVTT/.test(text)) return 'vtt';
+  if (/\.vtt$/i.test(name || '')) return 'vtt';
+  return 'srt';
+}
+
+// Robust SRT parse — tolerant of missing indices, CRLF, BOM, and stray
+// blank lines. A cue is any block containing a "start --> end" line.
+function stParseSRT(text) {
+  text = text.replace(/^﻿/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const blocks = text.split(/\n{2,}/);
+  const cues = [];
+  for (const block of blocks) {
+    const lines = block.split('\n');
+    let tIdx = -1, tm = null;
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(/(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3})(.*)/);
+      if (m) { tIdx = i; tm = m; break; }
+    }
+    if (tIdx === -1) continue;
+    const number = (tIdx > 0 && /^\d+$/.test(lines[0].trim())) ? lines[0].trim() : String(cues.length + 1);
+    const textLines = lines.slice(tIdx + 1).filter(l => l !== undefined);
+    const text2 = textLines.join('\n').replace(/\s+$/,'');
+    cues.push({ number, start: tm[1], end: tm[2], settings: (tm[3] || '').trim(), text: text2, he: '' });
+  }
+  return cues;
+}
+
+// WebVTT parse — like SRT but uses "." for ms, may have cue identifiers
+// and inline settings after the timecode.
+function stParseVTT(text) {
+  text = text.replace(/^﻿/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  // Drop the WEBVTT header line + any header metadata up to the first blank line
+  text = text.replace(/^WEBVTT[^\n]*\n(?:[^\n]+\n)*?(?:\n|$)/, '');
+  const blocks = text.split(/\n{2,}/);
+  const cues = [];
+  for (const block of blocks) {
+    const lines = block.split('\n');
+    let tIdx = -1, tm = null;
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(/(\d{1,2}:\d{2}:\d{2}\.\d{1,3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}\.\d{1,3})(.*)/);
+      if (m) { tIdx = i; tm = m; break; }
+    }
+    if (tIdx === -1) continue;
+    // a cue identifier may sit on the line above the timecode
+    const number = (tIdx > 0 ? lines[0].trim() : String(cues.length + 1));
+    const text2 = lines.slice(tIdx + 1).join('\n').replace(/\s+$/,'');
+    cues.push({ number, start: tm[1], end: tm[2], settings: (tm[3] || '').trim(), text: text2, he: '' });
+  }
+  return cues;
+}
+
+function stRenderCostEstimate() {
+  const host = document.getElementById('st-cost-estimate');
+  if (!host) return;
+  if (!stTotalWords) { host.style.display = 'none'; return; }
+  const model = document.getElementById('st-model')?.value || 'gpt-5.4';
+  host.innerHTML = adminBuildCostTable(stTotalWords, model);
+  host.style.display = 'block';
+}
+
+// Translate a batch of cue texts. Sends a JSON array of English strings,
+// expects a JSON array of Hebrew strings of the SAME length, in order,
+// preserving the \n line breaks within each cue.
+async function stTranslateBatch(texts, model, apiKey, concise) {
+  const sys =
+`You are a professional English→Hebrew subtitle translator. You will receive a JSON array of English subtitle cues. Translate each into natural, fluent Hebrew.
+
+RULES:
+- Return a JSON array of the SAME length, in the SAME order. Element i is the Hebrew translation of input element i.
+- Preserve line breaks: if a cue has a "\\n", keep the translation split across the same number of lines at natural points.
+- Do NOT merge, split, add, or drop cues. One input string → one output string.
+- Keep Hebrew punctuation natural; translate idiomatically, not word-for-word.${concise ? '\n- Keep each line short enough for comfortable subtitle reading speed; tighten wording where Hebrew would otherwise run long.' : ''}
+- Output ONLY the JSON array. No markdown, no commentary, no code fences.`;
+
+  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      temperature: 0.3,
+      messages: [
+        { role: 'system', content: sys },
+        { role: 'user', content: JSON.stringify(texts) }
+      ]
+    })
+  });
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error?.message || 'GPT error ' + r.status);
+  let raw = (data.choices?.[0]?.message?.content || '').trim();
+  raw = raw.replace(/^```[a-z]*\n?/i, '').replace(/```\s*$/, '').trim();
+  const arr = JSON.parse(raw);
+  if (!Array.isArray(arr)) throw new Error('Expected a JSON array from GPT');
+  return arr;
+}
+
+async function stTranslate() {
+  const apiKey = getApiKey();
+  if (!apiKey) { promptApiKey(); return; }
+  if (!stFile || !stCues.length) return;
+
+  const model   = document.getElementById('st-model').value || 'gpt-5.4';
+  const concise = document.getElementById('st-readingspeed').checked;
+
+  const btn  = document.getElementById('st-btn');
+  const prog = document.getElementById('st-prog');
+  const bar  = document.getElementById('st-prog-bar');
+  const txt  = document.getElementById('st-prog-text');
+  const err  = document.getElementById('st-error');
+  const res  = document.getElementById('st-results');
+  err.style.display = 'none'; res.style.display = 'none';
+  btn.disabled = true; prog.classList.add('show'); bar.style.width = '5%';
+
+  try {
+    const BATCH = 20;
+    for (let i = 0; i < stCues.length; i += BATCH) {
+      const slice = stCues.slice(i, i + BATCH);
+      txt.textContent = `Translating cues ${i+1}–${Math.min(i+BATCH, stCues.length)} of ${stCues.length} (${model})…`;
+      bar.style.width = (5 + (i / stCues.length) * 90) + '%';
+      const texts = slice.map(c => c.text);
+      let out;
+      try {
+        out = await stTranslateBatch(texts, model, apiKey, concise);
+      } catch (e) {
+        console.warn('[st] batch failed:', e.message);
+        out = texts.map(() => '');   // leave blanks on failure; user can retry/edit
+      }
+      for (let j = 0; j < slice.length; j++) {
+        slice[j].he = (out[j] != null ? String(out[j]) : '') || slice[j].text;
+      }
+      if (i + BATCH < stCues.length) await new Promise(r => setTimeout(r, 200));
+    }
+    bar.style.width = '100%'; txt.textContent = '✅ Done!';
+    setTimeout(() => prog.classList.remove('show'), 1200);
+    stRenderResults();
+    document.getElementById('st-dl-srt').disabled = false;
+    document.getElementById('st-dl-vtt').disabled = false;
+  } catch (e) {
+    prog.classList.remove('show');
+    err.style.display = 'block';
+    err.textContent = '❌ ' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function stRenderResults() {
+  document.getElementById('st-results').style.display = 'block';
+  document.getElementById('st-badges').innerHTML =
+    `<span class="tres-badge tb-seg">🎬 ${stCues.length} cues</span>` +
+    `<span class="tres-badge tb-lang">📝 ${stTotalWords.toLocaleString()} source words</span>` +
+    `<span class="tres-badge tb-lang">${stFormat.toUpperCase()} in</span>`;
+
+  // Cap rendered rows for performance on huge files; all cues still export.
+  const CAP = 300;
+  const shown = stCues.slice(0, CAP);
+  const rowsHTML = shown.map((c, i) => `
+    <div style="display:grid;grid-template-columns:60px 1fr 1fr;gap:.5rem;align-items:start;padding:.4rem .5rem;border:1px solid #1f2937;border-radius:6px;background:#0f0f17">
+      <div style="font-size:.62rem;color:#64748b;font-family:monospace;line-height:1.3">#${esc(c.number)}<br>${esc(c.start.slice(3))}</div>
+      <div style="font-size:.76rem;color:#cbd5e1;white-space:pre-wrap;line-height:1.4">${esc(c.text)}</div>
+      <textarea data-cue="${i}" oninput="stEditCue(${i}, this.value)" dir="rtl" style="font-size:.8rem;color:#bbf7d0;background:#0a0a14;border:1px solid #14532d;border-radius:5px;padding:.35rem .5rem;line-height:1.4;resize:vertical;min-height:2.6rem;width:100%;font-family:inherit">${esc(c.he)}</textarea>
+    </div>`).join('');
+  const more = stCues.length > CAP ? `<div style="text-align:center;color:#64748b;font-size:.72rem;padding:.5rem">…and ${stCues.length - CAP} more cues (all included in the download)</div>` : '';
+  document.getElementById('st-list').innerHTML = rowsHTML + more;
+}
+
+function stEditCue(i, val) {
+  if (stCues[i]) stCues[i].he = val;
+}
+
+// Convert a timecode's millisecond separator for the target format.
+function stTimecode(tc, fmt) {
+  return fmt === 'vtt' ? tc.replace(',', '.') : tc.replace('.', ',');
+}
+
+function stBuildSRT() {
+  return stCues.map((c, i) => {
+    const num = i + 1;   // renumber sequentially for a clean SRT
+    return `${num}\n${stTimecode(c.start,'srt')} --> ${stTimecode(c.end,'srt')}\n${c.he || c.text}`;
+  }).join('\n\n') + '\n';
+}
+
+function stBuildVTT() {
+  const body = stCues.map(c => {
+    const settings = c.settings ? ' ' + c.settings : '';
+    return `${stTimecode(c.start,'vtt')} --> ${stTimecode(c.end,'vtt')}${settings}\n${c.he || c.text}`;
+  }).join('\n\n');
+  return 'WEBVTT\n\n' + body + '\n';
+}
+
+function stDownload(fmt) {
+  if (!stCues.length) { showAdminToast('Nothing to download yet.'); return; }
+  const content = fmt === 'vtt' ? stBuildVTT() : stBuildSRT();
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  const base = (stFile?.name || 'subtitles').replace(/\.(srt|vtt|sbv|txt)$/i, '');
+  a.download = `${base}_HE.${fmt}`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+  showAdminToast(`✅ Downloaded ${a.download}`);
+}
+
+// Drag-and-drop for the subtitle card
+(function(){
+  const dz = document.getElementById('st-drop');
+  if (!dz) return;
+  dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('drag-over'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+  dz.addEventListener('drop', e => {
+    e.preventDefault(); dz.classList.remove('drag-over');
+    const f = e.dataTransfer.files[0];
+    if (f) stOnFile({ files: [f] });
+  });
+})();
 
 // ─── GEL Evaluation Form generator ──────────────────────────
 // Maps the Proofreader's issue findings (by category × severity) into
