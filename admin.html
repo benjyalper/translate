@@ -265,6 +265,20 @@
       /* Cost-estimate 4-up may wrap if space is tight */
       #pr-cost-estimate>div:first-child,
       #dp-cost-estimate>div:first-child{flex-wrap:wrap}
+
+      /* ── Top navbar: stack into tidy rows instead of a messy wrap ── */
+      .topbar{flex-direction:column;align-items:stretch;padding:.7rem 4vw;gap:.55rem}
+      .topbar-left{width:100%;flex-wrap:wrap;align-items:center;gap:.45rem .6rem}
+      .topbar-right{width:100%;justify-content:space-between;gap:.5rem}
+      .topbar-logo{font-size:1.05rem;margin-right:auto}   /* logo left, badge/back follow */
+      /* Primary nav: full-width row with two equal tabs */
+      .main-tabs{order:10;width:100%;margin:.1rem 0 0;gap:.5rem}
+      .main-tab{flex:1;text-align:center;padding:.55rem .4rem}
+      /* Shrink the secondary buttons so they fit two-up */
+      .btn-back-site{font-size:.74rem;padding:.4rem .8rem}
+      .btn-scrape{flex:1;justify-content:center;padding:.55rem .8rem;font-size:.8rem}
+      .btn-logout{padding:.55rem 1rem;font-size:.8rem}
+      .topbar-badge{font-size:.62rem;padding:.22rem .55rem}
     }
 
     .tool-card{
