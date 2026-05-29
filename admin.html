@@ -3878,6 +3878,14 @@ function trPlaceholdersToXml(text, tagMap) {
 
 function trIsTranslatable(text) { return (text || '').replace(/\{\{TAG_\d+\}\}/g,'').trim().length > 0; }
 
+// True if the text contains any Chinese (Han) character — CJK Unified
+// Ideographs + Extension A + Compatibility Ideographs. These source segments
+// must NOT be translated to Hebrew; the source is copied verbatim to the
+// target (the manuals come from Chinese OEMs and stray Chinese should pass
+// through untouched). Used by both the Auto-Translator and the Proofreader.
+const TR_CJK_RE = /[㐀-䶿一-鿿豈-﫿]/;
+function trHasChinese(text) { return TR_CJK_RE.test(text || ''); }
+
 // Count words in a source string. Strips placeholder markers so they don't
 // inflate the count, and treats whitespace as word boundary (works equally
 // for Hebrew, English, mixed). Returns 0 for empty/whitespace input.
@@ -4881,13 +4889,26 @@ async function trProcessXliff(content, apiKey, onProgress, model) {
     translatedWords: 0,
   };
 
+  // Chinese-source rule: any segment whose source contains Han characters is
+  // copied to the target VERBATIM — never sent to GPT, never rendered into
+  // Hebrew (the manuals come from Chinese OEMs; stray Chinese must pass
+  // through untouched). Everything else goes through normal translation.
+  const toCopy      = empty.filter(s =>  trHasChinese(s.sourceText));
+  const toTranslate = empty.filter(s => !trHasChinese(s.sourceText));
+
+  let copied = 0;
+  for (const s of toCopy) {
+    content = trInsertTranslation(content, s, s.sourceText); // source → target as-is
+    copied++;
+  }
+
   const BATCH = 20;
   let translated = 0;
   let translatedWords = 0;
   const pairs = []; // captured source/target pairs for optional TM save
-  for (let i = 0; i < empty.length; i += BATCH) {
-    const batch = empty.slice(i, i + BATCH);
-    if (onProgress) onProgress(i, empty.length);
+  for (let i = 0; i < toTranslate.length; i += BATCH) {
+    const batch = toTranslate.slice(i, i + BATCH);
+    if (onProgress) onProgress(i, toTranslate.length);
     const translations = await trTranslateBatch(batch.map(s => s.sourceText), apiKey, model);
     for (let j = 0; j < batch.length; j++) {
       if (translations[j]) {
@@ -4897,7 +4918,7 @@ async function trProcessXliff(content, apiKey, onProgress, model) {
         translatedWords += trCountWords(batch[j].sourceText);
       }
     }
-    if (i + BATCH < empty.length) await new Promise(r => setTimeout(r, 500));
+    if (i + BATCH < toTranslate.length) await new Promise(r => setTimeout(r, 500));
   }
   // Sanity check: ensure the assembled SDLXLIFF is well-formed XML before
   // we bundle it into the return package. If a translation slipped a bad
@@ -4908,7 +4929,8 @@ async function trProcessXliff(content, apiKey, onProgress, model) {
     throw new Error('Translated SDLXLIFF failed XML validation: ' + check.message);
   }
   return {
-    translated,
+    translated: translated + copied,   // GPT-translated + Chinese copied verbatim
+    copiedSegments: copied,            // Chinese-source segments passed through as-is
     total: segs.length,
     content,
     pairs,
@@ -4988,7 +5010,7 @@ async function trTranslate() {
 
     let totalTranslated = 0, totalSegments = 0;
     let totalWordsAll = 0, preTransSegsAll = 0, preTransWordsAll = 0;
-    let translatedWordsAll = 0, toTranslateWordsAll = 0;
+    let translatedWordsAll = 0, toTranslateWordsAll = 0, copiedAll = 0;
     const allPairs = []; // collected source/target pairs across all files (for TM save)
     for (let fi = 0; fi < xliffEntries.length; fi++) {
       const { path: relPath, entry } = xliffEntries[fi];
@@ -4996,7 +5018,7 @@ async function trTranslate() {
       const {
         translated, total, content: newContent, pairs,
         totalWords, preTranslatedSegments, preTranslatedWords,
-        toTranslateWords, translatedWords,
+        toTranslateWords, translatedWords, copiedSegments,
       } = await trProcessXliff(rawContent, apiKey, (done, all) => {
         const base = 20 + (fi / xliffEntries.length) * 70;
         const inc  = (done / all) * (70 / xliffEntries.length);
@@ -5010,6 +5032,7 @@ async function trTranslate() {
       preTransWordsAll    += preTranslatedWords  || 0;
       toTranslateWordsAll += toTranslateWords    || 0;
       translatedWordsAll  += translatedWords     || 0;
+      copiedAll           += copiedSegments      || 0;
       if (pairs && pairs.length) allPairs.push(...pairs);
       // Rewrite the SDLXLIFF target-language attribute to match what we
       // actually translated INTO. Otherwise Trados sees "fr-FR" in the
@@ -5038,6 +5061,7 @@ async function trTranslate() {
       <span class="tres-badge tb-seg">📑 ${fmt(totalSegments)} segments in file</span>
       <span class="tres-badge tb-lang">📝 ${fmt(translatedWordsAll)} / ${fmt(totalWordsAll)} words</span>
       <span class="tres-badge tb-lang">📄 ${xliffEntries.length} file(s)</span>
+      ${copiedAll > 0 ? `<span class="tres-badge tb-lang">🇨🇳 ${fmt(copiedAll)} Chinese copied as-is</span>` : ''}
       ${glossBadge}`;
 
     // Detailed stats block — three groups: file totals, this run, skipped
@@ -5053,6 +5077,7 @@ async function trTranslate() {
           <div style="color:#86efac;font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;margin-bottom:.3rem">✅ This translation</div>
           <div style="color:#e2e8f0"><span style="color:#34d399;font-weight:600">${fmt(totalTranslated)}</span> segments translated</div>
           <div style="color:#e2e8f0"><span style="color:#34d399;font-weight:600">${fmt(translatedWordsAll)}</span> words translated</div>
+          ${copiedAll > 0 ? `<div style="color:#e2e8f0"><span style="color:#fcd34d;font-weight:600">${fmt(copiedAll)}</span> Chinese segments copied as-is</div>` : ''}
           <div style="color:#64748b;font-size:.72rem;margin-top:.2rem">model: ${trModel}</div>
         </div>
         <div style="background:#0a0a14;border:1px solid #1f2937;border-radius:8px;padding:.6rem .8rem">
@@ -5721,15 +5746,47 @@ async function prAnalyze() {
 
   try {
     // Segments were extracted at upload time (see prOnFile). Just reuse.
-    const segsToReview = prSegsToReview;
-    if (segsToReview.length === 0) throw new Error('No translated segments found to review.');
+    const allSegs = prSegsToReview;
+    if (allSegs.length === 0) throw new Error('No translated segments found to review.');
+
+    prAllIssues = [];
+    let segIdxCounter = 0;
+
+    // Chinese-source rule: never GPT-review a segment whose SOURCE contains
+    // Chinese. If the target already copies the source verbatim, it's correct
+    // → skip silently. If it was translated/changed, flag it to revert to the
+    // Chinese source (suggestion = the source itself).
+    const segsToReview = [];
+    let cjkCorrect = 0;
+    for (const s of allSegs) {
+      if (trHasChinese(s.source)) {
+        if ((s.target || '').trim() !== (s.source || '').trim()) {
+          prAllIssues.push({
+            id: 'iss_' + (segIdxCounter++),
+            ...s,
+            issues: [{
+              severity: 'major',
+              category: 'accuracy',
+              description: 'Source is Chinese — the target should copy the Chinese verbatim, not translate it to Hebrew.',
+              suggestion: s.source,
+            }],
+            apply: false,
+          });
+        } else {
+          cjkCorrect++; // target already copies the Chinese source → fine
+        }
+      } else {
+        segsToReview.push(s);
+      }
+    }
+    if (segsToReview.length === 0 && prAllIssues.length === 0) {
+      throw new Error('No translated segments found to review (all sources are Chinese and correctly copied).');
+    }
 
     txt.textContent = `Reviewing ${segsToReview.length} translated segments with ${model}…`;
     bar.style.width = '15%';
 
     const BATCH = 12;
-    prAllIssues = [];
-    let segIdxCounter = 0;
     for (let i = 0; i < segsToReview.length; i += BATCH) {
       const batch = segsToReview.slice(i, i + BATCH);
       txt.textContent = `Reviewing segments ${i+1}–${Math.min(i+BATCH, segsToReview.length)} of ${segsToReview.length} (${model})…`;
@@ -5749,8 +5806,10 @@ async function prAnalyze() {
       if (i + BATCH < segsToReview.length) await new Promise(r => setTimeout(r, 250));
     }
 
-    bar.style.width = '100%'; txt.textContent = '✅ Done!';
-    setTimeout(() => prog.classList.remove('show'), 1500);
+    bar.style.width = '100%';
+    const cjkNote = cjkCorrect ? ` · 🇨🇳 ${cjkCorrect} Chinese segment${cjkCorrect===1?'':'s'} left as-is` : '';
+    txt.textContent = '✅ Done!' + cjkNote;
+    setTimeout(() => prog.classList.remove('show'), 2200);
     prRenderResults();
   } catch (e) {
     prog.classList.remove('show');
