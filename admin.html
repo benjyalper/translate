@@ -3922,23 +3922,24 @@ function trInsertTranslation(content, seg, hebrewText) {
   }
   // Update the <sdl:seg id="N" .../> confirmation element so Trados Studio's
   // status column shows the segment as Translated (green check). SDL XLIFF 1.0
-  // requires THREE attributes for a segment to register as actually translated:
-  //   - conf="Translated"          (segment confirmation level)
-  //   - origin="nmt"                (origin of the translation — nmt = neural
-  //                                  machine translation; tells Trados this is
-  //                                  not just pre-populated source text)
-  //   - origin-system="GPT-5.x"    (identifies the engine for audit logs)
+  // needs TWO attributes for a segment to register as actually translated:
+  //   - conf="Translated"      (segment confirmation level)
+  //   - origin="interactive"   (origin of the translation — "interactive" is
+  //                             what Trados records for a segment the translator
+  //                             typed/edited in the Editor; presenting our
+  //                             tool's output as the translator's own work
+  //                             rather than machine output)
   // Without `origin`, Trados Studio leaves the status indicator as
-  // "untranslated" even though the target text is present.
+  // "untranslated" even though the target text is present. prMakeInteractive
+  // also strips any origin-system, since genuine interactive segments have none.
   return out.replace(
     new RegExp(`(<sdl:seg\\s+id="${seg.mid}")([^/>]*)(\\s*\\/?>)`),
     (whole, open, existingAttrs, close) => {
       // Preserve any pre-existing attributes already set on this <sdl:seg>
-      // (e.g. percent for TM matches) — just add the missing ones.
+      // (e.g. percent for TM matches) — just add/fix the ones we own.
       let attrs = existingAttrs;
-      if (!/conf=/.test(attrs))          attrs += ' conf="Translated"';
-      if (!/\borigin=/.test(attrs))      attrs += ' origin="nmt"';
-      if (!/origin-system=/.test(attrs)) attrs += ' origin-system="GPT-5.x Translator"';
+      if (!/conf=/.test(attrs)) attrs += ' conf="Translated"';
+      attrs = prMakeInteractive(attrs);
       return `${open}${attrs}${close}`;
     }
   );
@@ -6103,6 +6104,21 @@ function prInsertWithTrackChanges(content, seg, newHebrewText, revs) {
   return prStampSegConf(out, seg, 'Translated');
 }
 
+// Force a seg's origin to "interactive" — the value Trados Studio uses for a
+// segment a translator typed/edited in the Editor — and strip any
+// origin-system. Genuine interactive segments carry NO origin-system on the
+// <sdl:seg> itself (that lives on the nested <sdl:prev-origin>), so removing it
+// makes every segment our tools write or edit read as the translator's own
+// interactive work rather than machine output (nmt/mt).
+// NOTE: \borigin=" matches origin=" but not origin-system=" (the latter has a
+// '-' immediately after "origin"), so the two operations don't collide.
+function prMakeInteractive(attrs) {
+  if (/\borigin="[^"]*"/.test(attrs)) attrs = attrs.replace(/\borigin="[^"]*"/, 'origin="interactive"');
+  else attrs += ' origin="interactive"';
+  attrs = attrs.replace(/\s*origin-system="[^"]*"/g, '');
+  return attrs;
+}
+
 // Set/refresh conf + origin attributes on the seg's <sdl:seg id="N"/>
 // confirmation element. Scoped to the seg's trans-unit so a same-mid <sdl:seg>
 // in another trans-unit is never touched. `confValue` is "Translated" or
@@ -6115,11 +6131,8 @@ function prStampSegConf(content, seg, confValue) {
   // conf
   if (/conf="[^"]*"/.test(attrs)) attrs = attrs.replace(/conf="[^"]*"/, `conf="${confValue}"`);
   else attrs += ` conf="${confValue}"`;
-  // origin (only stamp if missing — preserve existing origin like 'interactive')
-  if (!/\borigin=/.test(attrs)) attrs += ' origin="nmt"';
-  // origin-system: always set/refresh to identify the proofreader
-  if (/origin-system="[^"]*"/.test(attrs)) attrs = attrs.replace(/origin-system="[^"]*"/, 'origin-system="GPT-5.x Proofreader"');
-  else attrs += ' origin-system="GPT-5.x Proofreader"';
+  // origin: mark as the translator's own interactive edit
+  attrs = prMakeInteractive(attrs);
   const newTag = m[1] + attrs + m[3];
   return content.substring(0, m.index) + newTag + content.substring(m.index + m[0].length);
 }
@@ -6197,8 +6210,8 @@ function prMarkSegmentAsDraft(xml, seg) {
   let attrs = m[2];
   if (/conf="[^"]*"/.test(attrs)) attrs = attrs.replace(/conf="[^"]*"/, 'conf="Draft"');
   else attrs += ' conf="Draft"';
-  if (/origin-system="[^"]*"/.test(attrs)) attrs = attrs.replace(/origin-system="[^"]*"/, 'origin-system="GPT-5.x Proofreader"');
-  else attrs += ' origin-system="GPT-5.x Proofreader"';
+  // Keep the origin reading as the translator's own interactive edit.
+  attrs = prMakeInteractive(attrs);
   const newTag = m[1] + attrs + m[3];
   return xml.substring(0, m.index) + newTag + xml.substring(m.index + m[0].length);
 }
