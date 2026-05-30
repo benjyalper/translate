@@ -6106,13 +6106,13 @@ function prFindTargetMrkRange(content, seg) {
   tagRe.lastIndex = innerStart;
   let depth = 1;
   let innerEnd = -1;
-  let tm;
-  while ((tm = tagRe.exec(content)) !== null) {
-    if (tm.index >= tgtClose) break;
-    const tag = tm[0];
+  let tagMatch;
+  while ((tagMatch = tagRe.exec(content)) !== null) {
+    if (tagMatch.index >= tgtClose) break;
+    const tag = tagMatch[0];
     if (tag.charAt(1) === '/') {
       depth--;
-      if (depth === 0) { innerEnd = tm.index; break; }
+      if (depth === 0) { innerEnd = tagMatch.index; break; }
     } else if (tag.charAt(tag.length - 2) !== '/') {
       // <mrk ...> (paired open) increases depth; <mrk ... /> (self-closing) does not
       depth++;
