@@ -6097,8 +6097,28 @@ function prFindTargetMrkRange(content, seg) {
   const mm = mrkOpenRe.exec(content);
   if (!mm || mm.index >= tgtClose) return null;
   const innerStart = mm.index + mm[0].length;
-  const innerEnd = content.indexOf('</mrk>', innerStart);
-  if (innerEnd === -1 || innerEnd >= tgtClose) return null;
+  // Find the MATCHING </mrk> for the seg-mrk we just opened — not just the
+  // first one. Earlier versions used indexOf('</mrk>', innerStart), which
+  // truncates the range at the first nested mrk close (e.g., when a previous
+  // track-changes pass already wrote <mrk x-sdl-added>...</mrk> inside) and
+  // caused proofread fixes to be re-applied as nested duplicates.
+  const tagRe = /<\/?mrk\b[^>]*>/g;
+  tagRe.lastIndex = innerStart;
+  let depth = 1;
+  let innerEnd = -1;
+  let tm;
+  while ((tm = tagRe.exec(content)) !== null) {
+    if (tm.index >= tgtClose) break;
+    const tag = tm[0];
+    if (tag.charAt(1) === '/') {
+      depth--;
+      if (depth === 0) { innerEnd = tm.index; break; }
+    } else if (tag.charAt(tag.length - 2) !== '/') {
+      // <mrk ...> (paired open) increases depth; <mrk ... /> (self-closing) does not
+      depth++;
+    }
+  }
+  if (innerEnd === -1) return null;
   return { openStart: mm.index, innerStart, innerEnd, closeEnd: innerEnd + '</mrk>'.length };
 }
 
@@ -6309,7 +6329,22 @@ async function prDownloadRevised() {
       const segs = trExtractSegments(content);
       const segMap = new Map();
       segs.forEach(s => segMap.set(s.mid, s));
-      const applicable = toApply.filter(t => t.fileIdx === fi);
+      // Dedupe by mid so a single segment can't be track-changed twice in
+      // one download. Without this, a duplicate entry in `toApply` (e.g. the
+      // same seg landing in two batches, or both a Chinese-source push and a
+      // proofreader push) would call prInsertWithTrackChanges twice, nesting
+      // the previous added/deleted pair inside a new <deleted> wrap and
+      // producing the visible "fix struck out and then re-added" artifact.
+      const seenMids = new Set();
+      const applicable = toApply.filter(t => {
+        if (t.fileIdx !== fi) return false;
+        if (seenMids.has(t.mid)) {
+          console.warn(`[proofreader] dropping duplicate fix for mid=${t.mid} in file ${fi} — upstream prAllIssues has a dupe`);
+          return false;
+        }
+        seenMids.add(t.mid);
+        return true;
+      });
       // Each tracked fix pushes TWO entries here: one for the insertion and
       // one for the deletion. prInsertWithTrackChanges fills them in.
       const revsForThisFile = [];
