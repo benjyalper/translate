@@ -6161,13 +6161,17 @@ function prInsertWithTrackChanges(content, seg, newHebrewText, revs) {
 
   const addId = prGenRevId();
   const delId = prGenRevId();
-  // Trados ordering: <added> first, <deleted> second. Sibling mrks (NOT
-  // nested) inside the seg mrk.
+  // Order: <deleted> first, <added> second — sibling mrks (NOT nested)
+  // inside the seg mrk. Hebrew is RTL, so the FIRST element in document
+  // order renders on the RIGHT (where the reader's eye starts). Putting
+  // the deleted original first makes the red strikethrough appear on the
+  // right and the blue correction immediately to its left, matching the
+  // natural review flow for Hebrew text.
   const trackedContent =
-    `<mrk mtype="x-sdl-added" sdl:revid="${addId}">${newInner}</mrk>` +
-    `<mrk mtype="x-sdl-deleted" sdl:revid="${delId}">${origInner}</mrk>`;
-  revs.push({ id: addId });             // insertion: no type
+    `<mrk mtype="x-sdl-deleted" sdl:revid="${delId}">${origInner}</mrk>` +
+    `<mrk mtype="x-sdl-added" sdl:revid="${addId}">${newInner}</mrk>`;
   revs.push({ id: delId, type: 'Delete' });
+  revs.push({ id: addId });             // insertion: no type
 
   // Splice the tracked content in by index — safer than regex .replace
   // because it can't accidentally hit the source-side mrk.
