@@ -608,7 +608,7 @@
         <button class="toolmap-btn" onclick="scrollToTool('tool-doc-translator')">
           <span class="tm-label">🌐 Document Translator</span>
           <span class="tm-info" tabindex="0">i</span>
-          <span class="tm-tip"><span class="tm-tip-title">Document Translator (HE ↔ EN)</span>Drop any .docx / .txt / .md / .csv / .html → GPT translates in either direction → download in the same format with all styling preserved. Auto-detects source language. Uses gpt-5.4 by default, gpt-5.5 for tone-sensitive work.</span>
+          <span class="tm-tip"><span class="tm-tip-title">Document Translator (HE ↔ EN)</span>Drop any .docx / .pdf / .txt / .md / .csv / .html → GPT translates in either direction → download in the same format with all styling preserved. PDF input outputs an editable .docx (PDF visual cannot be cleanly round-tripped). Auto-detects source language. Uses gpt-5.4 by default, gpt-5.5 for tone-sensitive work.</span>
         </button>
 
         <button class="toolmap-btn" onclick="scrollToTool('tool-he-en-perminute')">
@@ -1174,8 +1174,8 @@
           <div>
             <label style="font-size:.75rem;color:#94a3b8;display:block;margin-bottom:.4rem">① Drop or pick a file</label>
             <label style="display:flex;align-items:center;justify-content:center;gap:.6rem;padding:1.4rem 1rem;background:#0a0a14;border:2px dashed #312e81;border-radius:10px;cursor:pointer;color:#cbd5e1;font-size:.85rem" id="dt-drop">
-              <span>📂 Choose .docx, .txt, .md, .csv, or .html</span>
-              <input type="file" id="dt-file" accept=".docx,.txt,.md,.csv,.html,.htm" style="display:none" onchange="dtOnFile(this)"/>
+              <span>📂 Choose .docx, .pdf, .txt, .md, .csv, or .html</span>
+              <input type="file" id="dt-file" accept=".docx,.pdf,.txt,.md,.csv,.html,.htm" style="display:none" onchange="dtOnFile(this)"/>
             </label>
             <div id="dt-status" style="margin-top:.5rem;font-size:.78rem;color:#94a3b8;min-height:1.2rem"></div>
           </div>
@@ -1217,8 +1217,11 @@
         </div>
 
         <div style="margin-top:.6rem;font-size:.72rem;color:#64748b;line-height:1.5">
-          <strong style="color:#94a3b8">v1 scope:</strong> .docx (full styling preserved — bold, italic, lists, tables, headers/footers). .txt/.md/.csv/.html (text translated, structure preserved). PDF not yet supported — convert to .docx first (LibreOffice does this well).
-          Each <code style="background:#0a0a14;padding:0 .3rem;border-radius:3px;color:#a5b4fc">&lt;w:t&gt;</code> run in a .docx is translated independently, so for paragraphs with mid-sentence formatting changes (e.g. bold word in the middle), the translation may not redistribute perfectly across the runs. Whole-paragraph documents are unaffected.
+          <strong style="color:#94a3b8">Output format per input:</strong>
+          <code style="background:#0a0a14;padding:0 .3rem;border-radius:3px;color:#a5b4fc">.docx → .docx</code> (full styling preserved) ·
+          <code style="background:#0a0a14;padding:0 .3rem;border-radius:3px;color:#a5b4fc">.pdf → .docx</code> (text + paragraphs extracted; PDF visual styling cannot be cleanly round-tripped, but Word can re-export to PDF in one click) ·
+          <code style="background:#0a0a14;padding:0 .3rem;border-radius:3px;color:#a5b4fc">.txt/.md/.csv/.html → same format</code>.
+          For heavily-formatted .docx with mid-sentence inline styling (e.g. a bold word in the middle of a paragraph), the translation is applied per <code style="background:#0a0a14;padding:0 .3rem;border-radius:3px;color:#a5b4fc">&lt;w:t&gt;</code> run independently — formatting survives, but split-sentence quality may dip.
         </div>
       </div><!-- /doc translator card -->
 
@@ -8949,13 +8952,14 @@ function dtOnFile(input) {
   const file = input.files && input.files[0];
   if (!file) return;
   const ext = (file.name.split('.').pop() || '').toLowerCase();
-  if (!['docx','txt','md','csv','html','htm'].includes(ext)) {
+  if (!['docx','pdf','txt','md','csv','html','htm'].includes(ext)) {
     showAdminToast('❌ Unsupported file type: .' + ext);
     return;
   }
   dtFile = file;
   dtTranslatedBlob = null;
-  document.getElementById('dt-status').textContent = `📄 ${file.name} · ${(file.size/1024).toFixed(1)} KB`;
+  const note = ext === 'pdf' ? ' · output will be a translated .docx' : '';
+  document.getElementById('dt-status').textContent = `📄 ${file.name} · ${(file.size/1024).toFixed(1)} KB${note}`;
   document.getElementById('dt-translate-btn').disabled = false;
   document.getElementById('dt-dl-btn').style.display = 'none';
 }
@@ -8986,6 +8990,8 @@ async function dtTranslate() {
     let result;
     if (ext === 'docx') {
       result = await dtTranslateDocx(dtFile, sourceLang, targetLang, model, apiKey, { bar, txt });
+    } else if (ext === 'pdf') {
+      result = await dtTranslatePdfToDocx(dtFile, sourceLang, targetLang, model, apiKey, { bar, txt });
     } else {
       result = await dtTranslatePlain(dtFile, ext, sourceLang, targetLang, model, apiKey, { bar, txt });
     }
@@ -9108,6 +9114,103 @@ async function dtTranslateDocxAuxParts(zip, sourceLang, targetLang, model, apiKe
     }
     zip.file(path, xml);
   }
+}
+
+// ── PDF: extract paragraphs (reuse the Document Proofreader's
+// pdfjs-based extractor), translate them, build a fresh minimal DOCX.
+// We deliberately do NOT try to round-trip PDF → translated PDF —
+// that requires native tooling (LibreOffice headless or a paid API)
+// and still loses fidelity. A clean editable DOCX is the honest output;
+// Word can re-export to PDF in one click.
+async function dtTranslatePdfToDocx(file, sourceLang, targetLang, model, apiKey, ui) {
+  ui.txt.textContent = 'Extracting PDF text…';
+  // dpExtractPDF is defined in the Document Proofreader section above.
+  // Returns an array of paragraph strings (empty strings act as page separators).
+  const paragraphs = await dpExtractPDF(file);
+  const translatable = [];
+  const placeholders = []; // for each paragraph: { idx, isEmpty }
+  paragraphs.forEach((p, i) => {
+    if (p && p.trim()) {
+      placeholders.push({ idx: i, slot: translatable.length });
+      translatable.push(p);
+    } else {
+      placeholders.push({ idx: i, slot: -1 }); // blank line passthrough
+    }
+  });
+  if (translatable.length === 0) throw new Error('No translatable text extracted from the PDF.');
+
+  ui.txt.textContent = `Translating ${translatable.length} paragraphs…`;
+  ui.bar.style.width = '20%';
+  const BATCH = 10;
+  const translated = [];
+  for (let i = 0; i < translatable.length; i += BATCH) {
+    const batch = translatable.slice(i, i + BATCH);
+    const results = await dtTranslateBatch(batch, sourceLang, targetLang, model, apiKey);
+    translated.push(...results);
+    ui.bar.style.width = (20 + Math.min(70, (i + BATCH) / translatable.length * 70)) + '%';
+    ui.txt.textContent = `Translating ${Math.min(i + BATCH, translatable.length)} / ${translatable.length}…`;
+  }
+
+  ui.bar.style.width = '93%';
+  ui.txt.textContent = 'Building .docx…';
+
+  // Reassemble: walk original paragraphs, substitute translations where present
+  const finalParagraphs = paragraphs.map((p, i) => {
+    const ph = placeholders[i];
+    if (!ph || ph.slot < 0) return ''; // blank line / page separator
+    return translated[ph.slot] || p;
+  });
+
+  const blob = await dtBuildSimpleDocx(finalParagraphs, targetLang === 'he');
+  const baseName = file.name.replace(/\.pdf$/i, '');
+  const tag = targetLang === 'he' ? '_HE' : '_EN';
+  return { blob, name: `${baseName}${tag}.docx`, count: translatable.length };
+}
+
+// Build a minimal valid DOCX from a list of paragraph strings.
+// Opens cleanly in Word / LibreOffice / Pages. Hebrew target gets
+// <w:bidi/> on each paragraph and <w:rtl/> on each run so the document
+// renders right-to-left by default.
+async function dtBuildSimpleDocx(paragraphs, isRtl) {
+  const pPr = isRtl ? '<w:pPr><w:bidi/></w:pPr>' : '';
+  const rPr = isRtl ? '<w:rPr><w:rtl/></w:rPr>' : '';
+  const bodyXml = paragraphs.map(p => {
+    if (!p || !p.trim()) return '<w:p/>';
+    return `<w:p>${pPr}<w:r>${rPr}<w:t xml:space="preserve">${dtXmlEscape(p)}</w:t></w:r></w:p>`;
+  }).join('');
+
+  const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:body>${bodyXml}<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr></w:body>
+</w:document>`;
+
+  const contentTypesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>`;
+
+  const rootRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>`;
+
+  const docRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+</Relationships>`;
+
+  const zip = new JSZip();
+  zip.file('[Content_Types].xml', contentTypesXml);
+  zip.file('_rels/.rels', rootRelsXml);
+  zip.file('word/document.xml', documentXml);
+  zip.file('word/_rels/document.xml.rels', docRelsXml);
+  return zip.generateAsync({
+    type: 'blob',
+    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 6 },
+  });
 }
 
 // ── Plain text family (.txt, .md, .csv, .html)
