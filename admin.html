@@ -1268,21 +1268,25 @@
               </label>
               <label style="font-size:.78rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem">
                 <span style="min-width:75px">To:</span>
-                <select id="dt-target-lang" style="flex:1;padding:.5rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.8rem">
+                <select id="dt-target-lang" onchange="dtRenderPreflight()" style="flex:1;padding:.5rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.8rem">
                   <option value="he">Hebrew</option>
                   <option value="en">English</option>
                 </select>
               </label>
               <label style="font-size:.78rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem">
                 <span style="min-width:75px">Model:</span>
-                <select id="dt-model" style="flex:1;padding:.5rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.8rem">
-                  <option value="gpt-5.4">gpt-5.4 (~$0.006 / 500 words · default)</option>
-                  <option value="gpt-5.5">gpt-5.5 (~$0.018 / 500 words · top quality for tone-sensitive work)</option>
+                <select id="dt-model" onchange="dtRenderPreflight()" style="flex:1;padding:.5rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.8rem">
+                  <option value="gpt-5.4">gpt-5.4 (default · cheaper)</option>
+                  <option value="gpt-5.5">gpt-5.5 (top quality for tone-sensitive work)</option>
                 </select>
               </label>
             </div>
           </div>
         </div>
+
+        <!-- Pre-flight stats appear here after file upload, then update
+             live during the run, then show actual numbers when done. -->
+        <div id="dt-stats" style="display:none;margin-bottom:.7rem;padding:.55rem .8rem;background:rgba(79,70,229,.06);border:1px solid rgba(79,70,229,.2);border-radius:8px;font-size:.78rem;color:#cbd5e1;line-height:1.5"></div>
 
         <button class="tbtn gold" id="dt-translate-btn" onclick="dtTranslate()" disabled>🌐 Translate Document</button>
         <button class="tbtn" id="dt-dl-btn" onclick="dtDownload()" style="display:none;width:auto;padding:.65rem 1.3rem;font-size:.82rem;background:#1e1b4b;color:#a5b4fc;margin-left:.5rem">⬇ Download Translated File</button>
@@ -9080,6 +9084,72 @@ function htCopyEnglish() {
 let dtFile = null;
 let dtTranslatedBlob = null;
 let dtOutputName = '';
+// Per-run accumulator (set at dtTranslate start, mutated by dtTranslateBatch,
+// read for the final stats panel). null when no run is in flight.
+let dtCurrentRun = null;
+// Pre-flight stats cached so model/target-lang changes can re-render cost
+// instantly without re-extracting the file.
+let dtPreflightStatsCache = null;
+
+// Per-million-token prices — keep in sync with the model dropdown options.
+const DT_PRICES = {
+  'gpt-5.4':      { in: 2.50, out: 15.00 },
+  'gpt-5.5':      { in: 5.00, out: 30.00 },
+  'gpt-5.4-mini': { in: 0.75, out:  4.50 },
+};
+
+function dtCountWords(s) {
+  if (!s || !s.trim()) return 0;
+  return (s.match(/\S+/g) || []).length;
+}
+function dtFmtCost(usd) {
+  if (usd < 0.001) return '< $0.001';
+  if (usd < 0.01)  return '$' + usd.toFixed(4);
+  if (usd < 1)     return '$' + usd.toFixed(3);
+  return '$' + usd.toFixed(2);
+}
+function dtFmtTime(secs) {
+  if (secs < 60) return Math.round(secs) + 's';
+  const m = Math.floor(secs / 60), s = Math.round(secs % 60);
+  return m + 'm ' + s + 's';
+}
+function dtEstimateCost(words, model, targetLang) {
+  if (!words) return 0;
+  const p = DT_PRICES[model] || DT_PRICES['gpt-5.4'];
+  // English ≈ 1.3 tokens/word, Hebrew ≈ 2.5 tokens/word.
+  // Source is the "other" language relative to target.
+  // ×1.3 overhead for system prompt + JSON structure per batch.
+  const srcPerWord = targetLang === 'he' ? 1.3 : 2.5;
+  const tgtPerWord = targetLang === 'he' ? 2.5 : 1.3;
+  const inTok  = words * srcPerWord * 1.3;
+  const outTok = words * tgtPerWord * 1.1;
+  return (inTok / 1e6) * p.in + (outTok / 1e6) * p.out;
+}
+function dtEstimateTime(segments) {
+  // Realistic: ~3.5s per batch (network + LLM round-trip), batch size = 20.
+  return Math.max(2, Math.ceil(Math.max(1, segments) / 20) * 3.5);
+}
+function dtActualCost(inTokens, outTokens, model) {
+  const p = DT_PRICES[model] || DT_PRICES['gpt-5.4'];
+  return (inTokens / 1e6) * p.in + (outTokens / 1e6) * p.out;
+}
+
+function dtRenderPreflight() {
+  const stats = dtPreflightStatsCache;
+  const el = document.getElementById('dt-stats');
+  if (!stats) { el.style.display = 'none'; return; }
+  const model = document.getElementById('dt-model').value;
+  const target = document.getElementById('dt-target-lang').value;
+  const cost = dtEstimateCost(stats.words, model, target);
+  const time = dtEstimateTime(stats.segments);
+  el.style.display = 'block';
+  el.innerHTML =
+    `📊 <strong style="color:#a5b4fc">${stats.words.toLocaleString()}</strong> words · ` +
+    `<strong style="color:#a5b4fc">${stats.segments.toLocaleString()}</strong> segment${stats.segments===1?'':'s'} · ` +
+    `est cost: <strong style="color:#a5b4fc">${dtFmtCost(cost)}</strong> · ` +
+    `est time: <strong style="color:#a5b4fc">${dtFmtTime(time)}</strong>` +
+    `<div style="font-size:.7rem;color:#64748b;margin-top:.2rem">Estimates assume ${model}; pick a different model or target language above to re-estimate.</div>`;
+}
 
 function dtOnFile(input) {
   const file = input.files && input.files[0];
@@ -9091,10 +9161,176 @@ function dtOnFile(input) {
   }
   dtFile = file;
   dtTranslatedBlob = null;
+  dtPreflightStatsCache = null;
   const note = ext === 'pdf' ? ' · output will be a translated .docx' : '';
   document.getElementById('dt-status').textContent = `📄 ${file.name} · ${(file.size/1024).toFixed(1)} KB${note}`;
   document.getElementById('dt-translate-btn').disabled = false;
   document.getElementById('dt-dl-btn').style.display = 'none';
+  // Kick off a non-blocking preflight: count words now so the user can see
+  // estimated cost/time before they decide to click Translate.
+  dtRunPreflight(file, ext);
+}
+
+async function dtRunPreflight(file, ext) {
+  const el = document.getElementById('dt-stats');
+  el.style.display = 'block';
+  el.innerHTML = '<span style="color:#94a3b8">📊 Counting words…</span>';
+  try {
+    const stats = await dtPreflightStats(file, ext);
+    dtPreflightStatsCache = stats;
+    dtRenderPreflight();
+  } catch (e) {
+    console.warn('[doc-translator preflight]', e);
+    dtPreflightStatsCache = null;
+    el.innerHTML = '<span style="color:#64748b">📊 Stats unavailable for this file — translation will still work and show actual numbers when done.</span>';
+  }
+}
+
+// Per-format preflight: extract text quickly, return { words, segments }.
+async function dtPreflightStats(file, ext) {
+  if (ext === 'docx') return await dtPreflightOpenXml(file, /^word\/(document|header\d+|footer\d+|footnotes|endnotes|comments)\.xml$/, /<w:t[^>]*>([^<]*)<\/w:t>/g);
+  if (ext === 'pptx') return await dtPreflightOpenXml(file, /^ppt\/(slides|notesSlides|slideLayouts|slideMasters)\/[^\/]+\.xml$/, /<a:t[^>]*>([^<]*)<\/a:t>/g);
+  if (ext === 'xlsx') return await dtPreflightXlsx(file);
+  if (ext === 'odt')  return await dtPreflightOdt(file);
+  if (ext === 'pdf')  return await dtPreflightPdf(file);
+  if (ext === 'rtf')  return await dtPreflightRtf(file);
+  if (ext === 'mqxlz' || ext === 'mqxliff') return await dtPreflightMq(file, ext);
+  return await dtPreflightPlain(file, ext);
+}
+
+async function dtPreflightOpenXml(file, pathRe, tagRe) {
+  const buf = await file.arrayBuffer();
+  const zip = await JSZip.loadAsync(buf);
+  const paths = Object.keys(zip.files).filter(p => pathRe.test(p));
+  let words = 0, segments = 0;
+  for (const path of paths) {
+    const xml = await zip.file(path).async('text');
+    const re = new RegExp(tagRe.source, tagRe.flags);
+    let m;
+    while ((m = re.exec(xml)) !== null) {
+      const text = dtXmlUnescape(m[1]).trim();
+      if (text) { words += dtCountWords(text); segments++; }
+    }
+  }
+  return { words, segments };
+}
+
+async function dtPreflightXlsx(file) {
+  const buf = await file.arrayBuffer();
+  const zip = await JSZip.loadAsync(buf);
+  const ss = zip.file('xl/sharedStrings.xml');
+  if (!ss) return { words: 0, segments: 0 };
+  const xml = await ss.async('text');
+  let words = 0, segments = 0;
+  const re = /<t[^>]*>([^<]*)<\/t>/g;
+  let m;
+  while ((m = re.exec(xml)) !== null) {
+    const text = dtXmlUnescape(m[1]).trim();
+    if (text && !/^["']?[\d.,\-+%]+["']?$/.test(text)) {
+      words += dtCountWords(text); segments++;
+    }
+  }
+  return { words, segments };
+}
+
+async function dtPreflightOdt(file) {
+  const buf = await file.arrayBuffer();
+  const zip = await JSZip.loadAsync(buf);
+  const entry = zip.file('content.xml');
+  if (!entry) return { words: 0, segments: 0 };
+  const xml = await entry.async('text');
+  const doc = new DOMParser().parseFromString(xml, 'application/xml');
+  const TEXT_NS = 'urn:oasis:names:tc:opendocument:xmlns:text:1.0';
+  const TAGS = ['p','h','span','list-item','a'];
+  let words = 0, segments = 0;
+  const seen = new Set();
+  for (const tag of TAGS) {
+    const els = doc.getElementsByTagNameNS(TEXT_NS, tag);
+    for (let i = 0; i < els.length; i++) {
+      for (const child of els[i].childNodes) {
+        if (child.nodeType === 3 && !seen.has(child)) {
+          const text = (child.nodeValue || '').trim();
+          if (text) { seen.add(child); words += dtCountWords(text); segments++; }
+        }
+      }
+    }
+  }
+  return { words, segments };
+}
+
+async function dtPreflightPdf(file) {
+  if (!window.pdfjsLib) throw new Error('pdfjs not loaded');
+  const paragraphs = await dpExtractPDF(file);
+  let words = 0, segments = 0;
+  for (const p of paragraphs) {
+    if (p && p.trim()) { words += dtCountWords(p); segments++; }
+  }
+  return { words, segments };
+}
+
+async function dtPreflightRtf(file) {
+  // Cheap approximation: strip control words / groups / Unicode escapes and
+  // count words in what's left. Good enough for a pre-flight estimate.
+  const rtf = await file.text();
+  const stripped = rtf
+    .replace(/\\u-?\d+\s?[^\\{}]?/g, ' ')
+    .replace(/\\[a-zA-Z]+(-?\d+)?\s?/g, ' ')
+    .replace(/\\'[0-9a-fA-F]{2}/g, ' ')
+    .replace(/\\./g, ' ')
+    .replace(/[{}]/g, ' ');
+  return { words: dtCountWords(stripped), segments: 0 };
+}
+
+async function dtPreflightMq(file, ext) {
+  let xml;
+  if (ext === 'mqxlz') {
+    const buf = await file.arrayBuffer();
+    const zip = await JSZip.loadAsync(buf);
+    const entries = Object.keys(zip.files).filter(p => /\.mqxliff$/i.test(p) && !zip.files[p].dir);
+    if (entries.length === 0) return { words: 0, segments: 0 };
+    xml = await zip.file(entries[0]).async('text');
+  } else {
+    xml = await file.text();
+  }
+  const doc = new DOMParser().parseFromString(xml, 'application/xml');
+  const tus = doc.getElementsByTagNameNS('*', 'trans-unit');
+  let words = 0, segments = 0;
+  for (let i = 0; i < tus.length; i++) {
+    const sources = tus[i].getElementsByTagNameNS('*', 'source');
+    if (sources.length === 0) continue;
+    const text = (sources[0].textContent || '').trim();
+    if (text) { words += dtCountWords(text); segments++; }
+  }
+  return { words, segments };
+}
+
+async function dtPreflightPlain(file, ext) {
+  const text = await file.text();
+  let words = 0, segments = 0;
+  if (ext === 'html' || ext === 'htm') {
+    const doc = new DOMParser().parseFromString(text, 'text/html');
+    const walk = (n) => {
+      if (n.nodeType === 3 && n.nodeValue && n.nodeValue.trim()) {
+        words += dtCountWords(n.nodeValue); segments++;
+      } else if (n.nodeType === 1 && !['SCRIPT','STYLE','NOSCRIPT','CODE','PRE'].includes(n.tagName)) {
+        for (const child of n.childNodes) walk(child);
+      }
+    };
+    walk(doc.body);
+  } else if (ext === 'csv') {
+    for (const line of text.split(/\r?\n/)) {
+      for (const cell of line.split(',')) {
+        const t = cell.trim();
+        if (t && !/^["']?[\d.,\-+%]+["']?$/.test(t)) { words += dtCountWords(t); segments++; }
+      }
+    }
+  } else {
+    // txt, md
+    for (const p of text.split(/\n\s*\n/)) {
+      if (p.trim()) { words += dtCountWords(p); segments++; }
+    }
+  }
+  return { words, segments };
 }
 
 async function dtTranslate() {
@@ -9112,12 +9348,34 @@ async function dtTranslate() {
   const bar  = document.getElementById('dt-prog-bar');
   const txt  = document.getElementById('dt-prog-text');
   const dlBtn = document.getElementById('dt-dl-btn');
+  const statsEl = document.getElementById('dt-stats');
 
   btn.disabled = true;
   dlBtn.style.display = 'none';
   prog.classList.add('show');
   bar.style.width = '5%';
   txt.textContent = 'Reading file…';
+
+  // Start a run: dtTranslateBatch will accumulate token usage here.
+  dtCurrentRun = { startTime: Date.now(), inputTokens: 0, outputTokens: 0, batches: 0, model };
+
+  // Live stats tick — every 500ms, refresh elapsed + token tally in the stats panel.
+  const liveTimer = setInterval(() => {
+    if (!dtCurrentRun) return;
+    const elapsed = (Date.now() - dtCurrentRun.startTime) / 1000;
+    const live = `<div style="font-size:.72rem;color:#94a3b8;margin-top:.2rem">⏱ ${dtFmtTime(elapsed)} elapsed · ` +
+      `${dtCurrentRun.inputTokens.toLocaleString()} in + ${dtCurrentRun.outputTokens.toLocaleString()} out tokens` +
+      (dtCurrentRun.batches ? ` · ${dtCurrentRun.batches} batch${dtCurrentRun.batches===1?'':'es'}` : '') +
+      `</div>`;
+    if (dtPreflightStatsCache) {
+      // Re-render preflight (which sets innerHTML from cache) and append the live line.
+      dtRenderPreflight();
+      statsEl.innerHTML += live;
+    } else {
+      statsEl.style.display = 'block';
+      statsEl.innerHTML = '<span style="color:#94a3b8">📊 Translating…</span>' + live;
+    }
+  }, 500);
 
   try {
     let result;
@@ -9143,12 +9401,26 @@ async function dtTranslate() {
     bar.style.width = '100%';
     txt.textContent = `✅ Done — ${result.count} text unit${result.count===1?'':'s'} translated · click Download`;
     dlBtn.style.display = 'inline-block';
+
+    // Final stats: actual elapsed + cost from real token usage.
+    const elapsed = (Date.now() - dtCurrentRun.startTime) / 1000;
+    const cost = dtActualCost(dtCurrentRun.inputTokens, dtCurrentRun.outputTokens, model);
+    statsEl.style.display = 'block';
+    statsEl.innerHTML =
+      `📊 <strong style="color:#86efac">✅ ${result.count.toLocaleString()} unit${result.count===1?'':'s'} translated</strong> · ` +
+      `cost: <strong style="color:#86efac">${dtFmtCost(cost)}</strong> · ` +
+      `took: <strong style="color:#86efac">${dtFmtTime(elapsed)}</strong>` +
+      `<div style="font-size:.7rem;color:#64748b;margin-top:.2rem">` +
+      `${dtCurrentRun.inputTokens.toLocaleString()} input + ${dtCurrentRun.outputTokens.toLocaleString()} output tokens across ${dtCurrentRun.batches} GPT call${dtCurrentRun.batches===1?'':'s'} (${model})` +
+      `</div>`;
     setTimeout(() => prog.classList.remove('show'), 2200);
   } catch (e) {
     txt.textContent = '❌ ' + e.message;
     setTimeout(() => prog.classList.remove('show'), 5000);
     console.error('[doc-translator]', e);
   } finally {
+    clearInterval(liveTimer);
+    dtCurrentRun = null;
     btn.disabled = false;
   }
 }
@@ -10256,6 +10528,14 @@ JSON only, with this exact shape:
     throw new Error(j.error?.message || ('OpenAI ' + r.status));
   }
   const j = await r.json();
+  // Accumulate token usage into the current run so the post-run stats panel
+  // can show actual cost. Safe no-op if there's no active run (preflight
+  // never calls this — preflight only counts words).
+  if (dtCurrentRun && j.usage) {
+    dtCurrentRun.inputTokens  += j.usage.prompt_tokens     || 0;
+    dtCurrentRun.outputTokens += j.usage.completion_tokens || 0;
+    dtCurrentRun.batches++;
+  }
   let raw = j.choices?.[0]?.message?.content || '{}';
   raw = raw.replace(/^```[a-z]*\n?/i, '').replace(/```$/, '').trim();
   let parsed;
