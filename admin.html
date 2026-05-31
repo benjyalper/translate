@@ -2230,7 +2230,9 @@ function hvcLaunch() {
 // Targets can be reached either by an id on the .tool-card itself
 // (glossary-manager has one historically) OR by a data-tool-anchor
 // attribute on the inner .tool-title — we walk up to find the card.
-function scrollToTool(id) {
+// skipUrl is set when called from the hash-route handler, to avoid a
+// redundant history.replaceState while we're already responding to a hash.
+function scrollToTool(id, skipUrl) {
   let el = document.getElementById(id);
   if (!el) {
     const anchor = document.querySelector(`[data-tool-anchor="${id}"]`);
@@ -2240,6 +2242,7 @@ function scrollToTool(id) {
   el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   el.classList.add('tm-flash');
   setTimeout(() => el.classList.remove('tm-flash'), 1400);
+  if (!skipUrl) setUrlHash(id);
 }
 
 // Calls /api/scrape → runs scraper.js + GPT-4o AI discovery.
@@ -2347,7 +2350,51 @@ function switchMainTab(tab) {
   document.getElementById('tab-jobs').classList.toggle('active', isJobs);
   document.getElementById('tab-tools').classList.toggle('active', !isJobs);
   document.getElementById('topbar-badge').textContent  = isJobs ? 'Admin · Jobs' : 'Admin · Tools';
+  // Reflect in URL so the page is bookmarkable. Jobs is the default,
+  // so its URL has no hash; tools gets #tools (or #tool-X via scrollToTool).
+  setUrlHash(isJobs ? '' : 'tools');
 }
+
+// ── URL-hash bookmarking ──────────────────────────────────────
+// Lets a user bookmark either the tools page as a whole (#tools) or
+// any individual tool (#tool-X, or #glossary-manager for the legacy id).
+// We use replaceState so the address bar updates without the browser's
+// default scroll-jump-to-id behavior fighting our smooth scroll.
+function setUrlHash(hash) {
+  try {
+    if (hash) {
+      history.replaceState(null, '', '#' + hash);
+    } else {
+      history.replaceState(null, '', location.pathname + location.search);
+    }
+  } catch { /* private mode or browser quirk — non-fatal */ }
+}
+
+function resolveHashRoute(hash) {
+  const h = String(hash || '').replace(/^#/, '');
+  if (!h) return { panel: 'jobs', toolId: null };
+  if (h === 'tools') return { panel: 'tools', toolId: null };
+  if (h === 'glossary-manager' || /^tool-/.test(h)) return { panel: 'tools', toolId: h };
+  return { panel: 'jobs', toolId: null };
+}
+
+function applyHashRoute() {
+  const route = resolveHashRoute(location.hash);
+  if (route.panel === 'tools') {
+    switchMainTab('tools');
+    if (route.toolId) {
+      // Wait a tick so the panel finishes becoming visible before scrolling
+      setTimeout(() => scrollToTool(route.toolId, /*skipUrl*/ true), 60);
+    }
+  } else if (location.hash) {
+    // Hash was present but unrecognized — land on jobs cleanly
+    switchMainTab('jobs');
+  }
+}
+
+// Apply once at load, and respond to manual hash edits / back-forward nav
+applyHashRoute();
+window.addEventListener('hashchange', applyHashRoute);
 
 // ── Shared utility ────────────────────────────────────────────
 function showAdminToast(msg, duration=5000) {
