@@ -641,6 +641,12 @@
           <span class="tm-tip"><span class="tm-tip-title">Document Proofreader (Hebrew)</span>Upload a Hebrew .pdf or .docx → GPT reviews each paragraph → preview issues by severity → approve fixes → download .docx with native Word track changes (red strikethrough + blue insert).</span>
         </button>
 
+        <button class="toolmap-btn" onclick="scrollToTool('tool-text-checker')">
+          <span class="tm-label">✍️ Text Checker</span>
+          <span class="tm-info" tabindex="0">i</span>
+          <span class="tm-tip"><span class="tm-tip-title">Text Checker (HE / EN)</span>Realtime spell &amp; grammar checker with inline underlines, hover tooltips, deep-review pass, and Tab-to-accept autocomplete. Runs as a separate app on port 3019. Click the card's Launch button to open it.</span>
+        </button>
+
         <button class="toolmap-btn" onclick="scrollToTool('tool-subtitle-translator')">
           <span class="tm-label">🎞️ Subtitle Translator</span>
           <span class="tm-info" tabindex="0">i</span>
@@ -1694,6 +1700,29 @@
         <div id="dp-error" style="display:none;padding:.7rem 1rem;background:#1a0000;border:1px solid #7f1d1d;border-radius:8px;font-size:.82rem;color:#fca5a5;margin-top:.6rem"></div>
       </div><!-- /document proofreader card -->
 
+      <!-- ── ✍️ TEXT CHECKER (external app launcher, HE/EN realtime) ─── -->
+      <div class="tool-card" style="grid-column:1/-1">
+        <div class="tool-header">
+          <div class="tool-icon">✍️</div>
+          <div>
+            <div class="tool-title" data-tool-anchor="tool-text-checker">Text Checker (Hebrew &amp; English)</div>
+            <div class="tool-sub">Realtime spell &amp; grammar checker with inline underlines, hover tooltips per issue, deep-review pass, and Tab-to-accept ghost-text autocomplete · gpt-5.4-mini + gpt-5.4</div>
+          </div>
+        </div>
+        <div class="tool-divider"></div>
+
+        <p style="font-size:.82rem;color:#cbd5e1;line-height:1.55;margin:0 0 .7rem 0">
+          Text Checker runs as its own standalone Next.js app on port <strong style="color:#a5b4fc">3019</strong> with its own server-side OpenAI key. Paste any Hebrew or English text — you get per-sentence underlines color-coded by issue type (spelling, grammar, syntax, punctuation, style), hover tooltips with suggestions you can Apply with one click, an on-demand Deep Review pass, and ghost-text completions you accept with <kbd style="background:#0a0a14;padding:.05rem .35rem;border-radius:3px;color:#a5b4fc;font-size:.72rem;border:1px solid #1f2937">Tab</kbd>.
+        </p>
+
+        <p style="font-size:.78rem;color:#94a3b8;line-height:1.5;margin:0 0 .9rem 0">
+          Make sure the local server is running first: <code style="background:#0a0a14;padding:.12rem .4rem;border-radius:3px;color:#a5b4fc;font-size:.78rem">cd text-checker &amp;&amp; npm run dev</code>
+        </p>
+
+        <button class="tbtn gold" onclick="tcLaunch()" style="width:auto;padding:.65rem 1.3rem;font-size:.82rem">🚀 Launch Text Checker</button>
+        <span id="tc-status" style="display:none;margin-left:.8rem;font-size:.78rem"></span>
+      </div><!-- /text checker card -->
+
       <!-- ── 🎬 SUBTITLE TRANSLATOR (SRT / VTT → Hebrew) ─────── -->
       <div class="tool-card" style="grid-column:1/-1">
         <div class="tool-header">
@@ -2204,6 +2233,25 @@ const TOOLS_API = (
   location.hostname === 'localhost' ||
   location.hostname === '127.0.0.1'
 ) ? 'http://localhost:3007' : '';
+
+// Text Checker launcher — opens the standalone Next.js app (port 3019)
+// in a new tab. Same shape as hvcLaunch — see note there about why we
+// don't probe the local server before opening.
+function tcLaunch() {
+  const url = 'http://localhost:3019';
+  const win = window.open(url, '_blank');
+  const status = document.getElementById('tc-status');
+  if (status) {
+    status.style.display = 'inline';
+    if (win) {
+      status.textContent = '↗ opened in new tab — if it shows an error, run: cd text-checker && npm run dev';
+      status.style.color = '#94a3b8';
+    } else {
+      status.textContent = '❌ popup blocked — allow popups for this site, then try again';
+      status.style.color = '#fca5a5';
+    }
+  }
+}
 
 // Hebrew Voice Cloner launcher — opens the standalone app (port 3018)
 // in a new tab. When the admin is served from Railway (HTTPS) we can't
