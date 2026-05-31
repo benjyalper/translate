@@ -607,6 +607,12 @@
           <span class="tm-tip"><span class="tm-tip-title">Trados SDLPPX Auto-Translator</span>Upload a .sdlppx project package → GPT translates every segment → download a .sdlrpx return package ready to send back. Choose quality tier per job.</span>
         </button>
 
+        <button class="toolmap-btn" onclick="scrollToTool('tool-memoq-translator')">
+          <span class="tm-label">🟣 memoQ Auto-Translator</span>
+          <span class="tm-info" tabindex="0">i</span>
+          <span class="tm-tip"><span class="tm-tip-title">memoQ Auto-Translator (.mqout → .mqback)</span>Upload a memoQ out-of-house package (.mqout) → GPT fills every &lt;target&gt; across every .mqxliff inside → download a return package (.mqback) ready to hand back to the PM. TMs / term bases / settings inside the package pass through untouched.</span>
+        </button>
+
         <button class="toolmap-btn" onclick="scrollToTool('tool-doc-translator')">
           <span class="tm-label">🌐 Document Translator</span>
           <span class="tm-info" tabindex="0">i</span>
@@ -1160,6 +1166,68 @@
         <!-- Error -->
         <div id="tr-error" style="display:none;padding:.7rem 1rem;background:#1a0000;border:1px solid #7f1d1d;border-radius:8px;font-size:.82rem;color:#fca5a5"></div>
       </div><!-- /trados card -->
+
+      <!-- ── 🟣 memoQ AUTO-TRANSLATOR (.mqout → translated .mqback) ─── -->
+      <div class="tool-card" style="grid-column:1/-1">
+        <div class="tool-header">
+          <div class="tool-icon">🟣</div>
+          <div>
+            <div class="tool-title" data-tool-anchor="tool-memoq-translator">memoQ Auto-Translator (.mqout → .mqback)</div>
+            <div class="tool-sub">Upload a memoQ out-of-house package (.mqout) → GPT fills every <code style="background:#0a0a14;padding:0 .3rem;border-radius:3px;color:#a5b4fc">&lt;target&gt;</code> across every .mqxliff inside → download a return package (.mqback) you can hand back to the PM</div>
+          </div>
+        </div>
+        <div class="tool-divider"></div>
+
+        <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:1rem;margin-bottom:.8rem">
+          <div>
+            <label style="font-size:.75rem;color:#94a3b8;display:block;margin-bottom:.4rem">① Drop or pick the .mqout package</label>
+            <label style="display:flex;align-items:center;justify-content:center;gap:.6rem;padding:1.4rem 1rem;background:#0a0a14;border:2px dashed #6b21a8;border-radius:10px;cursor:pointer;color:#cbd5e1;font-size:.85rem">
+              <span>📦 Choose .mqout</span>
+              <input type="file" id="mq-file" accept=".mqout,.zip" style="display:none" onchange="mqOnFile(this)"/>
+            </label>
+            <div id="mq-status" style="margin-top:.5rem;font-size:.78rem;color:#94a3b8;min-height:1.2rem"></div>
+          </div>
+          <div>
+            <label style="font-size:.75rem;color:#94a3b8;display:block;margin-bottom:.4rem">② Translate from → to</label>
+            <div style="display:flex;flex-direction:column;gap:.5rem">
+              <label style="font-size:.78rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem">
+                <span style="min-width:75px">From:</span>
+                <select id="mq-source-lang" style="flex:1;padding:.5rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.8rem">
+                  <option value="auto">— Auto-detect —</option>
+                  <option value="en">English</option>
+                  <option value="he">Hebrew</option>
+                </select>
+              </label>
+              <label style="font-size:.78rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem">
+                <span style="min-width:75px">To:</span>
+                <select id="mq-target-lang" style="flex:1;padding:.5rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.8rem">
+                  <option value="he">Hebrew</option>
+                  <option value="en">English</option>
+                </select>
+              </label>
+              <label style="font-size:.78rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem">
+                <span style="min-width:75px">Model:</span>
+                <select id="mq-model" style="flex:1;padding:.5rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.8rem">
+                  <option value="gpt-5.4">gpt-5.4 (~$0.006 / 500 words · default)</option>
+                  <option value="gpt-5.5">gpt-5.5 (~$0.018 / 500 words · top quality)</option>
+                </select>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <button class="tbtn gold" id="mq-translate-btn" onclick="mqTranslate()" disabled>🟣 Translate Package</button>
+        <button class="tbtn" id="mq-dl-btn" onclick="mqDownload()" style="display:none;width:auto;padding:.65rem 1.3rem;font-size:.82rem;background:#1e1b4b;color:#a5b4fc;margin-left:.5rem">⬇ Download .mqback</button>
+
+        <div class="tprog" id="mq-prog">
+          <div class="tprog-text" id="mq-prog-text">Translating…</div>
+          <div class="tprog-bar-outer"><div class="tprog-bar-inner" id="mq-prog-bar"></div></div>
+        </div>
+
+        <div style="margin-top:.6rem;font-size:.72rem;color:#64748b;line-height:1.5">
+          Same flow as the Trados Auto-Translator above, but for memoQ. The package is unzipped in the browser, every <code style="background:#0a0a14;padding:0 .3rem;border-radius:3px;color:#a5b4fc">.mqxliff</code> inside is translated segment-by-segment (filling <code style="background:#0a0a14;padding:0 .3rem;border-radius:3px;color:#a5b4fc">&lt;target&gt;</code> and setting <code style="background:#0a0a14;padding:0 .3rem;border-radius:3px;color:#a5b4fc">state="translated"</code>), and the package is rezipped under the .mqback extension. TMs, term bases, and settings inside the package pass through untouched.
+        </div>
+      </div><!-- /memoq translator card -->
 
       <!-- ── 🌐 DOCUMENT TRANSLATOR (any file, HE ↔ EN, styling preserved) ─── -->
       <div class="tool-card" style="grid-column:1/-1">
@@ -9130,30 +9198,15 @@ async function dtTranslateDocxAuxParts(zip, sourceLang, targetLang, model, apiKe
 }
 
 // ── memoQ: .mqxliff is XLIFF 1.2 with memoQ extensions; .mqxlz is a zip
-// containing a single .mqxliff. We translate each <trans-unit>'s <source>
-// text and write the result into <target>, setting state="translated" so
-// memoQ recognises the segment as completed. The file element's
-// target-language attribute is also bumped so memoQ shows the right
-// target locale on import. Inline tags (<bpt>, <ept>, <ph>, <g>, …) are
-// flattened out of the source for translation — for memoQ jobs with
-// heavy inline tags, expect the target to drop them; clean prose
-// segments translate perfectly.
-async function dtTranslateMq(file, ext, sourceLang, targetLang, model, apiKey, ui) {
-  let zip = null;
-  let xliffPath = null;
-  let xml;
-
-  if (ext === 'mqxlz') {
-    const buf = await file.arrayBuffer();
-    zip = await JSZip.loadAsync(buf);
-    const entries = Object.keys(zip.files).filter(p => /\.mqxliff$/i.test(p) && !zip.files[p].dir);
-    if (entries.length === 0) throw new Error('Not a valid .mqxlz (no .mqxliff inside)');
-    xliffPath = entries[0];
-    xml = await zip.file(xliffPath).async('text');
-  } else {
-    xml = await file.text();
-  }
-
+// containing a single .mqxliff; .mqout is a project package containing
+// multiple .mqxliff files plus TMs / term bases / settings. The core
+// per-XML translation is factored out as translateMqxliffXml so both
+// dtTranslateMq (single file) and mqTranslate (whole package) can share it.
+//
+// Inline tags (<bpt>, <ept>, <ph>, <g>, …) are flattened out of the source
+// for translation — clean prose segments translate perfectly; heavy-inline-
+// tag segments lose their inline formatting in the target.
+async function translateMqxliffXml(xml, sourceLang, targetLang, model, apiKey, onProgress) {
   const doc = new DOMParser().parseFromString(xml, 'application/xml');
   const err = doc.querySelector('parsererror');
   if (err) throw new Error('Invalid XML in memoQ file: ' + (err.textContent || '').slice(0, 200));
@@ -9169,22 +9222,17 @@ async function dtTranslateMq(file, ext, sourceLang, targetLang, model, apiKey, u
     if (raw.trim().length === 0) continue;
     items.push({ tu, source: sources[0], sourceText: raw });
   }
-  if (items.length === 0) throw new Error('No translatable segments found in memoQ file');
+  if (items.length === 0) return { xml, count: 0 };
 
-  ui.txt.textContent = `Translating ${items.length} memoQ segments…`;
-  ui.bar.style.width = '15%';
   const BATCH = 20;
   const translations = [];
   for (let i = 0; i < items.length; i += BATCH) {
     const batch = items.slice(i, i + BATCH);
     const results = await dtTranslateBatch(batch.map(b => b.sourceText), sourceLang, targetLang, model, apiKey);
     translations.push(...results);
-    ui.bar.style.width = (15 + Math.min(75, (i + BATCH) / items.length * 75)) + '%';
-    ui.txt.textContent = `Translating ${Math.min(i + BATCH, items.length)} / ${items.length}…`;
+    if (onProgress) onProgress(Math.min(i + BATCH, items.length), items.length);
   }
 
-  // Write each translation into the trans-unit's <target>; create one
-  // in the same namespace as <source> if it doesn't exist yet.
   for (let i = 0; i < items.length; i++) {
     const { tu, source } = items[i];
     const translated = translations[i] || items[i].sourceText;
@@ -9202,7 +9250,6 @@ async function dtTranslateMq(file, ext, sourceLang, targetLang, model, apiKey, u
     target.setAttribute('state', 'translated');
   }
 
-  // Bump file-level target-language so memoQ shows the right locale
   const fileEls = doc.getElementsByTagNameNS('*', 'file');
   const targetLangCode = targetLang === 'he' ? 'he-IL' : 'en-US';
   for (let i = 0; i < fileEls.length; i++) {
@@ -9211,23 +9258,160 @@ async function dtTranslateMq(file, ext, sourceLang, targetLang, model, apiKey, u
 
   let newXml = new XMLSerializer().serializeToString(doc);
   if (!/^<\?xml/.test(newXml)) newXml = '<?xml version="1.0" encoding="UTF-8"?>\n' + newXml;
+  return { xml: newXml, count: items.length };
+}
+
+async function dtTranslateMq(file, ext, sourceLang, targetLang, model, apiKey, ui) {
+  let zip = null;
+  let xliffPath = null;
+  let xml;
+
+  if (ext === 'mqxlz') {
+    const buf = await file.arrayBuffer();
+    zip = await JSZip.loadAsync(buf);
+    const entries = Object.keys(zip.files).filter(p => /\.mqxliff$/i.test(p) && !zip.files[p].dir);
+    if (entries.length === 0) throw new Error('Not a valid .mqxlz (no .mqxliff inside)');
+    xliffPath = entries[0];
+    xml = await zip.file(xliffPath).async('text');
+  } else {
+    xml = await file.text();
+  }
+
+  ui.txt.textContent = 'Translating memoQ segments…';
+  ui.bar.style.width = '15%';
+  const result = await translateMqxliffXml(xml, sourceLang, targetLang, model, apiKey, (done, total) => {
+    ui.bar.style.width = (15 + Math.min(75, done / total * 75)) + '%';
+    ui.txt.textContent = `Translating ${done} / ${total}…`;
+  });
+  if (result.count === 0) throw new Error('No translatable segments found in memoQ file');
 
   const baseName = file.name.replace(/\.(mqxlz|mqxliff)$/i, '');
   const tag = targetLang === 'he' ? '_HE' : '_EN';
 
   if (zip) {
-    zip.file(xliffPath, newXml);
+    zip.file(xliffPath, result.xml);
     const blob = await zip.generateAsync({
       type: 'blob',
       mimeType: 'application/octet-stream',
       compression: 'DEFLATE',
       compressionOptions: { level: 6 },
     });
-    return { blob, name: `${baseName}${tag}.mqxlz`, count: items.length };
+    return { blob, name: `${baseName}${tag}.mqxlz`, count: result.count };
   } else {
-    const blob = new Blob([newXml], { type: 'application/xml;charset=utf-8' });
-    return { blob, name: `${baseName}${tag}.mqxliff`, count: items.length };
+    const blob = new Blob([result.xml], { type: 'application/xml;charset=utf-8' });
+    return { blob, name: `${baseName}${tag}.mqxliff`, count: result.count };
   }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  🟣 memoQ AUTO-TRANSLATOR (.mqout → .mqback)
+//  Sister tool to the Trados Auto-Translator. The package is a zip
+//  containing one or more .mqxliff files plus TMs / term bases /
+//  settings; we translate every .mqxliff via the shared helper and
+//  rezip with the .mqback extension. Non-XLIFF files pass through.
+// ═══════════════════════════════════════════════════════════════
+let mqFile = null;
+let mqTranslatedBlob = null;
+let mqOutputName = '';
+
+function mqOnFile(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  if (!['mqout','zip'].includes(ext)) {
+    showAdminToast('❌ Pick a .mqout file');
+    return;
+  }
+  mqFile = file;
+  mqTranslatedBlob = null;
+  document.getElementById('mq-status').textContent = `📦 ${file.name} · ${(file.size/1024).toFixed(1)} KB`;
+  document.getElementById('mq-translate-btn').disabled = false;
+  document.getElementById('mq-dl-btn').style.display = 'none';
+}
+
+async function mqTranslate() {
+  const apiKey = getApiKey();
+  if (!apiKey) { showAdminToast('❌ Set your OpenAI key first'); return; }
+  if (!mqFile) return;
+
+  const sourceLang = document.getElementById('mq-source-lang').value;
+  const targetLang = document.getElementById('mq-target-lang').value;
+  const model      = document.getElementById('mq-model').value;
+
+  const btn  = document.getElementById('mq-translate-btn');
+  const prog = document.getElementById('mq-prog');
+  const bar  = document.getElementById('mq-prog-bar');
+  const txt  = document.getElementById('mq-prog-text');
+  const dlBtn = document.getElementById('mq-dl-btn');
+
+  btn.disabled = true;
+  dlBtn.style.display = 'none';
+  prog.classList.add('show');
+  bar.style.width = '5%';
+  txt.textContent = 'Unzipping package…';
+
+  try {
+    const buf = await mqFile.arrayBuffer();
+    const zip = await JSZip.loadAsync(buf);
+    const xliffPaths = Object.keys(zip.files).filter(p => /\.mqxliff$/i.test(p) && !zip.files[p].dir);
+    if (xliffPaths.length === 0) throw new Error('No .mqxliff files found inside the package');
+
+    txt.textContent = `Found ${xliffPaths.length} bilingual file${xliffPaths.length===1?'':'s'} — translating…`;
+    bar.style.width = '10%';
+
+    let totalSegs = 0;
+    for (let f = 0; f < xliffPaths.length; f++) {
+      const path = xliffPaths[f];
+      const xml = await zip.file(path).async('text');
+      const fileLabel = path.split('/').pop();
+      txt.textContent = `[${f+1}/${xliffPaths.length}] ${fileLabel} — extracting…`;
+
+      const result = await translateMqxliffXml(xml, sourceLang, targetLang, model, apiKey, (done, total) => {
+        const fileFrac = (f + done / total) / xliffPaths.length;
+        bar.style.width = (10 + Math.min(85, fileFrac * 85)) + '%';
+        txt.textContent = `[${f+1}/${xliffPaths.length}] ${fileLabel} — ${done}/${total} segments`;
+      });
+      totalSegs += result.count;
+      zip.file(path, result.xml);
+    }
+
+    txt.textContent = 'Packaging .mqback…';
+    bar.style.width = '96%';
+
+    // Rezip — memoQ accepts the same zip structure, just renamed to .mqback
+    const blob = await zip.generateAsync({
+      type: 'blob',
+      mimeType: 'application/octet-stream',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 6 },
+    });
+
+    mqTranslatedBlob = blob;
+    const baseName = mqFile.name.replace(/\.(mqout|zip)$/i, '');
+    const tag = targetLang === 'he' ? '_HE' : '_EN';
+    mqOutputName = `${baseName}${tag}.mqback`;
+
+    bar.style.width = '100%';
+    txt.textContent = `✅ Done — ${totalSegs} segments translated across ${xliffPaths.length} file${xliffPaths.length===1?'':'s'}`;
+    dlBtn.style.display = 'inline-block';
+    setTimeout(() => prog.classList.remove('show'), 2200);
+  } catch (e) {
+    txt.textContent = '❌ ' + e.message;
+    setTimeout(() => prog.classList.remove('show'), 5000);
+    console.error('[memoq-translator]', e);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function mqDownload() {
+  if (!mqTranslatedBlob) return;
+  const url = URL.createObjectURL(mqTranslatedBlob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = mqOutputName;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
 // ── ODT: like .docx but the OpenDocument namespace. Text content lives
