@@ -608,7 +608,7 @@
         <button class="toolmap-btn" onclick="scrollToTool('tool-doc-translator')">
           <span class="tm-label">🌐 Document Translator</span>
           <span class="tm-info" tabindex="0">i</span>
-          <span class="tm-tip"><span class="tm-tip-title">Document Translator (HE ↔ EN)</span>Drop any .docx / .pdf / .txt / .md / .csv / .html → GPT translates in either direction → download in the same format with all styling preserved. PDF input outputs an editable .docx (PDF visual cannot be cleanly round-tripped). Auto-detects source language. Uses gpt-5.4 by default, gpt-5.5 for tone-sensitive work.</span>
+          <span class="tm-tip"><span class="tm-tip-title">Document Translator (HE ↔ EN)</span>Drop .docx / .pdf / .rtf / .odt / .pptx / .xlsx / .txt / .md / .csv / .html → GPT translates in either direction → download in the same format with all styling preserved. PDF outputs an editable .docx. Auto-detects source language. Uses gpt-5.4 by default, gpt-5.5 for tone-sensitive work.</span>
         </button>
 
         <button class="toolmap-btn" onclick="scrollToTool('tool-he-en-perminute')">
@@ -1174,8 +1174,8 @@
           <div>
             <label style="font-size:.75rem;color:#94a3b8;display:block;margin-bottom:.4rem">① Drop or pick a file</label>
             <label style="display:flex;align-items:center;justify-content:center;gap:.6rem;padding:1.4rem 1rem;background:#0a0a14;border:2px dashed #312e81;border-radius:10px;cursor:pointer;color:#cbd5e1;font-size:.85rem" id="dt-drop">
-              <span>📂 Choose .docx, .pdf, .txt, .md, .csv, or .html</span>
-              <input type="file" id="dt-file" accept=".docx,.pdf,.txt,.md,.csv,.html,.htm" style="display:none" onchange="dtOnFile(this)"/>
+              <span>📂 Choose .docx, .pdf, .rtf, .odt, .pptx, .xlsx, .txt, .md, .csv, or .html</span>
+              <input type="file" id="dt-file" accept=".docx,.pdf,.rtf,.odt,.pptx,.xlsx,.txt,.md,.csv,.html,.htm" style="display:none" onchange="dtOnFile(this)"/>
             </label>
             <div id="dt-status" style="margin-top:.5rem;font-size:.78rem;color:#94a3b8;min-height:1.2rem"></div>
           </div>
@@ -1218,10 +1218,11 @@
 
         <div style="margin-top:.6rem;font-size:.72rem;color:#64748b;line-height:1.5">
           <strong style="color:#94a3b8">Output format per input:</strong>
-          <code style="background:#0a0a14;padding:0 .3rem;border-radius:3px;color:#a5b4fc">.docx → .docx</code> (full styling preserved) ·
-          <code style="background:#0a0a14;padding:0 .3rem;border-radius:3px;color:#a5b4fc">.pdf → .docx</code> (text + paragraphs extracted; PDF visual styling cannot be cleanly round-tripped, but Word can re-export to PDF in one click) ·
-          <code style="background:#0a0a14;padding:0 .3rem;border-radius:3px;color:#a5b4fc">.txt/.md/.csv/.html → same format</code>.
-          For heavily-formatted .docx with mid-sentence inline styling (e.g. a bold word in the middle of a paragraph), the translation is applied per <code style="background:#0a0a14;padding:0 .3rem;border-radius:3px;color:#a5b4fc">&lt;w:t&gt;</code> run independently — formatting survives, but split-sentence quality may dip.
+          <code style="background:#0a0a14;padding:0 .3rem;border-radius:3px;color:#a5b4fc">.docx / .odt / .pptx / .xlsx / .rtf / .txt / .md / .csv / .html → same format</code> with all styling preserved ·
+          <code style="background:#0a0a14;padding:0 .3rem;border-radius:3px;color:#a5b4fc">.pdf → .docx</code> (text + paragraphs extracted; PDF visual styling cannot be cleanly round-tripped, but Word can re-export to PDF in one click).
+          For heavily-formatted documents with mid-sentence inline styling (a bold word in the middle of a paragraph), translation is applied per text-run independently — formatting survives, but split-sentence quality may dip.
+          For .xlsx, only string cells are translated; numbers, dates, and formulas pass through untouched.
+          For .rtf, ASCII-source RTF (English) translates cleanly; Hebrew-source RTF using <code style="background:#0a0a14;padding:0 .3rem;border-radius:3px;color:#a5b4fc">\u####?</code> escapes is best converted to .docx first.
         </div>
       </div><!-- /doc translator card -->
 
@@ -8952,7 +8953,7 @@ function dtOnFile(input) {
   const file = input.files && input.files[0];
   if (!file) return;
   const ext = (file.name.split('.').pop() || '').toLowerCase();
-  if (!['docx','pdf','txt','md','csv','html','htm'].includes(ext)) {
+  if (!['docx','pdf','rtf','odt','pptx','xlsx','txt','md','csv','html','htm'].includes(ext)) {
     showAdminToast('❌ Unsupported file type: .' + ext);
     return;
   }
@@ -8992,6 +8993,14 @@ async function dtTranslate() {
       result = await dtTranslateDocx(dtFile, sourceLang, targetLang, model, apiKey, { bar, txt });
     } else if (ext === 'pdf') {
       result = await dtTranslatePdfToDocx(dtFile, sourceLang, targetLang, model, apiKey, { bar, txt });
+    } else if (ext === 'rtf') {
+      result = await dtTranslateRtf(dtFile, sourceLang, targetLang, model, apiKey, { bar, txt });
+    } else if (ext === 'odt') {
+      result = await dtTranslateOdt(dtFile, sourceLang, targetLang, model, apiKey, { bar, txt });
+    } else if (ext === 'pptx') {
+      result = await dtTranslatePptx(dtFile, sourceLang, targetLang, model, apiKey, { bar, txt });
+    } else if (ext === 'xlsx') {
+      result = await dtTranslateXlsx(dtFile, sourceLang, targetLang, model, apiKey, { bar, txt });
     } else {
       result = await dtTranslatePlain(dtFile, ext, sourceLang, targetLang, model, apiKey, { bar, txt });
     }
@@ -9114,6 +9123,314 @@ async function dtTranslateDocxAuxParts(zip, sourceLang, targetLang, model, apiKe
     }
     zip.file(path, xml);
   }
+}
+
+// ── ODT: like .docx but the OpenDocument namespace. Text content lives
+// as direct text children of <text:p>, <text:h>, <text:span>, etc. (no
+// dedicated leaf tag like docx's <w:t>), so we use DOMParser + a TEXT_NODE
+// walk instead of regex.
+async function dtTranslateOdt(file, sourceLang, targetLang, model, apiKey, ui) {
+  const buf = await file.arrayBuffer();
+  const zip = await JSZip.loadAsync(buf);
+  const entry = zip.file('content.xml');
+  if (!entry) throw new Error('Not a valid .odt (no content.xml inside)');
+  const xml = await entry.async('text');
+
+  const doc = new DOMParser().parseFromString(xml, 'application/xml');
+  const err = doc.querySelector('parsererror');
+  if (err) throw new Error('content.xml is not valid XML: ' + (err.textContent || '').slice(0, 200));
+
+  // Collect all non-empty TEXT_NODE descendants of text-bearing elements
+  const TEXT_NS = 'urn:oasis:names:tc:opendocument:xmlns:text:1.0';
+  const TEXT_TAGS = ['p', 'h', 'span', 'list-item', 'a'];
+  const seen = new Set();
+  const nodes = [];
+  for (const tag of TEXT_TAGS) {
+    const els = doc.getElementsByTagNameNS(TEXT_NS, tag);
+    for (let i = 0; i < els.length; i++) {
+      for (const child of els[i].childNodes) {
+        if (child.nodeType === 3 && child.nodeValue && child.nodeValue.trim().length > 0 && !seen.has(child)) {
+          seen.add(child);
+          nodes.push(child);
+        }
+      }
+    }
+  }
+  if (nodes.length === 0) throw new Error('No translatable text found in .odt');
+
+  ui.txt.textContent = `Translating ${nodes.length} text runs…`;
+  ui.bar.style.width = '15%';
+  const BATCH = 20;
+  for (let i = 0; i < nodes.length; i += BATCH) {
+    const batch = nodes.slice(i, i + BATCH);
+    const results = await dtTranslateBatch(batch.map(n => n.nodeValue), sourceLang, targetLang, model, apiKey);
+    for (let j = 0; j < batch.length; j++) batch[j].nodeValue = results[j] || batch[j].nodeValue;
+    ui.bar.style.width = (15 + Math.min(75, (i + BATCH) / nodes.length * 75)) + '%';
+    ui.txt.textContent = `Translating ${Math.min(i + BATCH, nodes.length)} / ${nodes.length}…`;
+  }
+
+  zip.file('content.xml', new XMLSerializer().serializeToString(doc));
+  const blob = await zip.generateAsync({
+    type: 'blob',
+    mimeType: 'application/vnd.oasis.opendocument.text',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 6 },
+  });
+  const baseName = file.name.replace(/\.odt$/i, '');
+  const tag = targetLang === 'he' ? '_HE' : '_EN';
+  return { blob, name: `${baseName}${tag}.odt`, count: nodes.length };
+}
+
+// ── PPTX: zip with one XML per slide. Text runs are <a:t>...</a:t>
+// (drawingml namespace). Includes slide layouts, masters, and notes so
+// nothing visible to the reader is left untranslated.
+async function dtTranslatePptx(file, sourceLang, targetLang, model, apiKey, ui) {
+  const buf = await file.arrayBuffer();
+  const zip = await JSZip.loadAsync(buf);
+  const xmlPaths = Object.keys(zip.files).filter(p =>
+    /^ppt\/(slides|notesSlides|slideLayouts|slideMasters)\/[^\/]+\.xml$/.test(p)
+  );
+  if (xmlPaths.length === 0) throw new Error('Not a valid .pptx (no slides found)');
+
+  // Phase 1: collect every <a:t>...</a:t> across all files
+  const allRuns = []; // {path, index, full, open, text, close}
+  const cache = new Map();
+  for (const path of xmlPaths) {
+    const content = await zip.file(path).async('text');
+    cache.set(path, content);
+    const re = /(<a:t[^>]*>)([^<]*)(<\/a:t>)/g;
+    let m;
+    while ((m = re.exec(content)) !== null) {
+      allRuns.push({ path, index: m.index, full: m[0], open: m[1], text: dtXmlUnescape(m[2]), close: m[3] });
+    }
+  }
+  const translatable = allRuns.filter(r => r.text.trim().length > 0);
+  if (translatable.length === 0) throw new Error('No translatable text found in .pptx');
+
+  ui.txt.textContent = `Translating ${translatable.length} text runs across ${xmlPaths.length} slide/layout files…`;
+  ui.bar.style.width = '15%';
+  const BATCH = 20;
+  const out = new Map(); // (path + '@' + index) → translation
+  for (let i = 0; i < translatable.length; i += BATCH) {
+    const batch = translatable.slice(i, i + BATCH);
+    const results = await dtTranslateBatch(batch.map(r => r.text), sourceLang, targetLang, model, apiKey);
+    for (let j = 0; j < batch.length; j++) out.set(batch[j].path + '@' + batch[j].index, results[j] || batch[j].text);
+    ui.bar.style.width = (15 + Math.min(75, (i + BATCH) / translatable.length * 75)) + '%';
+    ui.txt.textContent = `Translating ${Math.min(i + BATCH, translatable.length)} / ${translatable.length}…`;
+  }
+
+  // Phase 2: splice back per file (end → start to preserve indices)
+  for (const path of xmlPaths) {
+    let content = cache.get(path);
+    const runs = allRuns.filter(r => r.path === path).sort((a, b) => b.index - a.index);
+    for (const run of runs) {
+      const key = run.path + '@' + run.index;
+      if (!out.has(key)) continue;
+      const openTag = /xml:space=/.test(run.open) ? run.open : run.open.replace(/<a:t/, '<a:t xml:space="preserve"');
+      content = content.substring(0, run.index) + openTag + dtXmlEscape(out.get(key)) + run.close + content.substring(run.index + run.full.length);
+    }
+    zip.file(path, content);
+  }
+
+  const blob = await zip.generateAsync({
+    type: 'blob',
+    mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 6 },
+  });
+  const baseName = file.name.replace(/\.pptx$/i, '');
+  const tag = targetLang === 'he' ? '_HE' : '_EN';
+  return { blob, name: `${baseName}${tag}.pptx`, count: translatable.length };
+}
+
+// ── XLSX: nearly all visible cell strings live in xl/sharedStrings.xml
+// inside <si><t>...</t></si> (or inside <r><t>...</t></r> for rich text).
+// Numbers, dates, and formulas are NOT in shared strings and are left
+// untouched, which is exactly what we want.
+async function dtTranslateXlsx(file, sourceLang, targetLang, model, apiKey, ui) {
+  const buf = await file.arrayBuffer();
+  const zip = await JSZip.loadAsync(buf);
+  const sharedStringsFile = zip.file('xl/sharedStrings.xml');
+  if (!sharedStringsFile) throw new Error('Not a valid .xlsx, or all data is numeric (no strings to translate)');
+
+  let content = await sharedStringsFile.async('text');
+  const re = /(<t[^>]*>)([^<]*)(<\/t>)/g;
+  const runs = [];
+  let m;
+  while ((m = re.exec(content)) !== null) {
+    runs.push({ index: m.index, full: m[0], open: m[1], text: dtXmlUnescape(m[2]), close: m[3] });
+  }
+  // Skip whitespace-only, pure-numeric, and very short tokens that look like cell labels (A1, B2…)
+  const translatable = runs.filter(r => {
+    const t = r.text.trim();
+    if (t.length < 2) return false;
+    if (/^["']?[\d.,\-+%]+["']?$/.test(t)) return false; // pure numbers
+    return true;
+  });
+  if (translatable.length === 0) throw new Error('No translatable strings in .xlsx (all cells numeric?)');
+
+  ui.txt.textContent = `Translating ${translatable.length} unique strings…`;
+  ui.bar.style.width = '15%';
+  const BATCH = 30;
+  const out = new Map();
+  for (let i = 0; i < translatable.length; i += BATCH) {
+    const batch = translatable.slice(i, i + BATCH);
+    const results = await dtTranslateBatch(batch.map(r => r.text), sourceLang, targetLang, model, apiKey);
+    for (let j = 0; j < batch.length; j++) out.set(batch[j].index, results[j] || batch[j].text);
+    ui.bar.style.width = (15 + Math.min(75, (i + BATCH) / translatable.length * 75)) + '%';
+    ui.txt.textContent = `Translating ${Math.min(i + BATCH, translatable.length)} / ${translatable.length}…`;
+  }
+
+  // Splice back end → start
+  const ordered = runs.slice().sort((a, b) => b.index - a.index);
+  for (const r of ordered) {
+    if (!out.has(r.index)) continue;
+    const openTag = /xml:space=/.test(r.open) ? r.open : r.open.replace(/<t/, '<t xml:space="preserve"');
+    content = content.substring(0, r.index) + openTag + dtXmlEscape(out.get(r.index)) + r.close + content.substring(r.index + r.full.length);
+  }
+  zip.file('xl/sharedStrings.xml', content);
+
+  const blob = await zip.generateAsync({
+    type: 'blob',
+    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 6 },
+  });
+  const baseName = file.name.replace(/\.xlsx$/i, '');
+  const tag = targetLang === 'he' ? '_HE' : '_EN';
+  return { blob, name: `${baseName}${tag}.xlsx`, count: translatable.length };
+}
+
+// ── RTF: not XML — uses backslash control words and {…} groups. We
+// tokenize with a depth-tracking scanner that skips header/metadata
+// groups (fonttbl, colortbl, info, stylesheet, themedata, plus any
+// destination introduced by \*). Plain text runs in body groups are
+// collected, translated, and spliced back. Non-ASCII translation chars
+// are emitted as RTF Unicode escapes (\u####?) so the file stays
+// compatible with classic codepage-1252 readers.
+async function dtTranslateRtf(file, sourceLang, targetLang, model, apiKey, ui) {
+  const rtf = await file.text();
+  const META = new Set(['fonttbl','colortbl','stylesheet','info','generator',
+    'rsidtbl','listoverridetable','listtable','themedata','filetbl','revtbl',
+    'datastore','mailmerge','docvars','panose','latentstyles','xmlnstbl',
+    'pgptbl','protusertbl','operator','author','title','subject','keywords',
+    'doccomm','operator','company','manager']);
+
+  const runs = [];
+  let i = 0;
+  let depth = 0;
+  const skipStack = [];
+
+  while (i < rtf.length) {
+    const c = rtf[i];
+    if (c === '{') {
+      depth++;
+      // Look ahead for a metadata-group marker
+      let j = i + 1;
+      while (j < rtf.length && /\s/.test(rtf[j])) j++;
+      if (rtf[j] === '\\') {
+        if (rtf[j+1] === '*') {
+          skipStack.push(depth);
+        } else {
+          let k = j + 1;
+          while (k < rtf.length && /[a-zA-Z]/.test(rtf[k])) k++;
+          if (META.has(rtf.substring(j+1, k))) skipStack.push(depth);
+        }
+      }
+      i++;
+    } else if (c === '}') {
+      if (skipStack.length && skipStack[skipStack.length - 1] === depth) skipStack.pop();
+      depth--;
+      i++;
+    } else if (c === '\\') {
+      const next = rtf[i+1];
+      if (next === '\\' || next === '{' || next === '}') {
+        i += 2; // escaped literal — not translatable on its own
+      } else if (/[a-zA-Z]/.test(next)) {
+        // Control word: \name [-?\d+]? ' '?
+        let j = i + 1;
+        while (j < rtf.length && /[a-zA-Z]/.test(rtf[j])) j++;
+        const cw = rtf.substring(i+1, j);
+        if (rtf[j] === '-' || /\d/.test(rtf[j])) {
+          while (j < rtf.length && (rtf[j] === '-' || /\d/.test(rtf[j]))) j++;
+        }
+        if (rtf[j] === ' ') j++;
+        // \u Unicode escape: also consume the fallback char(s)
+        if (cw === 'u') {
+          if (rtf[j] === '\\' && rtf[j+1] === "'") j += 4;
+          else if (j < rtf.length) j += 1;
+        }
+        i = j;
+      } else {
+        i += 2; // control symbol
+      }
+    } else {
+      const start = i;
+      while (i < rtf.length && rtf[i] !== '\\' && rtf[i] !== '{' && rtf[i] !== '}') i++;
+      const text = rtf.substring(start, i);
+      // Translate only if outside metadata, has at least 2 visible chars, and
+      // contains at least one letter (Latin or Hebrew). Avoids picking up
+      // stray whitespace/punctuation between control words.
+      if (skipStack.length === 0 && text.trim().length >= 2 && /[a-zA-Z֐-׿]/.test(text)) {
+        runs.push({ start, end: i, text });
+      }
+    }
+  }
+
+  if (runs.length === 0) throw new Error('No translatable text found in .rtf — Hebrew-source RTFs using \\u####? escapes are best converted to .docx first.');
+
+  ui.txt.textContent = `Translating ${runs.length} text runs…`;
+  ui.bar.style.width = '15%';
+  const BATCH = 20;
+  const translations = [];
+  for (let i2 = 0; i2 < runs.length; i2 += BATCH) {
+    const batch = runs.slice(i2, i2 + BATCH);
+    const results = await dtTranslateBatch(batch.map(r => r.text), sourceLang, targetLang, model, apiKey);
+    translations.push(...results);
+    ui.bar.style.width = (15 + Math.min(75, (i2 + BATCH) / runs.length * 75)) + '%';
+    ui.txt.textContent = `Translating ${Math.min(i2 + BATCH, runs.length)} / ${runs.length}…`;
+  }
+
+  // Splice end → start so earlier positions stay valid
+  let result = rtf;
+  for (let idx = runs.length - 1; idx >= 0; idx--) {
+    const run = runs[idx];
+    const encoded = dtRtfEncode(translations[idx] || run.text);
+    result = result.substring(0, run.start) + encoded + result.substring(run.end);
+  }
+
+  const blob = new Blob([result], { type: 'application/rtf' });
+  const baseName = file.name.replace(/\.rtf$/i, '');
+  const tag = targetLang === 'he' ? '_HE' : '_EN';
+  return { blob, name: `${baseName}${tag}.rtf`, count: runs.length };
+}
+
+// Encode a string for RTF body text:
+//   - ASCII: passes through, with \ { } RTF-escaped
+//   - non-ASCII (Hebrew, etc.): emitted as \u####? Unicode escapes so
+//     classic codepage-1252 RTF readers still render correctly
+function dtRtfEncode(s) {
+  let out = '';
+  for (const ch of String(s)) {
+    const code = ch.codePointAt(0);
+    if (code < 128) {
+      if (ch === '\\') out += '\\\\';
+      else if (ch === '{') out += '\\{';
+      else if (ch === '}') out += '\\}';
+      else out += ch;
+    } else if (code < 32768) {
+      out += '\\u' + code + '?';
+    } else if (code < 65536) {
+      out += '\\u' + (code - 65536) + '?';   // RTF stores \u as signed int16
+    } else {
+      // Surrogate pair for codepoints > 0xFFFF
+      const offset = code - 0x10000;
+      const high = 0xD800 + (offset >> 10);
+      const low  = 0xDC00 + (offset & 0x3FF);
+      out += '\\u' + high + '?\\u' + (low - 65536) + '?';
+    }
+  }
+  return out;
 }
 
 // ── PDF: extract paragraphs (reuse the Document Proofreader's
