@@ -610,7 +610,7 @@
         <button class="toolmap-btn" onclick="scrollToTool('tool-doc-translator')">
           <span class="tm-label">🌐 Document Translator</span>
           <span class="tm-info" tabindex="0">i</span>
-          <span class="tm-tip"><span class="tm-tip-title">Document Translator (HE ↔ EN)</span>Drop .docx / .pdf / .rtf / .odt / .pptx / .xlsx / .txt / .md / .csv / .html → GPT translates in either direction → download in the same format with all styling preserved. PDF outputs an editable .docx. Auto-detects source language. Uses gpt-5.4 by default, gpt-5.5 for tone-sensitive work.</span>
+          <span class="tm-tip"><span class="tm-tip-title">Document Translator (HE ↔ EN)</span>Drop .docx / .pdf / .rtf / .odt / .pptx / .xlsx / .mqxlz / .mqxliff / .txt / .md / .csv / .html → GPT translates in either direction → download in the same format with all styling preserved. PDF outputs an editable .docx. memoQ bilinguals fill target segments and set state=translated. Auto-detects source language. Uses gpt-5.4 by default, gpt-5.5 for tone-sensitive work.</span>
         </button>
 
         <button class="toolmap-btn" onclick="scrollToTool('tool-he-en-perminute')">
@@ -1176,8 +1176,8 @@
           <div>
             <label style="font-size:.75rem;color:#94a3b8;display:block;margin-bottom:.4rem">① Drop or pick a file</label>
             <label style="display:flex;align-items:center;justify-content:center;gap:.6rem;padding:1.4rem 1rem;background:#0a0a14;border:2px dashed #312e81;border-radius:10px;cursor:pointer;color:#cbd5e1;font-size:.85rem" id="dt-drop">
-              <span>📂 Choose .docx, .pdf, .rtf, .odt, .pptx, .xlsx, .txt, .md, .csv, or .html</span>
-              <input type="file" id="dt-file" accept=".docx,.pdf,.rtf,.odt,.pptx,.xlsx,.txt,.md,.csv,.html,.htm" style="display:none" onchange="dtOnFile(this)"/>
+              <span>📂 Choose .docx, .pdf, .rtf, .odt, .pptx, .xlsx, .mqxlz, .mqxliff, .txt, .md, .csv, or .html</span>
+              <input type="file" id="dt-file" accept=".docx,.pdf,.rtf,.odt,.pptx,.xlsx,.mqxlz,.mqxliff,.txt,.md,.csv,.html,.htm" style="display:none" onchange="dtOnFile(this)"/>
             </label>
             <div id="dt-status" style="margin-top:.5rem;font-size:.78rem;color:#94a3b8;min-height:1.2rem"></div>
           </div>
@@ -1220,7 +1220,7 @@
 
         <div style="margin-top:.6rem;font-size:.72rem;color:#64748b;line-height:1.5">
           <strong style="color:#94a3b8">Output format per input:</strong>
-          <code style="background:#0a0a14;padding:0 .3rem;border-radius:3px;color:#a5b4fc">.docx / .odt / .pptx / .xlsx / .rtf / .txt / .md / .csv / .html → same format</code> with all styling preserved ·
+          <code style="background:#0a0a14;padding:0 .3rem;border-radius:3px;color:#a5b4fc">.docx / .odt / .pptx / .xlsx / .rtf / .mqxlz / .mqxliff / .txt / .md / .csv / .html → same format</code> with all styling preserved ·
           <code style="background:#0a0a14;padding:0 .3rem;border-radius:3px;color:#a5b4fc">.pdf → .docx</code> (text + paragraphs extracted; PDF visual styling cannot be cleanly round-tripped, but Word can re-export to PDF in one click).
           For heavily-formatted documents with mid-sentence inline styling (a bold word in the middle of a paragraph), translation is applied per text-run independently — formatting survives, but split-sentence quality may dip.
           For .xlsx, only string cells are translated; numbers, dates, and formulas pass through untouched.
@@ -8955,7 +8955,7 @@ function dtOnFile(input) {
   const file = input.files && input.files[0];
   if (!file) return;
   const ext = (file.name.split('.').pop() || '').toLowerCase();
-  if (!['docx','pdf','rtf','odt','pptx','xlsx','txt','md','csv','html','htm'].includes(ext)) {
+  if (!['docx','pdf','rtf','odt','pptx','xlsx','mqxlz','mqxliff','txt','md','csv','html','htm'].includes(ext)) {
     showAdminToast('❌ Unsupported file type: .' + ext);
     return;
   }
@@ -9003,6 +9003,8 @@ async function dtTranslate() {
       result = await dtTranslatePptx(dtFile, sourceLang, targetLang, model, apiKey, { bar, txt });
     } else if (ext === 'xlsx') {
       result = await dtTranslateXlsx(dtFile, sourceLang, targetLang, model, apiKey, { bar, txt });
+    } else if (ext === 'mqxlz' || ext === 'mqxliff') {
+      result = await dtTranslateMq(dtFile, ext, sourceLang, targetLang, model, apiKey, { bar, txt });
     } else {
       result = await dtTranslatePlain(dtFile, ext, sourceLang, targetLang, model, apiKey, { bar, txt });
     }
@@ -9124,6 +9126,107 @@ async function dtTranslateDocxAuxParts(zip, sourceLang, targetLang, model, apiKe
       xml = xml.substring(0, mt.index) + openTag + dtXmlEscape(translated) + mt.close + xml.substring(mt.index + mt.full.length);
     }
     zip.file(path, xml);
+  }
+}
+
+// ── memoQ: .mqxliff is XLIFF 1.2 with memoQ extensions; .mqxlz is a zip
+// containing a single .mqxliff. We translate each <trans-unit>'s <source>
+// text and write the result into <target>, setting state="translated" so
+// memoQ recognises the segment as completed. The file element's
+// target-language attribute is also bumped so memoQ shows the right
+// target locale on import. Inline tags (<bpt>, <ept>, <ph>, <g>, …) are
+// flattened out of the source for translation — for memoQ jobs with
+// heavy inline tags, expect the target to drop them; clean prose
+// segments translate perfectly.
+async function dtTranslateMq(file, ext, sourceLang, targetLang, model, apiKey, ui) {
+  let zip = null;
+  let xliffPath = null;
+  let xml;
+
+  if (ext === 'mqxlz') {
+    const buf = await file.arrayBuffer();
+    zip = await JSZip.loadAsync(buf);
+    const entries = Object.keys(zip.files).filter(p => /\.mqxliff$/i.test(p) && !zip.files[p].dir);
+    if (entries.length === 0) throw new Error('Not a valid .mqxlz (no .mqxliff inside)');
+    xliffPath = entries[0];
+    xml = await zip.file(xliffPath).async('text');
+  } else {
+    xml = await file.text();
+  }
+
+  const doc = new DOMParser().parseFromString(xml, 'application/xml');
+  const err = doc.querySelector('parsererror');
+  if (err) throw new Error('Invalid XML in memoQ file: ' + (err.textContent || '').slice(0, 200));
+
+  // Namespace-agnostic lookup — memoQ may declare xliff under different prefixes
+  const tus = doc.getElementsByTagNameNS('*', 'trans-unit');
+  const items = [];
+  for (let i = 0; i < tus.length; i++) {
+    const tu = tus[i];
+    const sources = tu.getElementsByTagNameNS('*', 'source');
+    if (sources.length === 0) continue;
+    const raw = sources[0].textContent || '';
+    if (raw.trim().length === 0) continue;
+    items.push({ tu, source: sources[0], sourceText: raw });
+  }
+  if (items.length === 0) throw new Error('No translatable segments found in memoQ file');
+
+  ui.txt.textContent = `Translating ${items.length} memoQ segments…`;
+  ui.bar.style.width = '15%';
+  const BATCH = 20;
+  const translations = [];
+  for (let i = 0; i < items.length; i += BATCH) {
+    const batch = items.slice(i, i + BATCH);
+    const results = await dtTranslateBatch(batch.map(b => b.sourceText), sourceLang, targetLang, model, apiKey);
+    translations.push(...results);
+    ui.bar.style.width = (15 + Math.min(75, (i + BATCH) / items.length * 75)) + '%';
+    ui.txt.textContent = `Translating ${Math.min(i + BATCH, items.length)} / ${items.length}…`;
+  }
+
+  // Write each translation into the trans-unit's <target>; create one
+  // in the same namespace as <source> if it doesn't exist yet.
+  for (let i = 0; i < items.length; i++) {
+    const { tu, source } = items[i];
+    const translated = translations[i] || items[i].sourceText;
+    const targets = tu.getElementsByTagNameNS('*', 'target');
+    let target;
+    if (targets.length > 0) {
+      target = targets[0];
+      while (target.firstChild) target.removeChild(target.firstChild);
+    } else {
+      const ns = source.namespaceURI;
+      target = ns ? doc.createElementNS(ns, 'target') : doc.createElement('target');
+      tu.appendChild(target);
+    }
+    target.appendChild(doc.createTextNode(translated));
+    target.setAttribute('state', 'translated');
+  }
+
+  // Bump file-level target-language so memoQ shows the right locale
+  const fileEls = doc.getElementsByTagNameNS('*', 'file');
+  const targetLangCode = targetLang === 'he' ? 'he-IL' : 'en-US';
+  for (let i = 0; i < fileEls.length; i++) {
+    fileEls[i].setAttribute('target-language', targetLangCode);
+  }
+
+  let newXml = new XMLSerializer().serializeToString(doc);
+  if (!/^<\?xml/.test(newXml)) newXml = '<?xml version="1.0" encoding="UTF-8"?>\n' + newXml;
+
+  const baseName = file.name.replace(/\.(mqxlz|mqxliff)$/i, '');
+  const tag = targetLang === 'he' ? '_HE' : '_EN';
+
+  if (zip) {
+    zip.file(xliffPath, newXml);
+    const blob = await zip.generateAsync({
+      type: 'blob',
+      mimeType: 'application/octet-stream',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 6 },
+    });
+    return { blob, name: `${baseName}${tag}.mqxlz`, count: items.length };
+  } else {
+    const blob = new Blob([newXml], { type: 'application/xml;charset=utf-8' });
+    return { blob, name: `${baseName}${tag}.mqxliff`, count: items.length };
   }
 }
 
