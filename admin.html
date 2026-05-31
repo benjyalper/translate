@@ -504,90 +504,6 @@
     <div class="last-updated" id="last-updated">Loading…</div>
   </div>
 
-  <!-- ── 🛠️ TOOL MAP — click to jump to a tool, hover ⓘ for workflow ── -->
-  <div class="toolmap">
-    <div class="toolmap-title">🛠️ Tool map · click to jump · hover the <span style="display:inline-flex;align-items:center;justify-content:center;width:.95rem;height:.95rem;border-radius:50%;background:#1f2937;color:#94a3b8;font-size:.6rem;font-style:italic">i</span> for what it does</div>
-    <div class="toolmap-grid">
-      <button class="toolmap-btn" onclick="scrollToTool('tool-audio-transcriber')">
-        <span class="tm-label">🎙️ Audio Transcriber</span>
-        <span class="tm-info" tabindex="0">i</span>
-        <span class="tm-tip"><span class="tm-tip-title">Audio Transcriber</span>Upload audio or video. Whisper produces a timestamped Hebrew/English transcript. Exports a .docx with timestamps included.</span>
-      </button>
-
-      <button class="toolmap-btn" onclick="scrollToTool('tool-audio-extractor')">
-        <span class="tm-label">🎬 Audio Extractor</span>
-        <span class="tm-info" tabindex="0">i</span>
-        <span class="tm-tip"><span class="tm-tip-title">Audio Extractor (MP4 → audio)</span>Strips the audio out of any video file and downloads it as WAV. Useful when you need to upload to ivrit.ai or another transcription service that doesn't accept video.</span>
-      </button>
-
-      <button class="toolmap-btn" onclick="scrollToTool('tool-trados-translator')">
-        <span class="tm-label">📦 Trados Auto-Translator</span>
-        <span class="tm-info" tabindex="0">i</span>
-        <span class="tm-tip"><span class="tm-tip-title">Trados SDLPPX Auto-Translator</span>Upload a .sdlppx project package → GPT translates every segment → download a .sdlrpx return package ready to send back. Choose quality tier per job.</span>
-      </button>
-
-      <button class="toolmap-btn" onclick="scrollToTool('tool-he-en-perminute')">
-        <span class="tm-label">🇮🇱→🇬🇧 HE→EN Per-Minute</span>
-        <span class="tm-info" tabindex="0">i</span>
-        <span class="tm-tip"><span class="tm-tip-title">Hebrew Text → English (per-minute formatted)</span>Paste a Hebrew transcript. GPT-5.4 translates and auto-segments into ~1-minute chunks, producing a VerboLabs-style deliverable.</span>
-      </button>
-
-      <button class="toolmap-btn" onclick="scrollToTool('tool-verbolabs')">
-        <span class="tm-label">📋 VerboLabs Template</span>
-        <span class="tm-info" tabindex="0">i</span>
-        <span class="tm-tip"><span class="tm-tip-title">VerboLabs Template Filler (ivrit.ai → English)</span>Paste an ivrit.ai Hebrew transcript with timestamps and speaker labels. GPT-5.4 translates and exports the exact VerboLabs 4-column template with OST &amp; Notes columns left blank to fill in.</span>
-      </button>
-
-      <button class="toolmap-btn" onclick="scrollToTool('glossary-manager')">
-        <span class="tm-label">📖 Glossary Manager</span>
-        <span class="tm-info" tabindex="0">i</span>
-        <span class="tm-tip"><span class="tm-tip-title">Glossary Manager</span>Save and reuse per-client term bases. Stored locally in your browser. Auto-loaded into the Trados translator so consistent terminology shows up across jobs.</span>
-      </button>
-
-      <button class="toolmap-btn" onclick="scrollToTool('tool-xbench')">
-        <span class="tm-label">🔧 XBench Revisor</span>
-        <span class="tm-info" tabindex="0">i</span>
-        <span class="tm-tip"><span class="tm-tip-title">XBench QA Report Revisor</span>Upload an XBench QA report (.xlsx) plus the matching SDLRPX. Auto-applies the corrections from the report. Download a revised package.</span>
-      </button>
-
-      <button class="toolmap-btn" onclick="scrollToTool('tool-translation-proofreader')">
-        <span class="tm-label">📑 Translation Proofreader</span>
-        <span class="tm-info" tabindex="0">i</span>
-        <span class="tm-tip"><span class="tm-tip-title">Translation Proofreader (Hebrew)</span>Upload .sdlppx with translated segments → GPT reviews each → preview issues by severity → approve fixes → download revised .sdlrpx with native Trados track changes.</span>
-      </button>
-
-      <button class="toolmap-btn" onclick="scrollToTool('tool-document-proofreader')">
-        <span class="tm-label">📄 Document Proofreader</span>
-        <span class="tm-info" tabindex="0">i</span>
-        <span class="tm-tip"><span class="tm-tip-title">Document Proofreader (Hebrew)</span>Upload a Hebrew .pdf or .docx → GPT reviews each paragraph → preview issues by severity → approve fixes → download .docx with native Word track changes (red strikethrough + blue insert).</span>
-      </button>
-
-      <button class="toolmap-btn" onclick="scrollToTool('tool-subtitle-translator')">
-        <span class="tm-label">🎞️ Subtitle Translator</span>
-        <span class="tm-info" tabindex="0">i</span>
-        <span class="tm-tip"><span class="tm-tip-title">Subtitle Translator (EN → HE)</span>Upload .srt or .vtt → GPT translates each cue to Hebrew while keeping every timecode and cue number byte-identical → download a translated subtitle file.</span>
-      </button>
-
-      <button class="toolmap-btn" onclick="scrollToTool('tool-subtitle-proofreader')">
-        <span class="tm-label">🔍 Subtitle Proofreader</span>
-        <span class="tm-info" tabindex="0">i</span>
-        <span class="tm-tip"><span class="tm-tip-title">Subtitle Proofreader (Hebrew)</span>Upload a Hebrew .srt/.vtt → GPT reviews each cue plus a technical pass flags reading-speed (CPS), line length, line count, and timing issues → approve fixes → export corrected subtitles with timecodes preserved.</span>
-      </button>
-
-      <button class="toolmap-btn" onclick="scrollToTool('tool-email-response')">
-        <span class="tm-label">✉️ Email Response</span>
-        <span class="tm-info" tabindex="0">i</span>
-        <span class="tm-tip"><span class="tm-tip-title">Email Response Generator</span>Paste an incoming email or job posting → GPT drafts a tailored reply in Benjy's voice. Pick style, length, model. Per-firm memory feeds context. Follow-up button on prior Them cards drafts gentle check-ins.</span>
-      </button>
-
-      <button class="toolmap-btn" onclick="scrollToTool('tool-firm-memory')">
-        <span class="tm-label">📁 Client / Firm Memory</span>
-        <span class="tm-info" tabindex="0">i</span>
-        <span class="tm-tip"><span class="tm-tip-title">Client / Firm Memory</span>Per-client correspondence history with a GPT-distilled running memory that informs future replies. Browse past exchanges. Use the 📨 Follow up button on any past message you replied to but never heard back on.</span>
-      </button>
-    </div>
-  </div>
-
   <div class="main">
     <div class="controls">
       <input type="text" class="search-input" id="search-input" placeholder="🔍  Search jobs, companies, keywords…" oninput="renderJobs()"/>
@@ -660,6 +576,91 @@
       <button class="ak-btn" onclick="promptApiKey()">Set Key</button>
       <button class="ak-btn" onclick="clearApiKey()" id="ak-clear" style="display:none">Clear</button>
     </div>
+
+    <!-- ── 🛠️ TOOL MAP — click to jump to a tool, hover ⓘ for workflow ── -->
+    <div class="toolmap">
+      <div class="toolmap-title">🛠️ Tool map · click to jump · hover the <span style="display:inline-flex;align-items:center;justify-content:center;width:.95rem;height:.95rem;border-radius:50%;background:#1f2937;color:#94a3b8;font-size:.6rem;font-style:italic">i</span> for what it does</div>
+      <div class="toolmap-grid">
+        <button class="toolmap-btn" onclick="scrollToTool('tool-audio-transcriber')">
+          <span class="tm-label">🎙️ Audio Transcriber</span>
+          <span class="tm-info" tabindex="0">i</span>
+          <span class="tm-tip"><span class="tm-tip-title">Audio Transcriber</span>Upload audio or video. Whisper produces a timestamped Hebrew/English transcript. Exports a .docx with timestamps included.</span>
+        </button>
+
+        <button class="toolmap-btn" onclick="scrollToTool('tool-audio-extractor')">
+          <span class="tm-label">🎬 Audio Extractor</span>
+          <span class="tm-info" tabindex="0">i</span>
+          <span class="tm-tip"><span class="tm-tip-title">Audio Extractor (MP4 → audio)</span>Strips the audio out of any video file and downloads it as WAV. Useful when you need to upload to ivrit.ai or another transcription service that doesn't accept video.</span>
+        </button>
+
+        <button class="toolmap-btn" onclick="scrollToTool('tool-trados-translator')">
+          <span class="tm-label">📦 Trados Auto-Translator</span>
+          <span class="tm-info" tabindex="0">i</span>
+          <span class="tm-tip"><span class="tm-tip-title">Trados SDLPPX Auto-Translator</span>Upload a .sdlppx project package → GPT translates every segment → download a .sdlrpx return package ready to send back. Choose quality tier per job.</span>
+        </button>
+
+        <button class="toolmap-btn" onclick="scrollToTool('tool-he-en-perminute')">
+          <span class="tm-label">🇮🇱→🇬🇧 HE→EN Per-Minute</span>
+          <span class="tm-info" tabindex="0">i</span>
+          <span class="tm-tip"><span class="tm-tip-title">Hebrew Text → English (per-minute formatted)</span>Paste a Hebrew transcript. GPT-5.4 translates and auto-segments into ~1-minute chunks, producing a VerboLabs-style deliverable.</span>
+        </button>
+
+        <button class="toolmap-btn" onclick="scrollToTool('tool-verbolabs')">
+          <span class="tm-label">📋 VerboLabs Template</span>
+          <span class="tm-info" tabindex="0">i</span>
+          <span class="tm-tip"><span class="tm-tip-title">VerboLabs Template Filler (ivrit.ai → English)</span>Paste an ivrit.ai Hebrew transcript with timestamps and speaker labels. GPT-5.4 translates and exports the exact VerboLabs 4-column template with OST &amp; Notes columns left blank to fill in.</span>
+        </button>
+
+        <button class="toolmap-btn" onclick="scrollToTool('glossary-manager')">
+          <span class="tm-label">📖 Glossary Manager</span>
+          <span class="tm-info" tabindex="0">i</span>
+          <span class="tm-tip"><span class="tm-tip-title">Glossary Manager</span>Save and reuse per-client term bases. Stored locally in your browser. Auto-loaded into the Trados translator so consistent terminology shows up across jobs.</span>
+        </button>
+
+        <button class="toolmap-btn" onclick="scrollToTool('tool-xbench')">
+          <span class="tm-label">🔧 XBench Revisor</span>
+          <span class="tm-info" tabindex="0">i</span>
+          <span class="tm-tip"><span class="tm-tip-title">XBench QA Report Revisor</span>Upload an XBench QA report (.xlsx) plus the matching SDLRPX. Auto-applies the corrections from the report. Download a revised package.</span>
+        </button>
+
+        <button class="toolmap-btn" onclick="scrollToTool('tool-translation-proofreader')">
+          <span class="tm-label">📑 Translation Proofreader</span>
+          <span class="tm-info" tabindex="0">i</span>
+          <span class="tm-tip"><span class="tm-tip-title">Translation Proofreader (Hebrew)</span>Upload .sdlppx with translated segments → GPT reviews each → preview issues by severity → approve fixes → download revised .sdlrpx with native Trados track changes.</span>
+        </button>
+
+        <button class="toolmap-btn" onclick="scrollToTool('tool-document-proofreader')">
+          <span class="tm-label">📄 Document Proofreader</span>
+          <span class="tm-info" tabindex="0">i</span>
+          <span class="tm-tip"><span class="tm-tip-title">Document Proofreader (Hebrew)</span>Upload a Hebrew .pdf or .docx → GPT reviews each paragraph → preview issues by severity → approve fixes → download .docx with native Word track changes (red strikethrough + blue insert).</span>
+        </button>
+
+        <button class="toolmap-btn" onclick="scrollToTool('tool-subtitle-translator')">
+          <span class="tm-label">🎞️ Subtitle Translator</span>
+          <span class="tm-info" tabindex="0">i</span>
+          <span class="tm-tip"><span class="tm-tip-title">Subtitle Translator (EN → HE)</span>Upload .srt or .vtt → GPT translates each cue to Hebrew while keeping every timecode and cue number byte-identical → download a translated subtitle file.</span>
+        </button>
+
+        <button class="toolmap-btn" onclick="scrollToTool('tool-subtitle-proofreader')">
+          <span class="tm-label">🔍 Subtitle Proofreader</span>
+          <span class="tm-info" tabindex="0">i</span>
+          <span class="tm-tip"><span class="tm-tip-title">Subtitle Proofreader (Hebrew)</span>Upload a Hebrew .srt/.vtt → GPT reviews each cue plus a technical pass flags reading-speed (CPS), line length, line count, and timing issues → approve fixes → export corrected subtitles with timecodes preserved.</span>
+        </button>
+
+        <button class="toolmap-btn" onclick="scrollToTool('tool-email-response')">
+          <span class="tm-label">✉️ Email Response</span>
+          <span class="tm-info" tabindex="0">i</span>
+          <span class="tm-tip"><span class="tm-tip-title">Email Response Generator</span>Paste an incoming email or job posting → GPT drafts a tailored reply in Benjy's voice. Pick style, length, model. Per-firm memory feeds context. Follow-up button on prior Them cards drafts gentle check-ins.</span>
+        </button>
+
+        <button class="toolmap-btn" onclick="scrollToTool('tool-firm-memory')">
+          <span class="tm-label">📁 Client / Firm Memory</span>
+          <span class="tm-info" tabindex="0">i</span>
+          <span class="tm-tip"><span class="tm-tip-title">Client / Firm Memory</span>Per-client correspondence history with a GPT-distilled running memory that informs future replies. Browse past exchanges. Use the 📨 Follow up button on any past message you replied to but never heard back on.</span>
+        </button>
+      </div>
+    </div>
+
     <div class="tools-grid">
 
       <!-- ── 🎙 TRANSCRIBER ─────────────────────────────────── -->
