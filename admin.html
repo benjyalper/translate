@@ -8954,6 +8954,91 @@ function erRecordExchange(firmId, incoming, reply) {
   erFirmsSave(store);
 }
 
+// ── Follow-up email drafting ─────────────────────────────────────
+// Called from a 📨 Follow up button on a Them card whose corresponding
+// "You" reply exists at themIdx+1. Composes a short, polite check-in
+// using the original client email + our prior reply as context, then
+// drops it into the existing er-output textarea so Copy / Download /
+// Open in Mail all work for free.
+async function erFollowUp(firmId, themIdx) {
+  const apiKey = getApiKey();
+  if (!apiKey) { showAdminToast('❌ Set your OpenAI key first'); return; }
+  const firm = erFirmFind(firmId);
+  if (!firm) { showAdminToast('❌ Client not found'); return; }
+  const them = firm.threads[themIdx];
+  const you  = firm.threads[themIdx + 1];
+  if (!them || them.direction !== 'in') { showAdminToast('❌ Not a client message'); return; }
+  if (!you  || you.direction  !== 'out') { showAdminToast('❌ No reply to follow up on'); return; }
+
+  const model  = document.getElementById('er-model')?.value  || 'gpt-5.4-mini';
+  const style  = document.getElementById('er-style')?.value  || 'warm-professional';
+  const out    = document.getElementById('er-output');
+  const wrap   = document.getElementById('er-out-wrap');
+  const err    = document.getElementById('er-error');
+  if (err) err.style.display = 'none';
+  if (wrap) wrap.style.display = 'block';
+  if (out) out.value = '⏳ Drafting follow-up…';
+  if (wrap) wrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+  const memBlock = firm.memory
+    ? `\n\nCLIENT MEMORY (use naturally, do not quote):\n${firm.memory}`
+    : '';
+
+  const sys =
+`You are drafting a polite follow-up email from Benjy Alper (freelance Hebrew–English translator) to a client who has not responded to his previous reply.
+
+Goal: a gentle check-in. Not pushy. Not desperate. Briefly remind the client of the topic and ask if they had a chance to review the previous reply.
+
+Style: ${style}.
+
+Rules:
+- Match the language of the original conversation (Hebrew if they wrote in Hebrew, English if English). If mixed, use the language Benjy used in his reply.
+- Keep the body to 4–7 lines. No filler, no over-explaining.
+- Do NOT apologize for following up.
+- Do NOT restate Benjy's previous reply in detail — just gently reference the topic ("I wanted to check in on the proposal I sent…" / "רציתי לבדוק האם הספקתם לעיין…").
+- Use a warm, human sign-off ("Best, Benjy" / "כל טוב, בנג'י").
+- Output EXACTLY this format:
+  Subject: <short subject>
+
+  <body>
+- No code fences, no preamble.${memBlock}`;
+
+  const user =
+`ORIGINAL EMAIL FROM CLIENT (${firm.name}, ${new Date(them.ts).toISOString().slice(0,10)}):
+${them.body}
+
+BENJY'S PREVIOUS REPLY (${new Date(you.ts).toISOString().slice(0,10)}):
+${you.body}
+
+The client has not responded since. Draft the follow-up.`;
+
+  try {
+    const r = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'system', content: sys }, { role: 'user', content: user }],
+        temperature: 0.55,
+        max_completion_tokens: 400,
+      }),
+    });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      throw new Error(j.error?.message || ('OpenAI ' + r.status));
+    }
+    const j = await r.json();
+    let reply = (j.choices?.[0]?.message?.content || '').trim();
+    reply = reply.replace(/^```[a-z]*\n?/i, '').replace(/```$/, '').trim();
+    if (out) out.value = reply;
+    showAdminToast('📨 Follow-up drafted');
+  } catch (e) {
+    if (out) out.value = '';
+    if (err) { err.style.display = 'block'; err.textContent = '❌ ' + e.message; }
+    showAdminToast('❌ ' + e.message);
+  }
+}
+
 // Regenerate the firm's distilled memory. Uses a cheap model by default
 // (mini) — quality is fine for fact extraction and keeps cost negligible.
 async function erDistillFirmMemory(firmId, apiKey, model) {
@@ -9041,15 +9126,28 @@ function erRenderFirms() {
   list.innerHTML = firms.map(f => {
     const exchanges = f.threads.length / 2 | 0;
     const last = f.updatedAt ? new Date(f.updatedAt).toISOString().slice(0,10) : '—';
+    // Map FIRST so each item keeps its original (chronological) index, then
+    // reverse for display (newest first). The Follow-up button needs the
+    // ORIGINAL index to locate the corresponding "You" reply in firm.threads.
     const threadsHTML = f.threads.length
-      ? f.threads.slice().reverse().map(t => {
+      ? f.threads.map((t, origIdx) => {
           const isIn = t.direction === 'in';
+          // Follow-up makes sense only on a Them card that we already replied
+          // to (next thread item is a You). The very last Them (no reply yet)
+          // doesn't get the button — that's a normal "needs reply" case.
+          const followable = isIn && f.threads[origIdx + 1] && f.threads[origIdx + 1].direction === 'out';
+          const followBtn = followable
+            ? `<button onclick="event.stopPropagation();erFollowUp('${f.id}',${origIdx})" title="Draft a check-in email since we never heard back" style="font-size:.62rem;padding:.18rem .55rem;border-radius:4px;background:#312e81;color:#a5b4fc;border:1px solid #4338ca;cursor:pointer;font-weight:600;white-space:nowrap">📨 Follow up</button>`
+            : '';
           return `
             <div style="padding:.4rem .55rem;border-radius:6px;background:${isIn ? 'rgba(252,211,77,0.05)' : 'rgba(52,211,153,0.05)'};border:1px solid #1f2937;margin-top:.35rem">
-              <div style="font-size:.62rem;text-transform:uppercase;letter-spacing:.04em;color:${isIn ? '#fcd34d' : '#34d399'};font-weight:700;margin-bottom:.2rem">${isIn ? '⬇ Them' : '⬆ You'} · ${new Date(t.ts).toISOString().slice(0,16).replace('T',' ')}</div>
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.2rem">
+                <div style="font-size:.62rem;text-transform:uppercase;letter-spacing:.04em;color:${isIn ? '#fcd34d' : '#34d399'};font-weight:700">${isIn ? '⬇ Them' : '⬆ You'} · ${new Date(t.ts).toISOString().slice(0,16).replace('T',' ')}</div>
+                ${followBtn}
+              </div>
               <div style="font-size:.74rem;color:#cbd5e1;white-space:pre-wrap;line-height:1.4;max-height:7rem;overflow-y:auto">${esc(t.body || '')}</div>
             </div>`;
-        }).join('')
+        }).reverse().join('')
       : '<div style="font-size:.72rem;color:#64748b;padding:.4rem 0">No correspondence recorded yet.</div>';
 
     return `
