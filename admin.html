@@ -401,6 +401,67 @@
       padding:.9rem 1.1rem;font-size:.85rem;
     }
     .trados-stats span{font-weight:700;color:#6ee7b7}
+
+    /* ── Tool Map (jump-to navigator under the stats bar) ──────── */
+    .toolmap{
+      max-width:1280px;margin:1rem auto 1.2rem auto;padding:.9rem 1.1rem;
+      background:rgba(79,70,229,.06);border:1px solid rgba(79,70,229,.18);
+      border-radius:10px;
+    }
+    .toolmap-title{
+      font-size:.74rem;color:#a5b4fc;font-weight:700;
+      margin-bottom:.55rem;text-transform:uppercase;letter-spacing:.05em;
+    }
+    .toolmap-grid{
+      display:grid;
+      grid-template-columns:repeat(auto-fill,minmax(190px,1fr));
+      gap:.5rem;
+    }
+    .toolmap-btn{
+      position:relative;
+      display:flex;align-items:center;gap:.4rem;
+      padding:.5rem .65rem;
+      background:#0f0f17;border:1px solid #1f2937;border-radius:7px;
+      color:#e2e8f0;font-size:.76rem;font-weight:600;
+      cursor:pointer;text-align:left;font-family:inherit;
+      transition:.15s;
+    }
+    .toolmap-btn:hover{background:#1e1b4b;border-color:#4338ca;color:#c7d2fe}
+    .toolmap-btn .tm-label{flex:1;line-height:1.2;min-width:0}
+    .toolmap-btn .tm-info{
+      display:inline-flex;align-items:center;justify-content:center;
+      width:1.1rem;height:1.1rem;border-radius:50%;flex-shrink:0;
+      background:#1f2937;color:#94a3b8;font-size:.66rem;font-weight:700;
+      cursor:help;font-style:italic;
+    }
+    .toolmap-btn .tm-info:hover{background:#4338ca;color:#fff}
+    .toolmap-btn .tm-tip{
+      position:absolute;
+      bottom:calc(100% + .35rem);
+      left:50%;transform:translateX(-50%);
+      width:280px;max-width:90vw;
+      background:#0a0a14;color:#e2e8f0;
+      border:1px solid #4338ca;border-radius:6px;
+      padding:.6rem .75rem;
+      font-size:.72rem;font-weight:400;line-height:1.45;
+      white-space:normal;text-align:left;
+      opacity:0;visibility:hidden;pointer-events:none;
+      transition:opacity .12s, visibility .12s;
+      z-index:50;
+      box-shadow:0 8px 24px rgba(0,0,0,.55);
+    }
+    .toolmap-btn .tm-tip-title{
+      display:block;font-weight:700;color:#a5b4fc;
+      margin-bottom:.3rem;font-size:.74rem;
+    }
+    .toolmap-btn .tm-info:hover + .tm-tip,
+    .toolmap-btn .tm-info:focus + .tm-tip{opacity:1;visibility:visible}
+    /* Highlight target tool briefly after jumping to it */
+    .tool-card.tm-flash{box-shadow:0 0 0 2px #4338ca,0 0 22px rgba(79,70,229,.4);transition:box-shadow .35s}
+    @media(max-width:560px){
+      .toolmap-grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+      .toolmap-btn .tm-tip{width:240px}
+    }
   </style>
 </head>
 <body>
@@ -441,6 +502,90 @@
     <div class="stat"><div class="stat-n" id="stat-sources">—</div><div class="stat-l">Sources</div></div>
     <div class="stat"><div class="stat-n" id="stat-new">—</div><div class="stat-l">From today</div></div>
     <div class="last-updated" id="last-updated">Loading…</div>
+  </div>
+
+  <!-- ── 🛠️ TOOL MAP — click to jump to a tool, hover ⓘ for workflow ── -->
+  <div class="toolmap">
+    <div class="toolmap-title">🛠️ Tool map · click to jump · hover the <span style="display:inline-flex;align-items:center;justify-content:center;width:.95rem;height:.95rem;border-radius:50%;background:#1f2937;color:#94a3b8;font-size:.6rem;font-style:italic">i</span> for what it does</div>
+    <div class="toolmap-grid">
+      <button class="toolmap-btn" onclick="scrollToTool('tool-audio-transcriber')">
+        <span class="tm-label">🎙️ Audio Transcriber</span>
+        <span class="tm-info" tabindex="0">i</span>
+        <span class="tm-tip"><span class="tm-tip-title">Audio Transcriber</span>Upload audio or video. Whisper produces a timestamped Hebrew/English transcript. Exports a .docx with timestamps included.</span>
+      </button>
+
+      <button class="toolmap-btn" onclick="scrollToTool('tool-audio-extractor')">
+        <span class="tm-label">🎬 Audio Extractor</span>
+        <span class="tm-info" tabindex="0">i</span>
+        <span class="tm-tip"><span class="tm-tip-title">Audio Extractor (MP4 → audio)</span>Strips the audio out of any video file and downloads it as WAV. Useful when you need to upload to ivrit.ai or another transcription service that doesn't accept video.</span>
+      </button>
+
+      <button class="toolmap-btn" onclick="scrollToTool('tool-trados-translator')">
+        <span class="tm-label">📦 Trados Auto-Translator</span>
+        <span class="tm-info" tabindex="0">i</span>
+        <span class="tm-tip"><span class="tm-tip-title">Trados SDLPPX Auto-Translator</span>Upload a .sdlppx project package → GPT translates every segment → download a .sdlrpx return package ready to send back. Choose quality tier per job.</span>
+      </button>
+
+      <button class="toolmap-btn" onclick="scrollToTool('tool-he-en-perminute')">
+        <span class="tm-label">🇮🇱→🇬🇧 HE→EN Per-Minute</span>
+        <span class="tm-info" tabindex="0">i</span>
+        <span class="tm-tip"><span class="tm-tip-title">Hebrew Text → English (per-minute formatted)</span>Paste a Hebrew transcript. GPT-5.4 translates and auto-segments into ~1-minute chunks, producing a VerboLabs-style deliverable.</span>
+      </button>
+
+      <button class="toolmap-btn" onclick="scrollToTool('tool-verbolabs')">
+        <span class="tm-label">📋 VerboLabs Template</span>
+        <span class="tm-info" tabindex="0">i</span>
+        <span class="tm-tip"><span class="tm-tip-title">VerboLabs Template Filler (ivrit.ai → English)</span>Paste an ivrit.ai Hebrew transcript with timestamps and speaker labels. GPT-5.4 translates and exports the exact VerboLabs 4-column template with OST &amp; Notes columns left blank to fill in.</span>
+      </button>
+
+      <button class="toolmap-btn" onclick="scrollToTool('glossary-manager')">
+        <span class="tm-label">📖 Glossary Manager</span>
+        <span class="tm-info" tabindex="0">i</span>
+        <span class="tm-tip"><span class="tm-tip-title">Glossary Manager</span>Save and reuse per-client term bases. Stored locally in your browser. Auto-loaded into the Trados translator so consistent terminology shows up across jobs.</span>
+      </button>
+
+      <button class="toolmap-btn" onclick="scrollToTool('tool-xbench')">
+        <span class="tm-label">🔧 XBench Revisor</span>
+        <span class="tm-info" tabindex="0">i</span>
+        <span class="tm-tip"><span class="tm-tip-title">XBench QA Report Revisor</span>Upload an XBench QA report (.xlsx) plus the matching SDLRPX. Auto-applies the corrections from the report. Download a revised package.</span>
+      </button>
+
+      <button class="toolmap-btn" onclick="scrollToTool('tool-translation-proofreader')">
+        <span class="tm-label">📑 Translation Proofreader</span>
+        <span class="tm-info" tabindex="0">i</span>
+        <span class="tm-tip"><span class="tm-tip-title">Translation Proofreader (Hebrew)</span>Upload .sdlppx with translated segments → GPT reviews each → preview issues by severity → approve fixes → download revised .sdlrpx with native Trados track changes.</span>
+      </button>
+
+      <button class="toolmap-btn" onclick="scrollToTool('tool-document-proofreader')">
+        <span class="tm-label">📄 Document Proofreader</span>
+        <span class="tm-info" tabindex="0">i</span>
+        <span class="tm-tip"><span class="tm-tip-title">Document Proofreader (Hebrew)</span>Upload a Hebrew .pdf or .docx → GPT reviews each paragraph → preview issues by severity → approve fixes → download .docx with native Word track changes (red strikethrough + blue insert).</span>
+      </button>
+
+      <button class="toolmap-btn" onclick="scrollToTool('tool-subtitle-translator')">
+        <span class="tm-label">🎞️ Subtitle Translator</span>
+        <span class="tm-info" tabindex="0">i</span>
+        <span class="tm-tip"><span class="tm-tip-title">Subtitle Translator (EN → HE)</span>Upload .srt or .vtt → GPT translates each cue to Hebrew while keeping every timecode and cue number byte-identical → download a translated subtitle file.</span>
+      </button>
+
+      <button class="toolmap-btn" onclick="scrollToTool('tool-subtitle-proofreader')">
+        <span class="tm-label">🔍 Subtitle Proofreader</span>
+        <span class="tm-info" tabindex="0">i</span>
+        <span class="tm-tip"><span class="tm-tip-title">Subtitle Proofreader (Hebrew)</span>Upload a Hebrew .srt/.vtt → GPT reviews each cue plus a technical pass flags reading-speed (CPS), line length, line count, and timing issues → approve fixes → export corrected subtitles with timecodes preserved.</span>
+      </button>
+
+      <button class="toolmap-btn" onclick="scrollToTool('tool-email-response')">
+        <span class="tm-label">✉️ Email Response</span>
+        <span class="tm-info" tabindex="0">i</span>
+        <span class="tm-tip"><span class="tm-tip-title">Email Response Generator</span>Paste an incoming email or job posting → GPT drafts a tailored reply in Benjy's voice. Pick style, length, model. Per-firm memory feeds context. Follow-up button on prior Them cards drafts gentle check-ins.</span>
+      </button>
+
+      <button class="toolmap-btn" onclick="scrollToTool('tool-firm-memory')">
+        <span class="tm-label">📁 Client / Firm Memory</span>
+        <span class="tm-info" tabindex="0">i</span>
+        <span class="tm-tip"><span class="tm-tip-title">Client / Firm Memory</span>Per-client correspondence history with a GPT-distilled running memory that informs future replies. Browse past exchanges. Use the 📨 Follow up button on any past message you replied to but never heard back on.</span>
+      </button>
+    </div>
   </div>
 
   <div class="main">
@@ -522,7 +667,7 @@
         <div class="tool-header">
           <div class="tool-icon">🎙</div>
           <div>
-            <div class="tool-title">Audio Transcriber</div>
+            <div class="tool-title" data-tool-anchor="tool-audio-transcriber">Audio Transcriber</div>
             <div class="tool-sub">Hebrew &amp; English · Whisper AI · exports .docx with timestamps</div>
           </div>
         </div>
@@ -741,7 +886,7 @@
         <div class="tool-header">
           <div class="tool-icon">🎵</div>
           <div>
-            <div class="tool-title">Audio Extractor (MP4 → audio)</div>
+            <div class="tool-title" data-tool-anchor="tool-audio-extractor">Audio Extractor (MP4 → audio)</div>
             <div class="tool-sub">Strip audio out of any video file → download as WAV · perfect for manual upload to ivrit.ai or other transcription services</div>
           </div>
         </div>
@@ -809,7 +954,7 @@
         <div class="tool-header">
           <div class="tool-icon">🔄</div>
           <div>
-            <div class="tool-title">Trados SDLPPX Auto-Translator</div>
+            <div class="tool-title" data-tool-anchor="tool-trados-translator">Trados SDLPPX Auto-Translator</div>
             <div class="tool-sub">Upload .sdlppx → GPT translates → download .sdlrpx return package · choose quality tier below</div>
           </div>
         </div>
@@ -977,7 +1122,7 @@
         <div class="tool-header">
           <div class="tool-icon">📝</div>
           <div>
-            <div class="tool-title">Hebrew Text → English (per-minute formatted)</div>
+            <div class="tool-title" data-tool-anchor="tool-he-en-perminute">Hebrew Text → English (per-minute formatted)</div>
             <div class="tool-sub">Paste a Hebrew transcript → GPT-5.4 translates + auto-segments into ~1-minute chunks → VerboLabs-style deliverable</div>
           </div>
         </div>
@@ -1082,7 +1227,7 @@
         <div class="tool-header">
           <div class="tool-icon">📋</div>
           <div>
-            <div class="tool-title">VerboLabs Template Filler (ivrit.ai → English)</div>
+            <div class="tool-title" data-tool-anchor="tool-verbolabs">VerboLabs Template Filler (ivrit.ai → English)</div>
             <div class="tool-sub">Paste an ivrit.ai Hebrew transcript (with <code style="background:#0a0a14;padding:0 4px;border-radius:3px;color:#a5b4fc">[mm:ss-mm:ss] דובר N:</code> format) → GPT-5.4 translates → exports the exact VerboLabs 4-column template with OST &amp; Notes columns left blank for you to fill</div>
           </div>
         </div>
@@ -1269,7 +1414,7 @@
         <div class="tool-header">
           <div class="tool-icon">📋</div>
           <div>
-            <div class="tool-title">XBench QA Report Revisor</div>
+            <div class="tool-title" data-tool-anchor="tool-xbench">XBench QA Report Revisor</div>
             <div class="tool-sub">Upload QA report (.xlsx) + SDLRPX → auto-apply corrections → download revised package</div>
           </div>
         </div>
@@ -1333,7 +1478,7 @@
         <div class="tool-header">
           <div class="tool-icon">📑</div>
           <div>
-            <div class="tool-title">Translation Proofreader (Hebrew)</div>
+            <div class="tool-title" data-tool-anchor="tool-translation-proofreader">Translation Proofreader (Hebrew)</div>
             <div class="tool-sub">Upload .sdlppx with translated segments → GPT-5.4 reviews each one → preview issues by severity → apply selected fixes → download revised .sdlrpx</div>
           </div>
         </div>
@@ -1450,7 +1595,7 @@
         <div class="tool-header">
           <div class="tool-icon">📄</div>
           <div>
-            <div class="tool-title">Document Proofreader (Hebrew)</div>
+            <div class="tool-title" data-tool-anchor="tool-document-proofreader">Document Proofreader (Hebrew)</div>
             <div class="tool-sub">Upload Hebrew .pdf or .docx → GPT-5.4 reviews each paragraph → preview issues by severity → approve fixes → download .docx with native Word track changes (red strikethrough + blue insert)</div>
           </div>
         </div>
@@ -1524,7 +1669,7 @@
         <div class="tool-header">
           <div class="tool-icon">🎬</div>
           <div>
-            <div class="tool-title">Subtitle Translator (EN → HE)</div>
+            <div class="tool-title" data-tool-anchor="tool-subtitle-translator">Subtitle Translator (EN → HE)</div>
             <div class="tool-sub">Upload .srt or .vtt → GPT translates each cue to Hebrew while keeping every timecode and cue number byte-identical → download a translated .srt / .vtt</div>
           </div>
         </div>
@@ -1579,7 +1724,7 @@
         <div class="tool-header">
           <div class="tool-icon">🔍</div>
           <div>
-            <div class="tool-title">Subtitle Proofreader (Hebrew)</div>
+            <div class="tool-title" data-tool-anchor="tool-subtitle-proofreader">Subtitle Proofreader (Hebrew)</div>
             <div class="tool-sub">Upload a Hebrew .srt/.vtt → GPT reviews each cue + a technical QA pass flags reading-speed (CPS), line length, line count &amp; timing issues → approve fixes → export corrected SRT/VTT (timecodes preserved). Add the English source for a bilingual accuracy check.</div>
           </div>
         </div>
@@ -1667,7 +1812,7 @@
         <div class="tool-header">
           <div class="tool-icon">✉️</div>
           <div>
-            <div class="tool-title">Email Response Generator</div>
+            <div class="tool-title" data-tool-anchor="tool-email-response">Email Response Generator</div>
             <div class="tool-sub">Paste a job posting / client email → drafts a tailored reply in Benjy's voice · gpt-5.4-nano default (~$0.0002/email)</div>
           </div>
         </div>
@@ -1771,7 +1916,7 @@
         <div class="tool-header">
           <div class="tool-icon">📁</div>
           <div>
-            <div class="tool-title">Client / Firm Memory</div>
+            <div class="tool-title" data-tool-anchor="tool-firm-memory">Client / Firm Memory</div>
             <div class="tool-sub">Correspondence history per agency · a GPT-distilled running memory informs future replies · syncs across devices when sync is connected</div>
           </div>
         </div>
@@ -2029,6 +2174,22 @@ const TOOLS_API = (
   location.hostname === 'localhost' ||
   location.hostname === '127.0.0.1'
 ) ? 'http://localhost:3007' : '';
+
+// Tool map: smooth-scroll to a tool card and briefly highlight it.
+// Targets can be reached either by an id on the .tool-card itself
+// (glossary-manager has one historically) OR by a data-tool-anchor
+// attribute on the inner .tool-title — we walk up to find the card.
+function scrollToTool(id) {
+  let el = document.getElementById(id);
+  if (!el) {
+    const anchor = document.querySelector(`[data-tool-anchor="${id}"]`);
+    if (anchor) el = anchor.closest('.tool-card');
+  }
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  el.classList.add('tm-flash');
+  setTimeout(() => el.classList.remove('tm-flash'), 1400);
+}
 
 // Calls /api/scrape → runs scraper.js + GPT-4o AI discovery.
 // Server returns the full jobs array so we update the grid directly
