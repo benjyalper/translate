@@ -649,6 +649,12 @@
           <span class="tm-tip"><span class="tm-tip-title">Translation Proofreader (Hebrew)</span>Upload .sdlppx with translated segments → GPT reviews each → preview issues by severity → approve fixes → download revised .sdlrpx with native Trados track changes.</span>
         </button>
 
+        <button class="toolmap-btn" onclick="scrollToTool('tool-memoq-proofreader')">
+          <span class="tm-label">🟣 memoQ Proofreader</span>
+          <span class="tm-info" tabindex="0">i</span>
+          <span class="tm-tip"><span class="tm-tip-title">memoQ Proofreader (auto-fix)</span>Drop a translated .mqxlz / .mqxliff → GPT reviews every filled &lt;target&gt; against its source → auto-applies clear fixes → download corrected file. Lighter than the SDL proofreader (no per-segment approve/reject UI yet).</span>
+        </button>
+
         <button class="toolmap-btn" onclick="scrollToTool('tool-document-proofreader')">
           <span class="tm-label">📄 Document Proofreader</span>
           <span class="tm-info" tabindex="0">i</span>
@@ -1768,6 +1774,62 @@
         <!-- Error -->
         <div id="pr-error" style="display:none;padding:.7rem 1rem;background:#1a0000;border:1px solid #7f1d1d;border-radius:8px;font-size:.82rem;color:#fca5a5;margin-top:.6rem"></div>
       </div><!-- /proofreader card -->
+
+      <!-- ── 🟣 memoQ PROOFREADER (.mqxlz / .mqxliff auto-fix) ──── -->
+      <div class="tool-card" style="grid-column:1/-1">
+        <div class="tool-header">
+          <div class="tool-icon">🟣</div>
+          <div>
+            <div class="tool-title" data-tool-anchor="tool-memoq-proofreader">memoQ Proofreader (auto-fix)</div>
+            <div class="tool-sub">Drop a translated .mqxlz / .mqxliff → GPT reviews every filled <code style="background:#0a0a14;padding:0 .3rem;border-radius:3px;color:#a5b4fc">&lt;target&gt;</code> against its source → auto-applies clear fixes → download the corrected file. Lighter than the SDL proofreader above (no per-segment approve/reject UI yet).</div>
+          </div>
+        </div>
+        <div class="tool-divider"></div>
+
+        <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:1rem;margin-bottom:.8rem">
+          <div>
+            <label style="font-size:.75rem;color:#94a3b8;display:block;margin-bottom:.4rem">① Drop or pick the .mqxlz / .mqxliff</label>
+            <label style="display:flex;align-items:center;justify-content:center;gap:.6rem;padding:1.4rem 1rem;background:#0a0a14;border:2px dashed #6b21a8;border-radius:10px;cursor:pointer;color:#cbd5e1;font-size:.85rem">
+              <span>📄 Choose .mqxlz or .mqxliff</span>
+              <input type="file" id="mqp-file" accept=".mqxlz,.mqxliff" style="display:none" onchange="mqpOnFile(this)"/>
+            </label>
+            <div id="mqp-status" style="margin-top:.5rem;font-size:.78rem;color:#94a3b8;min-height:1.2rem"></div>
+          </div>
+          <div>
+            <label style="font-size:.75rem;color:#94a3b8;display:block;margin-bottom:.4rem">② Target language &amp; model</label>
+            <div style="display:flex;flex-direction:column;gap:.5rem">
+              <label style="font-size:.78rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem">
+                <span style="min-width:100px">Target lang:</span>
+                <select id="mqp-target-lang" style="flex:1;padding:.5rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.8rem">
+                  <option value="he">Hebrew</option>
+                  <option value="en">English</option>
+                </select>
+              </label>
+              <label style="font-size:.78rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem">
+                <span style="min-width:100px">Model:</span>
+                <select id="mqp-model" style="flex:1;padding:.5rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.8rem">
+                  <option value="gpt-5.4">gpt-5.4 (default)</option>
+                  <option value="gpt-5.5">gpt-5.5 (top quality)</option>
+                </select>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <button class="tbtn gold" id="mqp-run-btn" onclick="mqpProofread()" disabled>🔍 Proofread</button>
+        <button class="tbtn" id="mqp-dl-btn" onclick="mqpDownload()" style="display:none;width:auto;padding:.65rem 1.3rem;font-size:.82rem;background:#1e1b4b;color:#a5b4fc;margin-left:.5rem">⬇ Download Corrected File</button>
+
+        <div class="tprog" id="mqp-prog">
+          <div class="tprog-text" id="mqp-prog-text">Proofreading…</div>
+          <div class="tprog-bar-outer"><div class="tprog-bar-inner" id="mqp-prog-bar"></div></div>
+        </div>
+
+        <div id="mqp-summary" style="display:none;margin-top:.7rem;padding:.65rem .85rem;background:rgba(168,85,247,.08);border:1px solid rgba(168,85,247,.3);border-radius:8px;font-size:.78rem;color:#cbd5e1;line-height:1.55"></div>
+
+        <div style="margin-top:.6rem;font-size:.72rem;color:#64748b;line-height:1.5">
+          Each filled target is sent to the model with its source for review. The model returns either "no fix needed" or a corrected target. Corrections are <strong>silently applied</strong> — no per-segment approve/reject yet. If you need that UI (with severity filters + track changes in memoQ format), say the word and I'll port it from the SDL Translation Proofreader above.
+        </div>
+      </div><!-- /memoq proofreader card -->
 
       <!-- ── 📄 DOCUMENT PROOFREADER (PDF / DOCX → Word) ───────── -->
       <div class="tool-card" style="grid-column:1/-1">
@@ -9412,6 +9474,224 @@ function mqDownload() {
   a.download = mqOutputName;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  🟣 memoQ PROOFREADER — reviews each filled <target> against its
+//  source via GPT and silently applies clear fixes. Lighter than the
+//  SDL Translation Proofreader (no per-segment approve/reject UI yet).
+// ═══════════════════════════════════════════════════════════════
+let mqpFile = null;
+let mqpResultBlob = null;
+let mqpResultName = '';
+
+function mqpOnFile(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  if (!['mqxlz','mqxliff'].includes(ext)) {
+    showAdminToast('❌ Pick a .mqxlz or .mqxliff file');
+    return;
+  }
+  mqpFile = file;
+  mqpResultBlob = null;
+  document.getElementById('mqp-status').textContent = `📄 ${file.name} · ${(file.size/1024).toFixed(1)} KB`;
+  document.getElementById('mqp-run-btn').disabled = false;
+  document.getElementById('mqp-dl-btn').style.display = 'none';
+  document.getElementById('mqp-summary').style.display = 'none';
+}
+
+async function mqpProofread() {
+  const apiKey = getApiKey();
+  if (!apiKey) { showAdminToast('❌ Set your OpenAI key first'); return; }
+  if (!mqpFile) return;
+
+  const targetLang = document.getElementById('mqp-target-lang').value;
+  const model      = document.getElementById('mqp-model').value;
+  const ext = (mqpFile.name.split('.').pop() || '').toLowerCase();
+
+  const btn  = document.getElementById('mqp-run-btn');
+  const prog = document.getElementById('mqp-prog');
+  const bar  = document.getElementById('mqp-prog-bar');
+  const txt  = document.getElementById('mqp-prog-text');
+  const dlBtn = document.getElementById('mqp-dl-btn');
+  const sum  = document.getElementById('mqp-summary');
+
+  btn.disabled = true;
+  dlBtn.style.display = 'none';
+  sum.style.display = 'none';
+  prog.classList.add('show');
+  bar.style.width = '5%';
+  txt.textContent = 'Reading file…';
+
+  try {
+    let zip = null;
+    let xliffPath = null;
+    let xml;
+
+    if (ext === 'mqxlz') {
+      const buf = await mqpFile.arrayBuffer();
+      zip = await JSZip.loadAsync(buf);
+      const entries = Object.keys(zip.files).filter(p => /\.mqxliff$/i.test(p) && !zip.files[p].dir);
+      if (entries.length === 0) throw new Error('Not a valid .mqxlz (no .mqxliff inside)');
+      xliffPath = entries[0];
+      xml = await zip.file(xliffPath).async('text');
+    } else {
+      xml = await mqpFile.text();
+    }
+
+    const doc = new DOMParser().parseFromString(xml, 'application/xml');
+    const err = doc.querySelector('parsererror');
+    if (err) throw new Error('Invalid XML in memoQ file: ' + (err.textContent || '').slice(0, 200));
+
+    // Collect trans-units that have BOTH a non-empty source and a non-empty
+    // target. Empty targets mean the segment hasn't been translated yet —
+    // proofreading is meaningless there.
+    const tus = doc.getElementsByTagNameNS('*', 'trans-unit');
+    const items = [];
+    for (let i = 0; i < tus.length; i++) {
+      const tu = tus[i];
+      const sources = tu.getElementsByTagNameNS('*', 'source');
+      const targets = tu.getElementsByTagNameNS('*', 'target');
+      if (sources.length === 0 || targets.length === 0) continue;
+      const srcText = (sources[0].textContent || '').trim();
+      const tgtText = (targets[0].textContent || '').trim();
+      if (!srcText || !tgtText) continue;
+      items.push({ tu, target: targets[0], source: srcText, originalTarget: tgtText });
+    }
+    if (items.length === 0) throw new Error('No filled target segments found to proofread');
+
+    txt.textContent = `Reviewing ${items.length} segments…`;
+    bar.style.width = '15%';
+
+    const BATCH = 10;
+    let fixed = 0;
+    const fixesLog = [];
+    for (let i = 0; i < items.length; i += BATCH) {
+      const batch = items.slice(i, i + BATCH);
+      const results = await mqpReviewBatch(
+        batch.map(b => ({ source: b.source, target: b.originalTarget })),
+        targetLang, model, apiKey
+      );
+      for (let j = 0; j < batch.length; j++) {
+        const r = results[j];
+        if (r && r.needsFix && r.corrected && r.corrected !== batch[j].originalTarget) {
+          const target = batch[j].target;
+          while (target.firstChild) target.removeChild(target.firstChild);
+          target.appendChild(doc.createTextNode(r.corrected));
+          target.setAttribute('state', 'translated');
+          fixed++;
+          if (fixesLog.length < 6) {
+            fixesLog.push({ from: batch[j].originalTarget.slice(0, 60), to: r.corrected.slice(0, 60), reason: (r.reason || '').slice(0, 80) });
+          }
+        }
+      }
+      bar.style.width = (15 + Math.min(80, (i + BATCH) / items.length * 80)) + '%';
+      txt.textContent = `Reviewed ${Math.min(i + BATCH, items.length)} / ${items.length} · ${fixed} fix${fixed===1?'':'es'} so far`;
+    }
+
+    let newXml = new XMLSerializer().serializeToString(doc);
+    if (!/^<\?xml/.test(newXml)) newXml = '<?xml version="1.0" encoding="UTF-8"?>\n' + newXml;
+
+    const baseName = mqpFile.name.replace(/\.(mqxlz|mqxliff)$/i, '');
+    if (zip) {
+      zip.file(xliffPath, newXml);
+      mqpResultBlob = await zip.generateAsync({
+        type: 'blob',
+        mimeType: 'application/octet-stream',
+        compression: 'DEFLATE',
+        compressionOptions: { level: 6 },
+      });
+      mqpResultName = `${baseName}_PROOFREAD.mqxlz`;
+    } else {
+      mqpResultBlob = new Blob([newXml], { type: 'application/xml;charset=utf-8' });
+      mqpResultName = `${baseName}_PROOFREAD.mqxliff`;
+    }
+
+    bar.style.width = '100%';
+    txt.textContent = `✅ Done — ${fixed} of ${items.length} segments updated`;
+    dlBtn.style.display = 'inline-block';
+
+    if (fixed > 0) {
+      const preview = fixesLog.map(f => `<div style="border-left:2px solid #a855f7;padding-left:.5rem;margin-top:.4rem"><span style="color:#fca5a5;text-decoration:line-through">${esc(f.from)}</span> <span style="color:#64748b">→</span> <span style="color:#86efac">${esc(f.to)}</span>${f.reason ? `<div style="font-size:.7rem;color:#94a3b8;margin-top:.15rem">${esc(f.reason)}</div>` : ''}</div>`).join('');
+      sum.innerHTML = `<strong style="color:#c4b5fd">${fixed} segment${fixed===1?'':'s'} updated</strong> out of ${items.length} reviewed. First few changes:${preview}${fixed > fixesLog.length ? `<div style="margin-top:.4rem;color:#94a3b8;font-size:.72rem">+ ${fixed - fixesLog.length} more — open the file in memoQ to see all</div>` : ''}`;
+      sum.style.display = 'block';
+    } else {
+      sum.textContent = `✨ All ${items.length} segments looked good — no fixes applied.`;
+      sum.style.display = 'block';
+    }
+    setTimeout(() => prog.classList.remove('show'), 2200);
+  } catch (e) {
+    txt.textContent = '❌ ' + e.message;
+    setTimeout(() => prog.classList.remove('show'), 5000);
+    console.error('[memoq-proofreader]', e);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function mqpDownload() {
+  if (!mqpResultBlob) return;
+  const url = URL.createObjectURL(mqpResultBlob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = mqpResultName;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+// Send N source/target pairs to GPT, get back N {needsFix, corrected, reason}
+// objects in the same order. Conservative prompt — only flag clear errors,
+// not stylistic preferences.
+async function mqpReviewBatch(pairs, targetLang, model, apiKey) {
+  if (pairs.length === 0) return [];
+  const tgtLabel = targetLang === 'he' ? 'Hebrew' : 'English';
+  const sys = `You are a senior ${tgtLabel} translation proofreader.
+
+TASK
+For each (source, target) pair, decide whether the target translation has a clear error and needs a fix.
+
+RULES
+- Be conservative. Only flag CLEAR errors: spelling, grammar, syntax, mistranslation, wrong register, wrong terminology.
+- Do NOT flag stylistic preferences (a different word choice that's also valid is not an error).
+- If the target is acceptable, set needsFix=false and corrected to the unchanged target.
+- If you fix it, keep the corrected version's length, tone, and inline punctuation similar to the original target.
+- Match the input's whitespace exactly.
+
+OUTPUT
+JSON only, with EXACTLY ${pairs.length} items in the SAME ORDER:
+{ "items": [
+  { "needsFix": boolean, "corrected": "...", "reason": "short reason (only when needsFix is true)" },
+  ...
+] }`;
+
+  const user = 'Pairs to review:\n' + pairs.map((p, i) =>
+    `[${i + 1}]\nSOURCE: ${p.source}\nTARGET: ${p.target}`
+  ).join('\n\n');
+
+  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      response_format: { type: 'json_object' },
+      messages: [{ role: 'system', content: sys }, { role: 'user', content: user }],
+      max_completion_tokens: Math.max(1200, pairs.reduce((s, p) => s + (p.source.length + p.target.length), 0) * 3),
+    }),
+  });
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    throw new Error(j.error?.message || ('OpenAI ' + r.status));
+  }
+  const j = await r.json();
+  let raw = j.choices?.[0]?.message?.content || '{}';
+  raw = raw.replace(/^```[a-z]*\n?/i, '').replace(/```$/, '').trim();
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch { throw new Error('Model returned invalid JSON for a proofreading batch'); }
+  const arr = Array.isArray(parsed.items) ? parsed.items : [];
+  // Pad with safe defaults if model returned fewer
+  while (arr.length < pairs.length) arr.push({ needsFix: false, corrected: pairs[arr.length].target });
+  return arr.slice(0, pairs.length);
 }
 
 // ── ODT: like .docx but the OpenDocument namespace. Text content lives
