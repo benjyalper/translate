@@ -593,6 +593,12 @@
           <span class="tm-tip"><span class="tm-tip-title">Audio Extractor (MP4 → audio)</span>Strips the audio out of any video file and downloads it as WAV. Useful when you need to upload to ivrit.ai or another transcription service that doesn't accept video.</span>
         </button>
 
+        <button class="toolmap-btn" onclick="scrollToTool('tool-voice-cloner')">
+          <span class="tm-label">🎤 Voice Cloner</span>
+          <span class="tm-info" tabindex="0">i</span>
+          <span class="tm-tip"><span class="tm-tip-title">Hebrew Voice Cloner (TTS)</span>Paste Hebrew → synthesize speech via pluggable TTS providers (ElevenLabs / OpenAI / mock). Runs as a separate app on port 3018. Click the card's Launch button to open it in a new tab.</span>
+        </button>
+
         <button class="toolmap-btn" onclick="scrollToTool('tool-trados-translator')">
           <span class="tm-label">📦 Trados Auto-Translator</span>
           <span class="tm-info" tabindex="0">i</span>
@@ -949,6 +955,29 @@
         <!-- Error -->
         <div id="ax-error" style="display:none;padding:.7rem 1rem;background:#1a0000;border:1px solid #7f1d1d;border-radius:8px;font-size:.82rem;color:#fca5a5;margin-top:.6rem"></div>
       </div><!-- /audio extractor card -->
+
+      <!-- ── 🎤 HEBREW VOICE CLONER (external app launcher) ─── -->
+      <div class="tool-card" style="grid-column:1/-1">
+        <div class="tool-header">
+          <div class="tool-icon">🎤</div>
+          <div>
+            <div class="tool-title" data-tool-anchor="tool-voice-cloner">Hebrew Voice Cloner (TTS)</div>
+            <div class="tool-sub">Paste Hebrew → preprocess for pronunciation → synthesize speech via pluggable TTS providers (ElevenLabs / OpenAI / mock) · grows a correction dictionary over time</div>
+          </div>
+        </div>
+        <div class="tool-divider"></div>
+
+        <p style="font-size:.82rem;color:#cbd5e1;line-height:1.55;margin:0 0 .7rem 0">
+          The Voice Cloner runs as its own standalone app on port <strong style="color:#a5b4fc">3018</strong>, with its own SQLite store for voice profiles, training samples, and the pronunciation correction dictionary. It opens in a new browser tab so you can leave the admin page open at the same time.
+        </p>
+
+        <p style="font-size:.78rem;color:#94a3b8;line-height:1.5;margin:0 0 .9rem 0">
+          Make sure the local server is running first: <code style="background:#0a0a14;padding:.12rem .4rem;border-radius:3px;color:#a5b4fc;font-size:.78rem">cd hebrew-voice-tts &amp;&amp; npm start</code>
+        </p>
+
+        <button class="tbtn gold" onclick="hvcLaunch()" style="width:auto;padding:.65rem 1.3rem;font-size:.82rem">🚀 Launch Voice Cloner</button>
+        <span id="hvc-status" style="display:none;margin-left:.8rem;font-size:.78rem"></span>
+      </div><!-- /voice cloner card -->
 
       <!-- ── 🔄 TRADOS ────────────────────────────────────── -->
       <div class="tool-card">
@@ -2175,6 +2204,27 @@ const TOOLS_API = (
   location.hostname === 'localhost' ||
   location.hostname === '127.0.0.1'
 ) ? 'http://localhost:3007' : '';
+
+// Hebrew Voice Cloner launcher — opens the standalone app (port 3018)
+// in a new tab. When the admin is served from Railway (HTTPS) we can't
+// fetch-probe http://localhost:3018 (mixed-content blocked), so we just
+// open the tab and let the browser show its own "can't reach" page if
+// the server isn't running.
+function hvcLaunch() {
+  const url = 'http://localhost:3018';
+  const win = window.open(url, '_blank');
+  const status = document.getElementById('hvc-status');
+  if (status) {
+    status.style.display = 'inline';
+    if (win) {
+      status.textContent = '↗ opened in new tab — if it shows an error, run: cd hebrew-voice-tts && npm start';
+      status.style.color = '#94a3b8';
+    } else {
+      status.textContent = '❌ popup blocked — allow popups for this site, then try again';
+      status.style.color = '#fca5a5';
+    }
+  }
+}
 
 // Tool map: smooth-scroll to a tool card and briefly highlight it.
 // Targets can be reached either by an id on the .tool-card itself
