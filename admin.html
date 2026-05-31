@@ -605,6 +605,12 @@
           <span class="tm-tip"><span class="tm-tip-title">Trados SDLPPX Auto-Translator</span>Upload a .sdlppx project package → GPT translates every segment → download a .sdlrpx return package ready to send back. Choose quality tier per job.</span>
         </button>
 
+        <button class="toolmap-btn" onclick="scrollToTool('tool-doc-translator')">
+          <span class="tm-label">🌐 Document Translator</span>
+          <span class="tm-info" tabindex="0">i</span>
+          <span class="tm-tip"><span class="tm-tip-title">Document Translator (HE ↔ EN)</span>Drop any .docx / .txt / .md / .csv / .html → GPT translates in either direction → download in the same format with all styling preserved. Auto-detects source language. Uses gpt-5.4 by default, gpt-5.5 for tone-sensitive work.</span>
+        </button>
+
         <button class="toolmap-btn" onclick="scrollToTool('tool-he-en-perminute')">
           <span class="tm-label">🇮🇱→🇬🇧 HE→EN Per-Minute</span>
           <span class="tm-info" tabindex="0">i</span>
@@ -1152,6 +1158,69 @@
         <!-- Error -->
         <div id="tr-error" style="display:none;padding:.7rem 1rem;background:#1a0000;border:1px solid #7f1d1d;border-radius:8px;font-size:.82rem;color:#fca5a5"></div>
       </div><!-- /trados card -->
+
+      <!-- ── 🌐 DOCUMENT TRANSLATOR (any file, HE ↔ EN, styling preserved) ─── -->
+      <div class="tool-card" style="grid-column:1/-1">
+        <div class="tool-header">
+          <div class="tool-icon">🌐</div>
+          <div>
+            <div class="tool-title" data-tool-anchor="tool-doc-translator">Document Translator (HE ↔ EN)</div>
+            <div class="tool-sub">Drop a .docx / .txt / .md / .csv / .html file → GPT translates in either direction → download in the SAME format with all styling preserved · auto-detects source language</div>
+          </div>
+        </div>
+        <div class="tool-divider"></div>
+
+        <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:1rem;margin-bottom:.8rem">
+          <div>
+            <label style="font-size:.75rem;color:#94a3b8;display:block;margin-bottom:.4rem">① Drop or pick a file</label>
+            <label style="display:flex;align-items:center;justify-content:center;gap:.6rem;padding:1.4rem 1rem;background:#0a0a14;border:2px dashed #312e81;border-radius:10px;cursor:pointer;color:#cbd5e1;font-size:.85rem" id="dt-drop">
+              <span>📂 Choose .docx, .txt, .md, .csv, or .html</span>
+              <input type="file" id="dt-file" accept=".docx,.txt,.md,.csv,.html,.htm" style="display:none" onchange="dtOnFile(this)"/>
+            </label>
+            <div id="dt-status" style="margin-top:.5rem;font-size:.78rem;color:#94a3b8;min-height:1.2rem"></div>
+          </div>
+          <div>
+            <label style="font-size:.75rem;color:#94a3b8;display:block;margin-bottom:.4rem">② Translate from → to</label>
+            <div style="display:flex;flex-direction:column;gap:.5rem">
+              <label style="font-size:.78rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem">
+                <span style="min-width:75px">From:</span>
+                <select id="dt-source-lang" style="flex:1;padding:.5rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.8rem">
+                  <option value="auto">— Auto-detect —</option>
+                  <option value="en">English</option>
+                  <option value="he">Hebrew</option>
+                </select>
+              </label>
+              <label style="font-size:.78rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem">
+                <span style="min-width:75px">To:</span>
+                <select id="dt-target-lang" style="flex:1;padding:.5rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.8rem">
+                  <option value="he">Hebrew</option>
+                  <option value="en">English</option>
+                </select>
+              </label>
+              <label style="font-size:.78rem;color:#cbd5e1;display:flex;align-items:center;gap:.4rem">
+                <span style="min-width:75px">Model:</span>
+                <select id="dt-model" style="flex:1;padding:.5rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.8rem">
+                  <option value="gpt-5.4">gpt-5.4 (~$0.006 / 500 words · default)</option>
+                  <option value="gpt-5.5">gpt-5.5 (~$0.018 / 500 words · top quality for tone-sensitive work)</option>
+                </select>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <button class="tbtn gold" id="dt-translate-btn" onclick="dtTranslate()" disabled>🌐 Translate Document</button>
+        <button class="tbtn" id="dt-dl-btn" onclick="dtDownload()" style="display:none;width:auto;padding:.65rem 1.3rem;font-size:.82rem;background:#1e1b4b;color:#a5b4fc;margin-left:.5rem">⬇ Download Translated File</button>
+
+        <div class="tprog" id="dt-prog">
+          <div class="tprog-text" id="dt-prog-text">Translating…</div>
+          <div class="tprog-bar-outer"><div class="tprog-bar-inner" id="dt-prog-bar"></div></div>
+        </div>
+
+        <div style="margin-top:.6rem;font-size:.72rem;color:#64748b;line-height:1.5">
+          <strong style="color:#94a3b8">v1 scope:</strong> .docx (full styling preserved — bold, italic, lists, tables, headers/footers). .txt/.md/.csv/.html (text translated, structure preserved). PDF not yet supported — convert to .docx first (LibreOffice does this well).
+          Each <code style="background:#0a0a14;padding:0 .3rem;border-radius:3px;color:#a5b4fc">&lt;w:t&gt;</code> run in a .docx is translated independently, so for paragraphs with mid-sentence formatting changes (e.g. bold word in the middle), the translation may not redistribute perfectly across the runs. Whole-paragraph documents are unaffected.
+        </div>
+      </div><!-- /doc translator card -->
 
       <!-- ── 📝 HEBREW TEXT → ENGLISH (per-minute formatted) ── -->
       <div class="tool-card" style="grid-column:1/-1">
@@ -8863,6 +8932,363 @@ function htCopyEnglish() {
     () => showAdminToast('📋 English copied to clipboard'),
     () => showAdminToast('❌ Copy failed — select & copy manually')
   );
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  🌐 DOCUMENT TRANSLATOR — any file type, HE ↔ EN, styling preserved
+//  Client-side: docx via JSZip + regex on word/document.xml; plain
+//  text / markdown / csv / html parsed in-browser. Each "text unit"
+//  is batched into JSON-mode GPT calls. The original file structure
+//  is left untouched except for the text content inside it.
+// ═══════════════════════════════════════════════════════════════
+let dtFile = null;
+let dtTranslatedBlob = null;
+let dtOutputName = '';
+
+function dtOnFile(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  if (!['docx','txt','md','csv','html','htm'].includes(ext)) {
+    showAdminToast('❌ Unsupported file type: .' + ext);
+    return;
+  }
+  dtFile = file;
+  dtTranslatedBlob = null;
+  document.getElementById('dt-status').textContent = `📄 ${file.name} · ${(file.size/1024).toFixed(1)} KB`;
+  document.getElementById('dt-translate-btn').disabled = false;
+  document.getElementById('dt-dl-btn').style.display = 'none';
+}
+
+async function dtTranslate() {
+  const apiKey = getApiKey();
+  if (!apiKey) { showAdminToast('❌ Set your OpenAI key first'); return; }
+  if (!dtFile) return;
+
+  const sourceLang = document.getElementById('dt-source-lang').value;
+  const targetLang = document.getElementById('dt-target-lang').value;
+  const model      = document.getElementById('dt-model').value;
+  const ext        = (dtFile.name.split('.').pop() || '').toLowerCase();
+
+  const btn  = document.getElementById('dt-translate-btn');
+  const prog = document.getElementById('dt-prog');
+  const bar  = document.getElementById('dt-prog-bar');
+  const txt  = document.getElementById('dt-prog-text');
+  const dlBtn = document.getElementById('dt-dl-btn');
+
+  btn.disabled = true;
+  dlBtn.style.display = 'none';
+  prog.classList.add('show');
+  bar.style.width = '5%';
+  txt.textContent = 'Reading file…';
+
+  try {
+    let result;
+    if (ext === 'docx') {
+      result = await dtTranslateDocx(dtFile, sourceLang, targetLang, model, apiKey, { bar, txt });
+    } else {
+      result = await dtTranslatePlain(dtFile, ext, sourceLang, targetLang, model, apiKey, { bar, txt });
+    }
+    dtTranslatedBlob = result.blob;
+    dtOutputName     = result.name;
+    bar.style.width = '100%';
+    txt.textContent = `✅ Done — ${result.count} text unit${result.count===1?'':'s'} translated · click Download`;
+    dlBtn.style.display = 'inline-block';
+    setTimeout(() => prog.classList.remove('show'), 2200);
+  } catch (e) {
+    txt.textContent = '❌ ' + e.message;
+    setTimeout(() => prog.classList.remove('show'), 5000);
+    console.error('[doc-translator]', e);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function dtDownload() {
+  if (!dtTranslatedBlob) return;
+  const url = URL.createObjectURL(dtTranslatedBlob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = dtOutputName;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+// ── DOCX: unzip, find every <w:t>...</w:t>, translate, splice, rezip
+async function dtTranslateDocx(file, sourceLang, targetLang, model, apiKey, ui) {
+  const buf = await file.arrayBuffer();
+  const zip = await JSZip.loadAsync(buf);
+  const docFile = zip.file('word/document.xml');
+  if (!docFile) throw new Error('Not a valid .docx (no word/document.xml inside)');
+  let content = await docFile.async('text');
+
+  // <w:t> has no child elements, so a simple regex is safe.
+  // Capture: 1=open tag (may include attrs like xml:space), 2=inner text, 3=close
+  const wtRe = /(<w:t[^>]*>)([^<]*)(<\/w:t>)/g;
+  const matches = [];
+  let m;
+  while ((m = wtRe.exec(content)) !== null) {
+    matches.push({ index: m.index, full: m[0], open: m[1], text: dtXmlUnescape(m[2]), close: m[3] });
+  }
+  if (matches.length === 0) throw new Error('No translatable text found in document');
+
+  // Only translate items with non-whitespace content
+  const translatable = matches.filter(x => x.text.trim().length > 0);
+  ui.txt.textContent = `Translating ${translatable.length} text runs…`;
+  ui.bar.style.width = '15%';
+
+  const BATCH = 20;
+  const out = new Map(); // index → translated text
+  for (let i = 0; i < translatable.length; i += BATCH) {
+    const batch = translatable.slice(i, i + BATCH);
+    const results = await dtTranslateBatch(batch.map(b => b.text), sourceLang, targetLang, model, apiKey);
+    for (let j = 0; j < batch.length; j++) out.set(batch[j].index, results[j] || batch[j].text);
+    ui.bar.style.width = (15 + Math.min(75, (i + BATCH) / translatable.length * 75)) + '%';
+    ui.txt.textContent = `Translating ${Math.min(i + BATCH, translatable.length)} / ${translatable.length}…`;
+  }
+
+  ui.bar.style.width = '93%';
+  ui.txt.textContent = 'Packaging .docx…';
+
+  // Splice translations back into content. Process from END to START so
+  // earlier indices remain valid as we mutate later chunks.
+  const ordered = matches.slice().sort((a, b) => b.index - a.index);
+  for (const mt of ordered) {
+    if (!out.has(mt.index)) continue;
+    const translated = out.get(mt.index);
+    // Ensure xml:space="preserve" so leading/trailing whitespace survives
+    const openTag = /xml:space=/.test(mt.open)
+      ? mt.open
+      : mt.open.replace(/<w:t/, '<w:t xml:space="preserve"');
+    const replacement = openTag + dtXmlEscape(translated) + mt.close;
+    content = content.substring(0, mt.index) + replacement + content.substring(mt.index + mt.full.length);
+  }
+
+  zip.file('word/document.xml', content);
+
+  // Optional: also translate headers, footers, footnotes, comments, endnotes
+  await dtTranslateDocxAuxParts(zip, sourceLang, targetLang, model, apiKey, ui);
+
+  const blob = await zip.generateAsync({
+    type: 'blob',
+    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 6 },
+  });
+  const baseName = file.name.replace(/\.docx$/i, '');
+  const tag = targetLang === 'he' ? '_HE' : '_EN';
+  return { blob, name: `${baseName}${tag}.docx`, count: translatable.length };
+}
+
+// Translate text in headers/footers/footnotes/endnotes/comments if present.
+// Each lives in its own XML file inside word/ — same <w:t> rule applies.
+async function dtTranslateDocxAuxParts(zip, sourceLang, targetLang, model, apiKey, ui) {
+  const auxPaths = Object.keys(zip.files).filter(p =>
+    /^word\/(header\d+|footer\d+|footnotes|endnotes|comments)\.xml$/.test(p)
+  );
+  for (const path of auxPaths) {
+    let xml = await zip.file(path).async('text');
+    const wtRe = /(<w:t[^>]*>)([^<]*)(<\/w:t>)/g;
+    const matches = [];
+    let m;
+    while ((m = wtRe.exec(xml)) !== null) {
+      matches.push({ index: m.index, full: m[0], open: m[1], text: dtXmlUnescape(m[2]), close: m[3] });
+    }
+    const translatable = matches.filter(x => x.text.trim().length > 0);
+    if (translatable.length === 0) continue;
+    const results = await dtTranslateBatch(translatable.map(b => b.text), sourceLang, targetLang, model, apiKey);
+    const out = new Map();
+    translatable.forEach((b, i) => out.set(b.index, results[i] || b.text));
+    const ordered = matches.slice().sort((a, b) => b.index - a.index);
+    for (const mt of ordered) {
+      if (!out.has(mt.index)) continue;
+      const translated = out.get(mt.index);
+      const openTag = /xml:space=/.test(mt.open) ? mt.open : mt.open.replace(/<w:t/, '<w:t xml:space="preserve"');
+      xml = xml.substring(0, mt.index) + openTag + dtXmlEscape(translated) + mt.close + xml.substring(mt.index + mt.full.length);
+    }
+    zip.file(path, xml);
+  }
+}
+
+// ── Plain text family (.txt, .md, .csv, .html)
+async function dtTranslatePlain(file, ext, sourceLang, targetLang, model, apiKey, ui) {
+  const text = await file.text();
+  let translated, count;
+  if (ext === 'html' || ext === 'htm') {
+    const r = await dtTranslateHtmlStr(text, sourceLang, targetLang, model, apiKey, ui);
+    translated = r.text; count = r.count;
+  } else if (ext === 'csv') {
+    const r = await dtTranslateCsvStr(text, sourceLang, targetLang, model, apiKey, ui);
+    translated = r.text; count = r.count;
+  } else {
+    const r = await dtTranslateParagraphsStr(text, sourceLang, targetLang, model, apiKey, ui);
+    translated = r.text; count = r.count;
+  }
+  const mime = (ext === 'csv') ? 'text/csv;charset=utf-8'
+             : (ext === 'html' || ext === 'htm') ? 'text/html;charset=utf-8'
+             : 'text/plain;charset=utf-8';
+  const blob = new Blob([translated], { type: mime });
+  const baseName = file.name.replace(/\.[^.]+$/, '');
+  const tag = targetLang === 'he' ? '_HE' : '_EN';
+  return { blob, name: `${baseName}${tag}.${ext}`, count };
+}
+
+async function dtTranslateParagraphsStr(text, sourceLang, targetLang, model, apiKey, ui) {
+  // Split by blank-line boundaries but remember the separators so the original
+  // whitespace shape is reproduced.
+  const parts = text.split(/(\n\s*\n)/); // odd indices are separators, even are content
+  const contentIdxs = [];
+  for (let i = 0; i < parts.length; i++) {
+    if (i % 2 === 0 && parts[i].trim().length > 0) contentIdxs.push(i);
+  }
+  if (contentIdxs.length === 0) return { text, count: 0 };
+
+  ui.txt.textContent = `Translating ${contentIdxs.length} paragraphs…`;
+  const BATCH = 10;
+  const items = contentIdxs.map(i => parts[i]);
+  const translated = [];
+  for (let i = 0; i < items.length; i += BATCH) {
+    const batch = items.slice(i, i + BATCH);
+    const results = await dtTranslateBatch(batch, sourceLang, targetLang, model, apiKey);
+    translated.push(...results);
+    ui.bar.style.width = (15 + Math.min(75, (i + BATCH) / items.length * 75)) + '%';
+  }
+  contentIdxs.forEach((idx, n) => { parts[idx] = translated[n] || parts[idx]; });
+  return { text: parts.join(''), count: contentIdxs.length };
+}
+
+async function dtTranslateHtmlStr(html, sourceLang, targetLang, model, apiKey, ui) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const nodes = [];
+  const walk = (n) => {
+    if (n.nodeType === 3 && n.nodeValue && n.nodeValue.trim().length > 0) {
+      nodes.push(n);
+    } else if (n.nodeType === 1 && !['SCRIPT','STYLE','NOSCRIPT','CODE','PRE'].includes(n.tagName)) {
+      n.childNodes.forEach(walk);
+    }
+  };
+  walk(doc.body);
+  if (nodes.length === 0) return { text: html, count: 0 };
+
+  ui.txt.textContent = `Translating ${nodes.length} HTML text nodes…`;
+  const BATCH = 20;
+  const items = nodes.map(n => n.nodeValue);
+  for (let i = 0; i < items.length; i += BATCH) {
+    const batch = items.slice(i, i + BATCH);
+    const results = await dtTranslateBatch(batch, sourceLang, targetLang, model, apiKey);
+    for (let j = 0; j < batch.length; j++) nodes[i + j].nodeValue = results[j] || batch[j];
+    ui.bar.style.width = (15 + Math.min(75, (i + BATCH) / items.length * 75)) + '%';
+  }
+  // For Hebrew target, set dir="rtl" on <html> if not present — better default rendering
+  if (targetLang === 'he' && !doc.documentElement.hasAttribute('dir')) {
+    doc.documentElement.setAttribute('dir', 'rtl');
+    doc.documentElement.setAttribute('lang', 'he');
+  } else if (targetLang === 'en' && !doc.documentElement.hasAttribute('dir')) {
+    doc.documentElement.setAttribute('lang', 'en');
+  }
+  return { text: '<!DOCTYPE html>\n' + doc.documentElement.outerHTML, count: nodes.length };
+}
+
+async function dtTranslateCsvStr(csv, sourceLang, targetLang, model, apiKey, ui) {
+  // Minimal CSV: split by \n then by ,. Doesn't handle quoted-field newlines —
+  // good enough for the common spreadsheet export case. Users with complex
+  // CSV should pre-clean.
+  const lines = csv.split(/\r?\n/);
+  const cells = [];     // strings to translate
+  const cellLoc = [];   // {row, col} for each
+  const rows = lines.map((line, row) => {
+    const parts = line.split(',');
+    parts.forEach((cell, col) => {
+      const t = cell.trim();
+      if (t && !/^["']?\d+(\.\d+)?["']?$/.test(t)) { // skip pure numbers
+        cells.push(cell);
+        cellLoc.push({ row, col });
+      }
+    });
+    return parts;
+  });
+  if (cells.length === 0) return { text: csv, count: 0 };
+
+  ui.txt.textContent = `Translating ${cells.length} cells…`;
+  const BATCH = 30;
+  const translated = [];
+  for (let i = 0; i < cells.length; i += BATCH) {
+    const batch = cells.slice(i, i + BATCH);
+    const results = await dtTranslateBatch(batch, sourceLang, targetLang, model, apiKey);
+    translated.push(...results);
+    ui.bar.style.width = (15 + Math.min(75, (i + BATCH) / cells.length * 75)) + '%';
+  }
+  cellLoc.forEach((loc, i) => { rows[loc.row][loc.col] = translated[i] || cells[i]; });
+  return { text: rows.map(r => r.join(',')).join('\n'), count: cells.length };
+}
+
+// ── The actual GPT call. JSON-mode for reliable parsing. Returns array of
+// strings, padded with originals if model returns too few.
+async function dtTranslateBatch(items, sourceLang, targetLang, model, apiKey) {
+  if (items.length === 0) return [];
+  const srcLabel = sourceLang === 'auto' ? 'the source language (auto-detect)'
+                 : sourceLang === 'he' ? 'Hebrew' : 'English';
+  const tgtLabel = targetLang === 'he' ? 'Hebrew' : 'English';
+
+  const sys = `You are a senior professional translator (Hebrew ↔ English).
+
+TASK
+Translate each input item from ${srcLabel} into ${tgtLabel}, preserving meaning, register, and tone exactly.
+
+RULES
+- Preserve any leading/trailing whitespace in the input EXACTLY in the output.
+- If an item is a brand name, proper noun, URL, email, phone number, code, or pure number, return it UNCHANGED.
+- If an item is empty or whitespace-only, return it UNCHANGED.
+- Match the input's punctuation/capitalization style.
+- Do NOT add explanations, footnotes, or commentary.
+- Return EXACTLY ${items.length} translations, one per input item, IN THE SAME ORDER.
+
+OUTPUT
+JSON only, with this exact shape:
+{ "translations": ["...", "...", ... ${items.length} items] }`;
+
+  const user = 'Items:\n' + items.map((t, i) => `[${i + 1}] ${t}`).join('\n');
+
+  const totalInChars = items.reduce((s, t) => s + (t || '').length, 0);
+  const maxOut = Math.max(800, Math.min(8000, totalInChars * 3));
+
+  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      response_format: { type: 'json_object' },
+      messages: [{ role: 'system', content: sys }, { role: 'user', content: user }],
+      max_completion_tokens: maxOut,
+    }),
+  });
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    throw new Error(j.error?.message || ('OpenAI ' + r.status));
+  }
+  const j = await r.json();
+  let raw = j.choices?.[0]?.message?.content || '{}';
+  raw = raw.replace(/^```[a-z]*\n?/i, '').replace(/```$/, '').trim();
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch { throw new Error('Model returned invalid JSON for a translation batch'); }
+  const arr = Array.isArray(parsed.translations) ? parsed.translations.map(String) : [];
+  while (arr.length < items.length) arr.push(items[arr.length]); // safety pad
+  return arr.slice(0, items.length);
+}
+
+function dtXmlEscape(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+function dtXmlUnescape(s) {
+  return String(s)
+    .replace(/&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&gt;/g, '>')
+    .replace(/&lt;/g, '<')
+    .replace(/&amp;/g, '&');
 }
 
 // ═══════════════════════════════════════════════════════════════
