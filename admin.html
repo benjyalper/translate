@@ -1641,7 +1641,8 @@
                 <tr style="background:#1e1b4b;position:sticky;top:0">
                   <th style="padding:.45rem .4rem;width:28px"></th>
                   <th style="padding:.45rem .5rem;text-align:center;color:#a5b4fc;width:48px">Seg</th>
-                  <th style="padding:.45rem .5rem;text-align:left;color:#a5b4fc;width:150px">Type / Mode</th>
+                  <th style="padding:.45rem .5rem;text-align:left;color:#a5b4fc;width:140px">Type / Mode</th>
+                  <th style="padding:.45rem .5rem;text-align:left;color:#a5b4fc;width:180px">Source</th>
                   <th style="padding:.45rem .5rem;text-align:left;color:#a5b4fc">Current target</th>
                   <th style="padding:.45rem .5rem;text-align:left;color:#a5b4fc">→ Fix</th>
                 </tr>
@@ -6308,13 +6309,22 @@ async function qaParseAndPreview() {
       const fixDisplay = f.correction
         ? `→ <strong style="color:#86efac">${f.correction}</strong>`
         : `→ <em style="color:#94a3b8">retranslate from source</em>`;
+      // Source for display: strip any XBench diff-format tags or live
+      // inline tags from the seg-source (for the chinese-passthrough rule),
+      // collapse whitespace, and HTML-escape so quotes/brackets in the
+      // text don't break the title attribute or cell markup.
+      const esc = s => String(s||'')
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      const srcPlain = (f.source || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+      const srcEsc   = esc(srcPlain);
       return `<tr style="border-bottom:1px solid #1e293b">
         <td style="padding:.35rem .5rem;text-align:center">
           <input type="checkbox" id="qacb_${idx}" checked style="accent-color:#4f46e5;cursor:pointer"/>
         </td>
         <td style="padding:.35rem .5rem;color:#94a3b8;font-family:monospace;font-size:.78rem">${f.segId}${fileBadge}</td>
         <td style="padding:.35rem .5rem">${typeBadge} ${modeLabel(f.mode)} ${proofreadBadge}</td>
-        <td style="padding:.35rem .5rem;color:#cbd5e1;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl" title="${f.strippedActual}">${f.strippedActual || '(empty)'}</td>
+        <td style="padding:.35rem .5rem;color:#cbd5e1;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:ltr;font-size:.72rem" title="${srcEsc}">${srcEsc || '<em style="color:#64748b">(no source)</em>'}</td>
+        <td style="padding:.35rem .5rem;color:#cbd5e1;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl" title="${esc(f.strippedActual)}">${esc(f.strippedActual) || '(empty)'}</td>
         <td style="padding:.35rem .5rem;color:#e2e8f0;direction:rtl">${fixDisplay}</td>
       </tr>`;
     }).join('');
