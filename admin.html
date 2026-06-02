@@ -1620,11 +1620,11 @@
             <div class="tdrop-sel" id="qa-xlsx-label" style="display:none"></div>
           </div>
           <div>
-            <label style="font-size:.75rem;color:#94a3b8;display:block;margin-bottom:.4rem">② SDLRPX Package</label>
+            <label style="font-size:.75rem;color:#94a3b8;display:block;margin-bottom:.4rem">② SDLRPX Package or .sdlxliff file(s)</label>
             <div class="tdrop" id="qa-rpx-drop">
-              <input type="file" id="qa-rpx-file" accept=".sdlrpx,.sdlppx,.zip" onchange="qaOnRpx(this)"/>
+              <input type="file" id="qa-rpx-file" accept=".sdlrpx,.sdlppx,.sdlxliff,.zip" multiple onchange="qaOnRpx(this)"/>
               <div class="tdrop-icon">📦</div>
-              <div class="tdrop-text">Drop .sdlrpx file or click<br><small>Trados review package</small></div>
+              <div class="tdrop-text">Drop .sdlrpx / .sdlppx package, or one or more .sdlxliff files<br><small>Bare .sdlxliff files are auto-bundled and processed the same way</small></div>
             </div>
             <div class="tdrop-sel" id="qa-rpx-label" style="display:none"></div>
           </div>
@@ -5656,6 +5656,10 @@ async function trTranslate() {
 // ── QA REVISOR v2 ───────────────────────────────────────
 let qaXlsxBuf = null, qaRpxFile = null, qaRpxName = '', qaRpxBuf = null;
 let qaParsedFixes = []; // final list shown in table
+// Set when input was bare .sdlxliff file(s) (auto-wrapped into a synthetic zip).
+// Drives output naming + extraction on download. Stores the bundled .sdlxliff
+// relative paths so the final step can fish them back out of the result zip.
+let qaBareSdlxliff = null; // null | { paths: string[], originalNames: string[] }
 
 function qaOnXlsx(input) {
   const f = input.files[0]; if (!f) return;
@@ -5665,11 +5669,50 @@ function qaOnXlsx(input) {
   r.onload = e => { qaXlsxBuf = e.target.result; qaCheckReady(); };
   r.readAsArrayBuffer(f);
 }
-function qaOnRpx(input) {
-  const f = input.files[0]; if (!f) return;
-  qaRpxFile = f; qaRpxName = f.name;
+
+async function qaOnRpx(input) {
+  const files = Array.from(input.files || []);
+  if (files.length === 0) return;
+  qaBareSdlxliff = null;
+
+  // Branch on what the user actually dropped: a single package, or one-or-more
+  // bare .sdlxliff files (which we bundle into a synthetic zip so the rest of
+  // the pipeline doesn't have to know the difference).
+  const allSdlxliff = files.every(f => /\.sdlxliff$/i.test(f.name));
+  if (allSdlxliff) {
+    const bundleZip = new JSZip();
+    const bundledPaths = [];
+    const originalNames = [];
+    for (const f of files) {
+      const buf = await f.arrayBuffer();
+      // The QA pipeline filters for he-IL paths (/^he[-_]/i), so we put each
+      // file under he-IL/ to match. Suffix with index to avoid collisions if
+      // two uploaded files share a basename.
+      const safeName = f.name.replace(/[\/\\]/g, '_');
+      const relPath = `he-IL/${bundledPaths.length}_${safeName}`;
+      bundleZip.file(relPath, buf);
+      bundledPaths.push(relPath);
+      originalNames.push(f.name);
+    }
+    const blob = await bundleZip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+    qaRpxFile = blob;
+    qaRpxName = files.length === 1
+      ? files[0].name.replace(/\.sdlxliff$/i, '.sdlxliff')   // single → keep .sdlxliff
+      : 'bilinguals.zip';                                    // multiple → zip
+    qaBareSdlxliff = { paths: bundledPaths, originalNames };
+  } else if (files.length === 1) {
+    // Single package (.sdlrpx / .sdlppx / .zip) — existing flow.
+    qaRpxFile = files[0];
+    qaRpxName = files[0].name;
+  } else {
+    showAdminToast('❌ Pick a single package, or one-or-more .sdlxliff files (not a mix)');
+    input.value = '';
+    return;
+  }
+
   const lbl = document.getElementById('qa-rpx-label');
-  lbl.textContent = f.name; lbl.style.display = 'block';
+  lbl.textContent = files.length === 1 ? files[0].name : `${files.length} .sdlxliff files bundled`;
+  lbl.style.display = 'block';
   qaCheckReady();
 }
 function qaCheckReady() {
@@ -5839,10 +5882,14 @@ async function qaParseAndPreview() {
 
     qaRpxBuf = await qaRpxFile.arrayBuffer(); // store so apply() can reuse without re-reading
     const zip = await JSZip.loadAsync(qaRpxBuf);
-    let xliffContent = null;
+    // Concatenate ALL he-IL .sdlxliff contents so qaGetMrkContent can find
+    // segments regardless of which file they live in. Previously we broke
+    // after the first match, which silently dropped issues for segments in
+    // any additional .sdlxliff files inside the package.
+    let xliffContent = '';
     for (const [relPath, entry] of Object.entries(zip.files)) {
       if (!entry.dir && relPath.endsWith('.sdlxliff') && /^he[-_]/i.test(relPath.split('/')[0])) {
-        xliffContent = await entry.async('string'); break;
+        xliffContent += (xliffContent ? '\n' : '') + (await entry.async('string'));
       }
     }
     if (!xliffContent) throw new Error('No he-IL SDLXLIFF found in package');
@@ -6005,10 +6052,34 @@ Output only the corrected/translated text for each item, numbered to match, one 
     }
 
     bar.style.width = '93%'; txt.textContent = 'Building package…';
-    const blob = await outZip.generateAsync({ type:'blob', compression:'DEFLATE', compressionOptions:{level:6} });
-    const url  = URL.createObjectURL(blob);
+
+    let outBlob, outName;
+    if (qaBareSdlxliff && qaBareSdlxliff.paths.length === 1) {
+      // Single bare .sdlxliff in → single revised .sdlxliff out (no zip wrapper)
+      const path = qaBareSdlxliff.paths[0];
+      const xliffStr = await outZip.file(path).async('string');
+      outBlob = new Blob([xliffStr], { type: 'application/xml;charset=utf-8' });
+      outName = qaBareSdlxliff.originalNames[0].replace(/(\.sdlxliff)$/i, '_QA_REVISED$1');
+    } else if (qaBareSdlxliff && qaBareSdlxliff.paths.length > 1) {
+      // Multiple bare .sdlxliff in → a clean zip of just the revised .sdlxliff
+      // files (no he-IL wrapper folder, original names restored)
+      const cleanZip = new JSZip();
+      for (let i = 0; i < qaBareSdlxliff.paths.length; i++) {
+        const xliffStr = await outZip.file(qaBareSdlxliff.paths[i]).async('string');
+        const baseName = qaBareSdlxliff.originalNames[i].replace(/(\.sdlxliff)$/i, '_QA_REVISED$1');
+        cleanZip.file(baseName, xliffStr);
+      }
+      outBlob = await cleanZip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+      outName = 'sdlxliff_QA_REVISED.zip';
+    } else {
+      // Original package flow — return the full repackaged zip
+      outBlob = await outZip.generateAsync({ type:'blob', compression:'DEFLATE', compressionOptions:{level:6} });
+      outName = qaRpxName.replace(/(\.[^.]+)$/, '_QA_REVISED$1');
+    }
+
+    const url  = URL.createObjectURL(outBlob);
     const a    = document.createElement('a');
-    a.href = url; a.download = qaRpxName.replace(/(\.[^.]+)$/, '_QA_REVISED$1');
+    a.href = url; a.download = outName;
     document.body.appendChild(a); a.click();
     setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
 
