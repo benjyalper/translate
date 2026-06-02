@@ -5742,7 +5742,10 @@ function qaParseAllIssues(rows) {
       group.push(rows[i++]);
     }
     if (!group.length) continue;
-    // Rows with no comment = the "correct" reference version
+    // Rows with no comment = the "correct" reference version. Prefer this
+    // clean target as the correction; the comment column carries XBench's
+    // visual diff (with Hebrew sometimes smuggled inside fake <g> tags) and
+    // is NOT a clean replacement string.
     const noComment = group.filter(r => !String(r[4] || '').trim());
     const correctTarget = noComment.length ? String(noComment[0][3] || '').trim() : null;
     for (const r of group) {
@@ -5752,10 +5755,18 @@ function qaParseAllIssues(rows) {
       const target = String(r[3] || '').trim();
       const comment= String(r[4] || '').trim();
       let correction = null;
-      if (comment && !comment.startsWith('Dreame') && !comment.startsWith('http') && comment !== target)
-        correction = comment;
-      else if (correctTarget && correctTarget !== target)
+      // Use the clean reference first; only fall back to the diff comment
+      // when there's no reference row in the group.
+      if (correctTarget && correctTarget !== target) {
         correction = correctTarget;
+      } else if (comment && !comment.startsWith('Dreame') && !comment.startsWith('http') && comment !== target) {
+        // Heuristic: reject obvious diff-format artifacts (unbalanced tags,
+        // letters wedged into a tag name like "<gע"). Falls through with
+        // null correction, which means the segment will be skipped — better
+        // than writing garbage XML into the file.
+        const tagsOk = !/<[a-zA-Z]+[^a-zA-Z0-9\s\/>]/.test(comment);
+        if (tagsOk) correction = comment;
+      }
       if (correction && !incoFixes.has(segId))
         incoFixes.set(segId, { segId, source, xliffTarget: target, correction, type: 'inconsistency' });
     }
@@ -5823,10 +5834,20 @@ function qaClassifyFix(issue, actualMrkContent) {
   const isDamaged = issue.type === 'damaged' || (srcWords >= 5 && tgtHeb <= 2);
   if (isDamaged) return { needsAI: true, mode: 'retranslate', stripped };
 
-  // Short plain text → direct replacement
-  if (!hasXml && stripped.length <= 70) return { needsAI: false, mode: 'direct', correction, stripped };
+  // Direct mode is only safe when the entire target IS approximately the term.
+  // If the target is a sentence containing the wrong term, replacing the WHOLE
+  // target with just the term destroys the surrounding translation. For
+  // key-term mismatches this is the most common failure mode — sentences like
+  // "rated power of 320W" got overwritten with just "rated power".
+  // Heuristic: direct OK only when target length is within ~1.6× the term's
+  // length AND there's no inline XML in the target.
+  const lenRatio = correction ? stripped.length / Math.max(1, correction.length) : 99;
+  const targetIsApproxTheTerm = lenRatio <= 1.6;
+  if (!hasXml && stripped.length <= 70 && targetIsApproxTheTerm) {
+    return { needsAI: false, mode: 'direct', correction, stripped };
+  }
 
-  // Sentence / XML → AI fix-term
+  // Sentence / XML / target much longer than term → AI fix-term in context
   return { needsAI: true, mode: 'fix_term', correction, stripped };
 }
 
