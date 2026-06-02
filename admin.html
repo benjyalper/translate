@@ -5831,38 +5831,50 @@ function qaClassifyFix(issue, actualMrkContent) {
 }
 
 // ── SDLXLIFF helpers (shared) ────────────────────────────
+// Match <mrk mtype="seg" mid="N"> with any trailing attributes the SDLXLIFF
+// might carry after mid (e.g. xid="…", or other Trados-side decorations).
+// The previous indexOf lookup was strict — it only matched the bare form
+// "<mrk mtype="seg" mid="N">" with no trailing attrs, which silently dropped
+// fixes on any segment whose mrk open tag had even one extra attribute.
+function qaMrkOpenRe(segId) {
+  return new RegExp(`<mrk\\s+mtype="seg"\\s+mid="${segId}"(?:\\s[^>]*)?>`, 'g');
+}
+
 function qaGetMrkContent(xliff, segId) {
-  const mrkOpen = `<mrk mtype="seg" mid="${segId}">`;
-  let pos = 0;
-  while (true) {
-    const idx = xliff.indexOf(mrkOpen, pos);
-    if (idx === -1) return null;
+  const re = qaMrkOpenRe(segId);
+  let m;
+  while ((m = re.exec(xliff)) !== null) {
+    const idx = m.index;
     const before = xliff.substring(Math.max(0, idx - 400), idx);
     if (before.lastIndexOf('<target') > before.lastIndexOf('<seg-source')) {
-      const cs = idx + mrkOpen.length;
+      const cs = idx + m[0].length;
       const ci = xliff.indexOf('</mrk>', cs);
       return ci === -1 ? null : xliff.substring(cs, ci);
     }
-    pos = idx + mrkOpen.length;
   }
+  return null;
 }
 
 function qaFixMrkInXliff(xliff, segId, newContent) {
-  const mrkOpen = `<mrk mtype="seg" mid="${segId}">`;
-  let result = xliff, pos = 0, changed = 0;
-  while (true) {
-    const idx = result.indexOf(mrkOpen, pos);
-    if (idx === -1) break;
-    const before = result.substring(Math.max(0, idx - 400), idx);
+  // Collect all replacement positions FIRST (target-side mrks only), then
+  // apply end → start so earlier offsets stay valid as we mutate the string.
+  const re = qaMrkOpenRe(segId);
+  const ops = [];
+  let m;
+  while ((m = re.exec(xliff)) !== null) {
+    const idx = m.index;
+    const before = xliff.substring(Math.max(0, idx - 400), idx);
     if (before.lastIndexOf('<target') > before.lastIndexOf('<seg-source')) {
-      const cs = idx + mrkOpen.length;
-      const ci = result.indexOf('</mrk>', cs);
-      if (ci === -1) break;
-      result = result.substring(0, cs) + newContent + result.substring(ci);
-      changed++; pos = cs + newContent.length;
-    } else {
-      pos = idx + mrkOpen.length;
+      const cs = idx + m[0].length;
+      const ci = xliff.indexOf('</mrk>', cs);
+      if (ci !== -1) ops.push({ cs, ci });
     }
+  }
+  ops.sort((a, b) => b.cs - a.cs);
+  let result = xliff, changed = 0;
+  for (const op of ops) {
+    result = result.substring(0, op.cs) + newContent + result.substring(op.ci);
+    changed++;
   }
   return { result, changed };
 }
@@ -6040,16 +6052,29 @@ Output only the corrected/translated text for each item, numbered to match, one 
 
     bar.style.width = '80%'; txt.textContent = 'Applying fixes…';
     let totalFixed = 0;
+    const perFile = []; // for the success line + console diagnostics
+    console.group('[qa-revisor] applying fixes');
+    console.log('toApply:', toApply.length, 'fixes · xliffPaths:', xliffPaths);
     for (const relPath of xliffPaths) {
       let content = await zip.file(relPath).async('string');
+      let fixedHere = 0;
+      const missedHere = [];
       for (const fix of toApply) {
         const newContent = fix.needsAI ? fix.aiCorrection : fix.correction;
-        if (!newContent) continue;
+        if (!newContent) { missedHere.push({ segId: fix.segId, reason: 'no correction text' }); continue; }
         const { result, changed } = qaFixMrkInXliff(content, fix.segId, newContent);
-        content = result; totalFixed += changed;
+        content = result;
+        if (changed === 0) missedHere.push({ segId: fix.segId, reason: 'mrk not found in this file' });
+        else fixedHere += changed;
       }
+      totalFixed += fixedHere;
+      perFile.push({ relPath, fixed: fixedHere });
+      console.log(`  · ${relPath}: ${fixedHere} fix${fixedHere===1?'':'es'} applied`,
+        missedHere.length ? `(${missedHere.length} segIds not in this file — normal for multi-file packages)` : '');
       outZip.file(relPath, content);
     }
+    console.log('totalFixed:', totalFixed);
+    console.groupEnd();
 
     bar.style.width = '93%'; txt.textContent = 'Building package…';
 
@@ -6084,8 +6109,13 @@ Output only the corrected/translated text for each item, numbered to match, one 
     setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
 
     bar.style.width = '100%';
-    txt.textContent = `✅ ${totalFixed} fix${totalFixed!==1?'es':''} applied — downloading revised package`;
-    setTimeout(() => prog.classList.remove('show'), 3000);
+    if (totalFixed === 0) {
+      txt.textContent = `⚠️ 0 fixes applied — none of the approved corrections matched a target-side <mrk> in the file(s). Check the console for details (F12).`;
+    } else {
+      const breakdown = perFile.filter(p => p.fixed > 0).map(p => `${p.fixed} in ${p.relPath.split('/').pop()}`).join(' · ');
+      txt.textContent = `✅ ${totalFixed} fix${totalFixed!==1?'es':''} applied (${breakdown}) — downloading revised file`;
+    }
+    setTimeout(() => prog.classList.remove('show'), 5000);
   } catch(e) {
     prog.classList.remove('show');
     err.style.display = 'block'; err.textContent = '❌ ' + e.message;
