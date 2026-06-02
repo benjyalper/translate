@@ -5854,43 +5854,93 @@ function qaClassifyFix(issue, actualMrkContent) {
 // ── SDLXLIFF helpers (shared) ────────────────────────────
 // Match <mrk mtype="seg" mid="N"> with any trailing attributes the SDLXLIFF
 // might carry after mid (e.g. xid="…", or other Trados-side decorations).
-// The previous indexOf lookup was strict — it only matched the bare form
-// "<mrk mtype="seg" mid="N">" with no trailing attrs, which silently dropped
-// fixes on any segment whose mrk open tag had even one extra attribute.
 function qaMrkOpenRe(segId) {
   return new RegExp(`<mrk\\s+mtype="seg"\\s+mid="${segId}"(?:\\s[^>]*)?>`, 'g');
 }
 
+// Find the matching </mrk> for a <mrk> opened at openEndIdx, using a
+// depth-balanced scan. Trados frequently NESTS mrks inside a seg mrk for
+// tracked changes (x-sdl-deleted + x-sdl-added pairs from a proofread pass).
+// The old indexOf('</mrk>') used here returned the FIRST close, which closed
+// the inner deleted-block, not the outer seg — so the tool was reading the
+// pre-proofread text and writing fixes into the deleted span. This walks the
+// tag stream and returns the index of the seg-mrk's own close.
+function qaFindMatchingMrkClose(xliff, openEndIdx) {
+  const scan = /<mrk\b[^>]*>|<\/mrk>/g;
+  scan.lastIndex = openEndIdx;
+  let depth = 1, hit;
+  while ((hit = scan.exec(xliff)) !== null) {
+    if (hit[0].startsWith('</')) {
+      if (--depth === 0) return hit.index;
+    } else {
+      depth++;
+    }
+  }
+  return -1;
+}
+
+// Given the raw content between a seg mrk's open and close tags, return the
+// LIVE target text — i.e. what a Trados user would actually see / send back.
+// Rules:
+//   • <mrk mtype="x-sdl-deleted">…</mrk>  → dropped entirely (it's the OLD)
+//   • <mrk mtype="x-sdl-added">…</mrk>    → unwrapped, inner content kept
+//   • everything else                     → passed through unchanged
+// For files with NO tracked changes this is a no-op.
+function qaExtractLiveText(segContent) {
+  let out = '';
+  let cursor = 0;
+  const trackedRe = /<mrk\s+mtype="(x-sdl-deleted|x-sdl-added)"[^>]*>/g;
+  let m;
+  while ((m = trackedRe.exec(segContent)) !== null) {
+    out += segContent.substring(cursor, m.index);
+    const innerStart = m.index + m[0].length;
+    const closeIdx   = segContent.indexOf('</mrk>', innerStart);
+    if (closeIdx === -1) { cursor = innerStart; break; }
+    if (m[1] === 'x-sdl-added') {
+      out += segContent.substring(innerStart, closeIdx);
+    }
+    // x-sdl-deleted: skip entirely
+    cursor = closeIdx + 6; // '</mrk>'.length
+    trackedRe.lastIndex = cursor;
+  }
+  out += segContent.substring(cursor);
+  return out;
+}
+
+// Return the live target text for segId, walking target-side seg mrks only.
 function qaGetMrkContent(xliff, segId) {
   const re = qaMrkOpenRe(segId);
   let m;
   while ((m = re.exec(xliff)) !== null) {
-    const idx = m.index;
+    const idx    = m.index;
     const before = xliff.substring(Math.max(0, idx - 400), idx);
-    if (before.lastIndexOf('<target') > before.lastIndexOf('<seg-source')) {
-      const cs = idx + m[0].length;
-      const ci = xliff.indexOf('</mrk>', cs);
-      return ci === -1 ? null : xliff.substring(cs, ci);
-    }
+    if (before.lastIndexOf('<target') <= before.lastIndexOf('<seg-source')) continue;
+    const cs = idx + m[0].length;
+    const ci = qaFindMatchingMrkClose(xliff, cs);
+    if (ci === -1) return null;
+    return qaExtractLiveText(xliff.substring(cs, ci));
   }
   return null;
 }
 
+// Replace the FULL content of every target-side seg mrk for segId with
+// newContent. If the segment had a tracked-change pair (deleted + added),
+// this collapses it — equivalent to "accept the proofreader's change, then
+// apply the QA correction on top" — giving the recipient a clean flat
+// target. Segments NOT being fixed keep their tracked changes intact.
 function qaFixMrkInXliff(xliff, segId, newContent) {
-  // Collect all replacement positions FIRST (target-side mrks only), then
-  // apply end → start so earlier offsets stay valid as we mutate the string.
   const re = qaMrkOpenRe(segId);
   const ops = [];
   let m;
   while ((m = re.exec(xliff)) !== null) {
-    const idx = m.index;
+    const idx    = m.index;
     const before = xliff.substring(Math.max(0, idx - 400), idx);
-    if (before.lastIndexOf('<target') > before.lastIndexOf('<seg-source')) {
-      const cs = idx + m[0].length;
-      const ci = xliff.indexOf('</mrk>', cs);
-      if (ci !== -1) ops.push({ cs, ci });
-    }
+    if (before.lastIndexOf('<target') <= before.lastIndexOf('<seg-source')) continue;
+    const cs = idx + m[0].length;
+    const ci = qaFindMatchingMrkClose(xliff, cs);
+    if (ci !== -1) ops.push({ cs, ci });
   }
+  // Apply end → start so earlier offsets stay valid as we mutate the string.
   ops.sort((a, b) => b.cs - a.cs);
   let result = xliff, changed = 0;
   for (const op of ops) {
@@ -5927,14 +5977,45 @@ async function qaParseAndPreview() {
     }
     if (!xliffContent) throw new Error('No he-IL SDLXLIFF found in package');
 
-    // Classify every issue
+    // Count tracked-change segments (proofreader's pending edits) so we can
+    // surface this to the user — affects how the apply step writes targets.
+    const trackedAdded   = (xliffContent.match(/<mrk\s+mtype="x-sdl-added"/g)   || []).length;
+    const trackedDeleted = (xliffContent.match(/<mrk\s+mtype="x-sdl-deleted"/g) || []).length;
+    const hasTrackedChanges = trackedAdded > 0 || trackedDeleted > 0;
+
+    // Precise per-segment check: does THIS segId's target mrk contain a
+    // tracked-change block inside its own balanced span? (A loose
+    // /<mrk mid="N">[^]*?<mrk x-sdl-/ regex would leak across to the NEXT
+    // segment's tracked changes.)
+    function qaSegHasTrackedChange(xliff, segId) {
+      const openRe = qaMrkOpenRe(segId);
+      let m;
+      while ((m = openRe.exec(xliff)) !== null) {
+        const idx    = m.index;
+        const before = xliff.substring(Math.max(0, idx - 400), idx);
+        if (before.lastIndexOf('<target') <= before.lastIndexOf('<seg-source')) continue;
+        const cs = idx + m[0].length;
+        const ci = qaFindMatchingMrkClose(xliff, cs);
+        if (ci === -1) return false;
+        return /<mrk\s+mtype="x-sdl-(added|deleted)"/.test(xliff.substring(cs, ci));
+      }
+      return false;
+    }
+
+    // Classify every issue — qaGetMrkContent now returns the LIVE target
+    // (the x-sdl-added content if a tracked-change pair exists), so the
+    // already-correct skip check sees what the file actually carries today,
+    // not the pre-proofread original.
     qaParsedFixes = [];
     let skipped = 0;
+    let proofreaderOverrides = 0; // live text differs from glossary AND a tracked change touched the segment
     for (const issue of rawIssues) {
       const actual = qaGetMrkContent(xliffContent, issue.segId);
       if (actual === null) continue;
       const cls = qaClassifyFix(issue, actual);
       if (cls.skip) { skipped++; continue; }
+      const segHasTrackedChange = qaSegHasTrackedChange(xliffContent, issue.segId);
+      if (segHasTrackedChange) proofreaderOverrides++;
       qaParsedFixes.push({
         ...issue,
         actualMrkContent: actual,
@@ -5942,7 +6023,8 @@ async function qaParseAndPreview() {
         correction: cls.correction || null,
         needsAI: cls.needsAI,
         mode: cls.mode,
-        aiCorrection: null
+        aiCorrection: null,
+        wasProofread: segHasTrackedChange
       });
     }
 
@@ -5950,7 +6032,16 @@ async function qaParseAndPreview() {
 
     const directN = qaParsedFixes.filter(f => !f.needsAI).length;
     const aiN     = qaParsedFixes.filter(f =>  f.needsAI).length;
+    const trackBanner = hasTrackedChanges
+      ? `<div style="margin-bottom:.5rem;padding:.5rem .7rem;background:#1e1b4b;border:1px solid #4338ca;border-radius:6px;font-size:.78rem;color:#c7d2fe">
+           ⚠️ <strong>Tracked changes detected</strong> in ${trackedAdded} segment${trackedAdded===1?'':'s'} (proofreader's pending edits).
+           The tool reads the <em>current</em> target (post-proofread) and writes a clean flat replacement when you apply a fix —
+           tracked changes are collapsed only on the segments you check.
+           ${proofreaderOverrides > 0 ? `<br><span style="color:#fbbf24">↳ ${proofreaderOverrides} flagged segment${proofreaderOverrides===1?'':'s'} had a proofreader override — review before auto-applying.</span>` : ''}
+         </div>`
+      : '';
     document.getElementById('qa-summary').innerHTML =
+      trackBanner +
       `<strong>${qaParsedFixes.length}</strong> segments to fix &nbsp;·&nbsp; ${directN} direct &nbsp;·&nbsp; ${aiN} GPT-4o &nbsp;·&nbsp; <span style="color:#94a3b8">${skipped} skipped (already correct)</span>`;
 
     const modeLabel = m => ({
@@ -5965,15 +6056,23 @@ async function qaParseAndPreview() {
         : f.type === 'damaged'
           ? `<span style="background:#ef444433;color:#fca5a5;padding:1px 5px;border-radius:4px">Damaged</span>`
           : `<span style="background:#0891b233;color:#67e8f9;padding:1px 5px;border-radius:4px">Inconsistency</span>`;
+      // "Proofread" badge: live text differs from glossary AND the proofreader
+      // touched this segment — i.e. they chose a non-glossary term on purpose.
+      // Default to UNCHECKED so the reviewer has to deliberately opt-in to
+      // overwrite a proofreader's call.
+      const proofreadBadge = f.wasProofread
+        ? `<span style="background:#f59e0b33;color:#fbbf24;padding:1px 5px;border-radius:4px;margin-left:4px" title="Proofreader changed this segment to something other than the glossary term — review before applying">Proofread</span>`
+        : '';
       const fixDisplay = f.correction
         ? `→ <strong style="color:#86efac">${f.correction}</strong>`
         : `→ <em style="color:#94a3b8">retranslate from source</em>`;
+      const defaultChecked = f.wasProofread ? '' : 'checked';
       return `<tr style="border-bottom:1px solid #1e293b">
         <td style="padding:.35rem .5rem;text-align:center">
-          <input type="checkbox" id="qacb_${idx}" checked style="accent-color:#4f46e5;cursor:pointer"/>
+          <input type="checkbox" id="qacb_${idx}" ${defaultChecked} style="accent-color:#4f46e5;cursor:pointer"/>
         </td>
         <td style="padding:.35rem .5rem;color:#94a3b8;font-family:monospace;font-size:.78rem">${f.segId}</td>
-        <td style="padding:.35rem .5rem">${typeBadge} ${modeLabel(f.mode)}</td>
+        <td style="padding:.35rem .5rem">${typeBadge} ${modeLabel(f.mode)} ${proofreadBadge}</td>
         <td style="padding:.35rem .5rem;color:#cbd5e1;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl" title="${f.strippedActual}">${f.strippedActual || '(empty)'}</td>
         <td style="padding:.35rem .5rem;color:#e2e8f0;direction:rtl">${fixDisplay}</td>
       </tr>`;
