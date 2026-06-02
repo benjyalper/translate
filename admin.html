@@ -5727,10 +5727,29 @@ function qaTermInTarget(term, target) {
   return qaHebNorm(target).includes(qaHebNorm(term));
 }
 
+// Extract the SDLXLIFF filename from an XBench row's column-A cell, e.g.
+//   "Aqua Air-西南欧.xlsx.sdlxliff (156)"  →  "Aqua Air-西南欧.xlsx.sdlxliff"
+// Returns null if the cell doesn't follow the expected pattern. Used to
+// route each fix to the correct file in multi-file QA reports (otherwise
+// fixes apply to every he-IL .sdlxliff in the package and corrupt
+// segId collisions across files).
+function qaExtractFileName(cellText) {
+  const m = String(cellText || '').match(/^(.+?\.(?:sdlxliff|xliff|mqxliff))\s*\(\d+\)$/i);
+  return m ? m[1].trim() : null;
+}
+
+// Key used to dedupe per-segment fixes. With multi-file reports a segId
+// can legitimately repeat across files (e.g. Terms.sdlxliff seg 1 and
+// Aqua Air.sdlxliff seg 1 are different segments) — keying by (file,segId)
+// keeps them distinct.
+function qaFixKey(fileName, segId) { return `${fileName || '?'}|${segId}`; }
+
 // ── Parse ALL issues from XLSX
 function qaParseAllIssues(rows) {
-  const incoFixes = new Map();
-  const ktFixes   = new Map();
+  const incoFixes  = new Map(); // (file,seg) → fix
+  const ktFixes    = new Map();
+  const dblFixes   = new Map();
+  const caseFixes  = new Map();
   let i = 0;
 
   // Pass 1: Inconsistency in Target — group-based
@@ -5750,6 +5769,7 @@ function qaParseAllIssues(rows) {
     const correctTarget = noComment.length ? String(noComment[0][3] || '').trim() : null;
     for (const r of group) {
       const sm = String(r[0]).match(/\((\d+)\)$/); if (!sm) continue;
+      const fileName = qaExtractFileName(r[0]);
       const segId  = parseInt(sm[1]);
       const source = String(r[2] || '').trim();
       const target = String(r[3] || '').trim();
@@ -5767,8 +5787,9 @@ function qaParseAllIssues(rows) {
         const tagsOk = !/<[a-zA-Z]+[^a-zA-Z0-9\s\/>]/.test(comment);
         if (tagsOk) correction = comment;
       }
-      if (correction && !incoFixes.has(segId))
-        incoFixes.set(segId, { segId, source, xliffTarget: target, correction, type: 'inconsistency' });
+      const key = qaFixKey(fileName, segId);
+      if (correction && !incoFixes.has(key))
+        incoFixes.set(key, { segId, fileName, source, xliffTarget: target, correction, type: 'inconsistency' });
     }
   }
 
@@ -5782,9 +5803,11 @@ function qaParseAllIssues(rows) {
     while (i < rows.length && /\(\d+\)$/.test(String(rows[i][0] || '').trim())) {
       const sm = String(rows[i][0]).match(/\((\d+)\)$/);
       if (sm) {
+        const fileName = qaExtractFileName(rows[i][0]);
         const segId = parseInt(sm[1]);
-        ktFixes.set(segId, {
+        ktFixes.set(qaFixKey(fileName, segId), {
           segId,
+          fileName,
           source:     String(rows[i][2] || '').trim(),
           xliffTarget:String(rows[i][3] || '').trim(),
           correctTerm,
@@ -5795,24 +5818,87 @@ function qaParseAllIssues(rows) {
     }
   }
 
-  // Pass 3: Catch damaged segments from ANY row (target is just a term but source is a sentence)
+  // Pass 3: Double Blank — target has >1 consecutive whitespace chars. Fix
+  // is mechanical (collapse to single space) and safe to apply directly.
+  i = 0;
+  while (i < rows.length) {
+    if (String(rows[i][0] || '').trim() !== 'Double Blank') { i++; continue; }
+    i++;
+    while (i < rows.length && /\(\d+\)$/.test(String(rows[i][0] || '').trim())) {
+      const sm = String(rows[i][0]).match(/\((\d+)\)$/);
+      if (sm) {
+        const fileName = qaExtractFileName(rows[i][0]);
+        const segId = parseInt(sm[1]);
+        const target = String(rows[i][3] || '');
+        const cleaned = target.replace(/[ \t]{2,}/g, ' ').replace(/^\s+|\s+$/g, '');
+        if (cleaned && cleaned !== target) {
+          dblFixes.set(qaFixKey(fileName, segId), {
+            segId, fileName,
+            source:     String(rows[i][2] || '').trim(),
+            xliffTarget: target.trim(),
+            correction: cleaned,
+            type: 'doubleblank',
+          });
+        }
+      }
+      i++;
+    }
+  }
+
+  // Pass 4: ALLUPPERCASE Mismatch — source has an all-caps token that the
+  // target dropped/translated. Header looks like "ALLUPPERCASE Mismatch
+  // Source (TOKEN)". We capture the token and stage these as GPT-assisted
+  // (the model needs the source + target + token to decide where it goes).
+  i = 0;
+  while (i < rows.length) {
+    const col0 = String(rows[i][0] || '').trim();
+    const um = col0.match(/^ALLUPPERCASE Mismatch Source\s*\((.+?)\)/i);
+    if (!um) { i++; continue; }
+    const upperToken = um[1].trim(); i++;
+    while (i < rows.length && /\(\d+\)$/.test(String(rows[i][0] || '').trim())) {
+      const sm = String(rows[i][0]).match(/\((\d+)\)$/);
+      if (sm) {
+        const fileName = qaExtractFileName(rows[i][0]);
+        const segId = parseInt(sm[1]);
+        caseFixes.set(qaFixKey(fileName, segId), {
+          segId, fileName,
+          source:     String(rows[i][2] || '').trim(),
+          xliffTarget:String(rows[i][3] || '').trim(),
+          upperToken,
+          type: 'uppercase',
+        });
+      }
+      i++;
+    }
+  }
+
+  // Pass 5: Catch damaged segments from ANY row (target is just a term but source is a sentence)
   const damagedFixes = new Map();
   for (const row of rows) {
     const sm = String(row[0] || '').match(/\((\d+)\)$/); if (!sm) continue;
+    const fileName = qaExtractFileName(row[0]);
     const segId = parseInt(sm[1]);
-    if (incoFixes.has(segId) || ktFixes.has(segId) || damagedFixes.has(segId)) continue;
+    const key = qaFixKey(fileName, segId);
+    if (incoFixes.has(key) || ktFixes.has(key) || dblFixes.has(key) || caseFixes.has(key) || damagedFixes.has(key)) continue;
     const srcPlain = String(row[2] || '').replace(/<[^>]+>/g,'').trim();
     const tgtPlain = String(row[3] || '').replace(/<[^>]+>/g,'').trim();
     const srcWords = srcPlain.split(/[\s\/&]+/).filter(w => w.length > 1).length;
     const tgtHebWords = tgtPlain.replace(/[^א-ת ]/g,' ').trim().split(/\s+/).filter(w=>w).length;
     if (srcWords >= 5 && tgtHebWords <= 2)
-      damagedFixes.set(segId, { segId, source: String(row[2]||'').trim(), xliffTarget: String(row[3]||'').trim(), type: 'damaged' });
+      damagedFixes.set(key, { segId, fileName, source: String(row[2]||'').trim(), xliffTarget: String(row[3]||'').trim(), type: 'damaged' });
   }
 
-  // Merge: key term > inconsistency; damaged if not already covered
+  // Merge: key term > inconsistency; double-blank, uppercase, damaged on top
+  // (deduped by (file,seg) key, not just segId, so multi-file reports work).
   const all = [...ktFixes.values()];
-  for (const f of incoFixes.values()) if (!ktFixes.has(f.segId)) all.push(f);
-  for (const f of damagedFixes.values()) all.push(f);
+  const seen = new Set(ktFixes.keys());
+  const addUnseen = map => {
+    for (const [k, v] of map) if (!seen.has(k)) { all.push(v); seen.add(k); }
+  };
+  addUnseen(incoFixes);
+  addUnseen(dblFixes);
+  addUnseen(caseFixes);
+  addUnseen(damagedFixes);
   return all.sort((a, b) => a.segId - b.segId);
 }
 
@@ -5822,11 +5908,31 @@ function qaClassifyFix(issue, actualMrkContent) {
   const hasXml    = /<[^>]+>/.test(actualMrkContent);
   const correction = issue.type === 'keyterm'      ? issue.correctTerm
                    : issue.type === 'inconsistency' ? issue.correction
-                   : null; // damaged
+                   : issue.type === 'doubleblank'   ? issue.correction
+                   : null; // damaged, uppercase
 
   // False-positive: correct term already effectively in target (and target is not just the term)
   if (issue.type === 'keyterm' && stripped.length > correction.length + 5 && qaTermInTarget(correction, stripped))
     return { skip: true, reason: 'already correct' };
+
+  // Double Blank — direct mechanical fix (collapse whitespace). Always safe.
+  // We work on the RAW MRK content (which may carry tracked-change pairs)
+  // and only collapse whitespace in TEXT NODES, leaving every tag interior
+  // alone. This way the proofreader's tracked changes survive the fix.
+  if (issue.type === 'doubleblank') {
+    const hasInline = /<[^>]+>/.test(actualMrkContent);
+    const corrected = hasInline
+      ? actualMrkContent.replace(/([^<]+)|(<[^>]+>)/g,
+          (_m, text, tag) => tag ? tag : text.replace(/[ \t]{2,}/g, ' '))
+      : actualMrkContent.replace(/[ \t]{2,}/g, ' ');
+    return { needsAI: false, mode: 'direct', correction: corrected, stripped };
+  }
+
+  // ALLUPPERCASE — needs GPT to weave the upper-case token into the right
+  // place in the Hebrew target (usually replacing the translated form of it).
+  if (issue.type === 'uppercase') {
+    return { needsAI: true, mode: 'preserve_case', stripped };
+  }
 
   // Damaged detection: for any type — short Hebrew target for a long English source
   const srcWords = issue.source.replace(/<[^>]+>/g,'').split(/\s+/).filter(w=>w.length>1).length;
@@ -5834,13 +5940,18 @@ function qaClassifyFix(issue, actualMrkContent) {
   const isDamaged = issue.type === 'damaged' || (srcWords >= 5 && tgtHeb <= 2);
   if (isDamaged) return { needsAI: true, mode: 'retranslate', stripped };
 
+  // Tag-safety guard: if the correction contains inline XML (e.g. <g id="N">)
+  // but the live target does NOT, doing a direct replace would orphan those
+  // tags inside a segment whose source has no matching placeholder. Demote
+  // to GPT so the model can decide whether to strip the tag or keep it.
+  const correctionHasXml = correction && /<[a-z][^>]*>/i.test(correction);
+  if (issue.type === 'inconsistency' && correctionHasXml && !hasXml) {
+    return { needsAI: true, mode: 'inconsistency_xml', correction, stripped };
+  }
+
   // Direct mode is only safe when the entire target IS approximately the term.
   // If the target is a sentence containing the wrong term, replacing the WHOLE
-  // target with just the term destroys the surrounding translation. For
-  // key-term mismatches this is the most common failure mode — sentences like
-  // "rated power of 320W" got overwritten with just "rated power".
-  // Heuristic: direct OK only when target length is within ~1.6× the term's
-  // length AND there's no inline XML in the target.
+  // target with just the term destroys the surrounding translation.
   const lenRatio = correction ? stripped.length / Math.max(1, correction.length) : 99;
   const targetIsApproxTheTerm = lenRatio <= 1.6;
   if (!hasXml && stripped.length <= 70 && targetIsApproxTheTerm) {
@@ -5879,6 +5990,25 @@ function qaFindMatchingMrkClose(xliff, openEndIdx) {
   return -1;
 }
 
+// Determine whether a seg mrk at mrkOpenIdx is on the target side. SDLXLIFF
+// puts seg mrks inside three blocks per trans-unit: <source>, <seg-source>,
+// and <target>. The previous heuristic looked BACKWARDS 400 chars for the
+// nearest <target>/<seg-source> opener — but files with long source blocks
+// (Aqua Air has hundreds of mrks packed inside one seg-source) blow past
+// that window, leaving the function unable to detect target side and
+// silently dropping fixes (e.g. seg 137). This scans FORWARD to the next
+// closing block tag instead — whichever of </target>, </seg-source>,
+// </source> appears first identifies the containing block.
+function qaIsTargetSideMrk(xliff, mrkOpenIdx) {
+  const tgt = xliff.indexOf('</target>',     mrkOpenIdx);
+  const sgs = xliff.indexOf('</seg-source>', mrkOpenIdx);
+  const src = xliff.indexOf('</source>',     mrkOpenIdx);
+  const candidates = [['target', tgt], ['seg-source', sgs], ['source', src]]
+    .filter(([, i]) => i !== -1)
+    .sort((a, b) => a[1] - b[1]);
+  return candidates.length > 0 && candidates[0][0] === 'target';
+}
+
 // Given the raw content between a seg mrk's open and close tags, return the
 // LIVE target text — i.e. what a Trados user would actually see / send back.
 // Rules:
@@ -5912,10 +6042,8 @@ function qaGetMrkContent(xliff, segId) {
   const re = qaMrkOpenRe(segId);
   let m;
   while ((m = re.exec(xliff)) !== null) {
-    const idx    = m.index;
-    const before = xliff.substring(Math.max(0, idx - 400), idx);
-    if (before.lastIndexOf('<target') <= before.lastIndexOf('<seg-source')) continue;
-    const cs = idx + m[0].length;
+    if (!qaIsTargetSideMrk(xliff, m.index)) continue;
+    const cs = m.index + m[0].length;
     const ci = qaFindMatchingMrkClose(xliff, cs);
     if (ci === -1) return null;
     return qaExtractLiveText(xliff.substring(cs, ci));
@@ -5933,10 +6061,8 @@ function qaFixMrkInXliff(xliff, segId, newContent) {
   const ops = [];
   let m;
   while ((m = re.exec(xliff)) !== null) {
-    const idx    = m.index;
-    const before = xliff.substring(Math.max(0, idx - 400), idx);
-    if (before.lastIndexOf('<target') <= before.lastIndexOf('<seg-source')) continue;
-    const cs = idx + m[0].length;
+    if (!qaIsTargetSideMrk(xliff, m.index)) continue;
+    const cs = m.index + m[0].length;
     const ci = qaFindMatchingMrkClose(xliff, cs);
     if (ci !== -1) ops.push({ cs, ci });
   }
@@ -5965,15 +6091,19 @@ async function qaParseAndPreview() {
 
     qaRpxBuf = await qaRpxFile.arrayBuffer(); // store so apply() can reuse without re-reading
     const zip = await JSZip.loadAsync(qaRpxBuf);
-    // Concatenate ALL he-IL .sdlxliff contents so qaGetMrkContent can find
-    // segments regardless of which file they live in. Previously we broke
-    // after the first match, which silently dropped issues for segments in
-    // any additional .sdlxliff files inside the package.
-    let xliffContent = '';
+    // Load each he-IL .sdlxliff separately. We keep both a per-file map
+    // (so a fix routed to a specific file reads THAT file's segment) and
+    // a concatenation (used as fallback when an XBench row didn't carry a
+    // filename, for backwards-compat with older reports).
+    const xliffByMatchName = {};  // basename (no synthetic prefix) → content
+    let xliffContent = '';        // legacy fallback
     for (const [relPath, entry] of Object.entries(zip.files)) {
-      if (!entry.dir && relPath.endsWith('.sdlxliff') && /^he[-_]/i.test(relPath.split('/')[0])) {
-        xliffContent += (xliffContent ? '\n' : '') + (await entry.async('string'));
-      }
+      if (entry.dir || !relPath.endsWith('.sdlxliff')) continue;
+      if (!/^he[-_]/i.test(relPath.split('/')[0])) continue;
+      const content = await entry.async('string');
+      const matchName = relPath.split('/').pop().replace(/^\d+_/, '');
+      xliffByMatchName[matchName] = content;
+      xliffContent += (xliffContent ? '\n' : '') + content;
     }
     if (!xliffContent) throw new Error('No he-IL SDLXLIFF found in package');
 
@@ -5991,16 +6121,25 @@ async function qaParseAndPreview() {
       const openRe = qaMrkOpenRe(segId);
       let m;
       while ((m = openRe.exec(xliff)) !== null) {
-        const idx    = m.index;
-        const before = xliff.substring(Math.max(0, idx - 400), idx);
-        if (before.lastIndexOf('<target') <= before.lastIndexOf('<seg-source')) continue;
-        const cs = idx + m[0].length;
+        if (!qaIsTargetSideMrk(xliff, m.index)) continue;
+        const cs = m.index + m[0].length;
         const ci = qaFindMatchingMrkClose(xliff, cs);
         if (ci === -1) return false;
         return /<mrk\s+mtype="x-sdl-(added|deleted)"/.test(xliff.substring(cs, ci));
       }
       return false;
     }
+
+    // Pick the right SDLXLIFF content for each fix. When the XBench report
+    // names a specific file, use THAT file's content (avoids collision
+    // segId mis-reads — e.g. Terms.sdlxliff seg 1 and Aqua Air.sdlxliff
+    // seg 1 are different segments). Returns null when the report cites a
+    // file the user didn't upload (so we can skip cleanly instead of
+    // mis-reading from a different file's segment with the same id).
+    const contentFor = (fileName) => {
+      if (fileName && fileName !== '?') return xliffByMatchName[fileName] || null;
+      return xliffContent; // legacy reports without filename → search all
+    };
 
     // Classify every issue — qaGetMrkContent now returns the LIVE target
     // (the x-sdl-added content if a tracked-change pair exists), so the
@@ -6009,12 +6148,16 @@ async function qaParseAndPreview() {
     qaParsedFixes = [];
     let skipped = 0;
     let proofreaderOverrides = 0; // live text differs from glossary AND a tracked change touched the segment
+    let missingSegs = 0;
+    let missingFiles = 0;
     for (const issue of rawIssues) {
-      const actual = qaGetMrkContent(xliffContent, issue.segId);
-      if (actual === null) continue;
+      const fileContent = contentFor(issue.fileName);
+      if (fileContent === null) { missingFiles++; continue; }
+      const actual = qaGetMrkContent(fileContent, issue.segId);
+      if (actual === null) { missingSegs++; continue; }
       const cls = qaClassifyFix(issue, actual);
       if (cls.skip) { skipped++; continue; }
-      const segHasTrackedChange = qaSegHasTrackedChange(xliffContent, issue.segId);
+      const segHasTrackedChange = qaSegHasTrackedChange(fileContent, issue.segId);
       if (segHasTrackedChange) proofreaderOverrides++;
       qaParsedFixes.push({
         ...issue,
@@ -6037,17 +6180,25 @@ async function qaParseAndPreview() {
            ⚠️ <strong>Tracked changes detected</strong> in ${trackedAdded} segment${trackedAdded===1?'':'s'} (proofreader's pending edits).
            The tool reads the <em>current</em> target (post-proofread) and writes a clean flat replacement when you apply a fix —
            tracked changes are collapsed only on the segments you check.
-           ${proofreaderOverrides > 0 ? `<br><span style="color:#fbbf24">↳ ${proofreaderOverrides} flagged segment${proofreaderOverrides===1?'':'s'} had a proofreader override — review before auto-applying.</span>` : ''}
+           ${proofreaderOverrides > 0 ? `<br><span style="color:#fbbf24">↳ ${proofreaderOverrides} flagged segment${proofreaderOverrides===1?'':'s'} had a proofreader override (marked <strong>Proofread</strong>) — applied by default, uncheck if you want to keep the proofreader's wording.</span>` : ''}
+         </div>`
+      : '';
+    const missingBanner = missingFiles > 0
+      ? `<div style="margin-bottom:.5rem;padding:.5rem .7rem;background:#3f1d1d;border:1px solid #b91c1c;border-radius:6px;font-size:.78rem;color:#fca5a5">
+           ⚠️ <strong>${missingFiles} fix${missingFiles===1?'':'es'} reference a file you didn't upload</strong> — those rows are not shown.
+           Upload the missing .sdlxliff file(s) alongside the report to include them.
          </div>`
       : '';
     document.getElementById('qa-summary').innerHTML =
-      trackBanner +
-      `<strong>${qaParsedFixes.length}</strong> segments to fix &nbsp;·&nbsp; ${directN} direct &nbsp;·&nbsp; ${aiN} GPT-4o &nbsp;·&nbsp; <span style="color:#94a3b8">${skipped} skipped (already correct)</span>`;
+      trackBanner + missingBanner +
+      `<strong>${qaParsedFixes.length}</strong> segments to fix &nbsp;·&nbsp; ${directN} direct &nbsp;·&nbsp; ${aiN} GPT-4o &nbsp;·&nbsp; <span style="color:#94a3b8">${skipped} skipped (already correct)${missingSegs ? ` · ${missingSegs} segId not found in file` : ''}</span>`;
 
     const modeLabel = m => ({
-      direct:      '<span style="color:#34d399;font-size:.7rem">direct</span>',
-      fix_term:    '<span style="color:#fbbf24;font-size:.7rem">GPT fix</span>',
-      retranslate: '<span style="color:#f87171;font-size:.7rem">GPT retranslate</span>'
+      direct:            '<span style="color:#34d399;font-size:.7rem">direct</span>',
+      fix_term:          '<span style="color:#fbbf24;font-size:.7rem">GPT fix</span>',
+      retranslate:       '<span style="color:#f87171;font-size:.7rem">GPT retranslate</span>',
+      preserve_case:     '<span style="color:#fbbf24;font-size:.7rem">GPT case</span>',
+      inconsistency_xml: '<span style="color:#fbbf24;font-size:.7rem">GPT tags</span>'
     })[m] || m;
 
     document.getElementById('qa-tbody').innerHTML = qaParsedFixes.map((f, idx) => {
@@ -6055,23 +6206,29 @@ async function qaParseAndPreview() {
         ? `<span style="background:#7c3aed33;color:#c084fc;padding:1px 5px;border-radius:4px">Key Term</span>`
         : f.type === 'damaged'
           ? `<span style="background:#ef444433;color:#fca5a5;padding:1px 5px;border-radius:4px">Damaged</span>`
-          : `<span style="background:#0891b233;color:#67e8f9;padding:1px 5px;border-radius:4px">Inconsistency</span>`;
+          : f.type === 'doubleblank'
+            ? `<span style="background:#06b6d433;color:#67e8f9;padding:1px 5px;border-radius:4px">Whitespace</span>`
+            : f.type === 'uppercase'
+              ? `<span style="background:#f59e0b33;color:#fbbf24;padding:1px 5px;border-radius:4px">Case</span>`
+              : `<span style="background:#0891b233;color:#67e8f9;padding:1px 5px;border-radius:4px">Inconsistency</span>`;
       // "Proofread" badge: live text differs from glossary AND the proofreader
-      // touched this segment — i.e. they chose a non-glossary term on purpose.
-      // Default to UNCHECKED so the reviewer has to deliberately opt-in to
-      // overwrite a proofreader's call.
+      // touched this segment. Visible as a warning but DEFAULT CHECKED — the
+      // user opted into "apply everything"; they can uncheck to honor the
+      // proofreader's call on specific rows.
       const proofreadBadge = f.wasProofread
-        ? `<span style="background:#f59e0b33;color:#fbbf24;padding:1px 5px;border-radius:4px;margin-left:4px" title="Proofreader changed this segment to something other than the glossary term — review before applying">Proofread</span>`
+        ? `<span style="background:#f59e0b33;color:#fbbf24;padding:1px 5px;border-radius:4px;margin-left:4px" title="Proofreader changed this segment to something other than the glossary term — applied by default; uncheck to keep the proofreader's wording">Proofread</span>`
+        : '';
+      const fileBadge = f.fileName && f.fileName !== '?'
+        ? `<span style="color:#64748b;font-size:.68rem;display:block;margin-top:1px" title="${f.fileName}">${f.fileName.length > 22 ? f.fileName.slice(0, 19) + '…' : f.fileName}</span>`
         : '';
       const fixDisplay = f.correction
         ? `→ <strong style="color:#86efac">${f.correction}</strong>`
         : `→ <em style="color:#94a3b8">retranslate from source</em>`;
-      const defaultChecked = f.wasProofread ? '' : 'checked';
       return `<tr style="border-bottom:1px solid #1e293b">
         <td style="padding:.35rem .5rem;text-align:center">
-          <input type="checkbox" id="qacb_${idx}" ${defaultChecked} style="accent-color:#4f46e5;cursor:pointer"/>
+          <input type="checkbox" id="qacb_${idx}" checked style="accent-color:#4f46e5;cursor:pointer"/>
         </td>
-        <td style="padding:.35rem .5rem;color:#94a3b8;font-family:monospace;font-size:.78rem">${f.segId}</td>
+        <td style="padding:.35rem .5rem;color:#94a3b8;font-family:monospace;font-size:.78rem">${f.segId}${fileBadge}</td>
         <td style="padding:.35rem .5rem">${typeBadge} ${modeLabel(f.mode)} ${proofreadBadge}</td>
         <td style="padding:.35rem .5rem;color:#cbd5e1;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl" title="${f.strippedActual}">${f.strippedActual || '(empty)'}</td>
         <td style="padding:.35rem .5rem;color:#e2e8f0;direction:rtl">${fixDisplay}</td>
@@ -6121,6 +6278,10 @@ async function qaApplyFixes() {
           const srcPlain = f.source.replace(/<[^>]+>/g,'');
           if (f.mode === 'retranslate')
             return `${j+1}. [RETRANSLATE] Source: "${srcPlain}"`;
+          if (f.mode === 'preserve_case')
+            return `${j+1}. [PRESERVE CASE] Source: "${srcPlain}" | Token to keep verbatim in target: "${f.upperToken}" | Current target: ${f.actualMrkContent}`;
+          if (f.mode === 'inconsistency_xml')
+            return `${j+1}. [INCONSISTENCY] Source: "${srcPlain}" | Current target: ${f.actualMrkContent} | Sibling translation (from a related segment, may carry tags not in THIS segment's source): ${f.correction}`;
           return `${j+1}. [FIX TERM] Source: "${srcPlain}" | Correct term: "${f.correction}" | Current target: ${f.actualMrkContent}`;
         }).join('\n');
 
@@ -6134,7 +6295,9 @@ async function qaApplyFixes() {
 `You are a Hebrew translator for a robot vacuum cleaner user manual.
 For [RETRANSLATE]: translate the English source into complete, natural Hebrew. Return the FULL translated sentence.
 For [FIX TERM]: the existing Hebrew has the wrong term. Replace ONLY that wrong term with the stated correct term. Return the COMPLETE corrected Hebrew sentence — never just the term alone.
-Preserve ALL XML tags exactly (like <x id="…"/>, <g id="…">).
+For [PRESERVE CASE]: the source contains an all-caps token (often a comparison word like "VS") that must appear verbatim in the target. The current Hebrew target translated/dropped it. Return the target with the verbatim token put back in the natural position (usually replacing the Hebrew word that translates it).
+For [INCONSISTENCY]: XBench thinks this segment's translation should match a sibling segment. The sibling translation may contain inline tags like <g id="N"> that DON'T belong here (this segment's source has no matching tag). Return a corrected target that uses the sibling's wording but ONLY keeps tags whose ids actually appear in THIS segment's source.
+Preserve ALL XML tags exactly (like <x id="…"/>, <g id="…">). NEVER invent tag ids.
 Output only the corrected/translated text for each item, numbered to match, one per line.` },
               { role: 'user', content: items }
             ]
@@ -6175,11 +6338,24 @@ Output only the corrected/translated text for each item, numbered to match, one 
     const perFile = []; // for the success line + console diagnostics
     console.group('[qa-revisor] applying fixes');
     console.log('toApply:', toApply.length, 'fixes · xliffPaths:', xliffPaths);
+    // Helper: derive the file's "match name" from its zip path. Strips the
+    // he-IL/ folder and the synthetic "0_" / "1_" prefix that qaOnRpx adds
+    // when bundling bare .sdlxliff uploads, so we can compare against the
+    // fileName captured from the XBench report.
+    const matchNameFor = (relPath) => relPath.split('/').pop().replace(/^\d+_/, '');
     for (const relPath of xliffPaths) {
       let content = await zip.file(relPath).async('string');
+      const fileMatchName = matchNameFor(relPath);
+      // Route fixes by filename — a fix with no captured filename ('?')
+      // applies to every file (backwards-compat for older XBench reports);
+      // otherwise it ONLY applies when the basename matches. This prevents
+      // segId collisions across files from corrupting the wrong file.
+      const fixesForThisFile = toApply.filter(f =>
+        !f.fileName || f.fileName === '?' || f.fileName === fileMatchName
+      );
       let fixedHere = 0;
       const missedHere = [];
-      for (const fix of toApply) {
+      for (const fix of fixesForThisFile) {
         const newContent = fix.needsAI ? fix.aiCorrection : fix.correction;
         if (!newContent) { missedHere.push({ segId: fix.segId, reason: 'no correction text' }); continue; }
         const { result, changed } = qaFixMrkInXliff(content, fix.segId, newContent);
@@ -6189,8 +6365,8 @@ Output only the corrected/translated text for each item, numbered to match, one 
       }
       totalFixed += fixedHere;
       perFile.push({ relPath, fixed: fixedHere });
-      console.log(`  · ${relPath}: ${fixedHere} fix${fixedHere===1?'':'es'} applied`,
-        missedHere.length ? `(${missedHere.length} segIds not in this file — normal for multi-file packages)` : '');
+      console.log(`  · ${relPath} (matched as "${fileMatchName}"): ${fixedHere} fix${fixedHere===1?'':'es'} applied`,
+        missedHere.length ? `· ${missedHere.length} skipped (segId not in this file)` : '');
       outZip.file(relPath, content);
     }
     console.log('totalFixed:', totalFixed);
