@@ -5909,11 +5909,18 @@ function qaClassifyFix(issue, actualMrkContent) {
   const correction = issue.type === 'keyterm'      ? issue.correctTerm
                    : issue.type === 'inconsistency' ? issue.correction
                    : issue.type === 'doubleblank'   ? issue.correction
+                   : issue.type === 'chinese'       ? issue.correction
                    : null; // damaged, uppercase
 
   // False-positive: correct term already effectively in target (and target is not just the term)
   if (issue.type === 'keyterm' && stripped.length > correction.length + 5 && qaTermInTarget(correction, stripped))
     return { skip: true, reason: 'already correct' };
+
+  // Chinese-source passthrough — copy the source verbatim into the target.
+  // Always direct mode; the source carries any inline tags that need to stay.
+  if (issue.type === 'chinese') {
+    return { needsAI: false, mode: 'direct', correction, stripped };
+  }
 
   // Double Blank — direct mechanical fix (collapse whitespace). Always safe.
   // We work on the RAW MRK content (which may carry tracked-change pairs)
@@ -6076,6 +6083,64 @@ function qaFixMrkInXliff(xliff, segId, newContent) {
   return { result, changed };
 }
 
+// ── Chinese-source passthrough scan ───────────────────────
+// Scan each uploaded SDLXLIFF for segments whose SOURCE is predominantly
+// Chinese (≥50% Han characters among non-whitespace). Those are usually
+// placeholders ("英文文案" = "English copy text", "亚马逊主图" = "Amazon main
+// image") that should be copied verbatim into the target. If the live
+// target already equals the source, no fix needed; otherwise propose
+// "copy source into target." Runs in addition to the XBench report so it
+// catches segments the report didn't flag.
+function qaScanChinesePassthrough(xliffByName) {
+  const HAN = /\p{Script=Han}/u;
+  const fixes = [];
+  for (const [fileName, content] of Object.entries(xliffByName)) {
+    const openRe = /<mrk\s+mtype="seg"\s+mid="(\d+)"(?:\s[^>]*)?>/g;
+    const seen = new Set();
+    let m;
+    while ((m = openRe.exec(content)) !== null) {
+      const segId = m[1];
+      if (seen.has(segId)) continue;
+      // Only scan the seg-source side (skips the bare <source> and <target>).
+      const idx = m.index;
+      const tgt = content.indexOf('</target>',     idx);
+      const sgs = content.indexOf('</seg-source>', idx);
+      const src = content.indexOf('</source>',     idx);
+      const cands = [['target', tgt], ['seg-source', sgs], ['source', src]]
+        .filter(([, i]) => i !== -1)
+        .sort((a, b) => a[1] - b[1]);
+      if (cands.length === 0 || cands[0][0] !== 'seg-source') continue;
+      seen.add(segId);
+      const cs = idx + m[0].length;
+      const ci = qaFindMatchingMrkClose(content, cs);
+      if (ci === -1) continue;
+      const sourceRaw = content.substring(cs, ci);
+      const sourcePlain = sourceRaw.replace(/<[^>]+>/g, '').trim();
+      if (!sourcePlain) continue;
+      // Chinese ratio over non-whitespace chars
+      const nonSpace = [...sourcePlain].filter(c => !/\s/.test(c));
+      if (nonSpace.length === 0) continue;
+      const cnCount = nonSpace.filter(c => HAN.test(c)).length;
+      if (cnCount / nonSpace.length < 0.5) continue;
+      // Live target — extract via the same tracked-change-aware reader so
+      // we compare against what Trados actually shows.
+      const liveTarget = qaGetMrkContent(content, segId);
+      if (liveTarget === null) continue;
+      const targetPlain = liveTarget.replace(/<[^>]+>/g, '').trim();
+      if (targetPlain === sourcePlain) continue;
+      fixes.push({
+        segId: parseInt(segId, 10),
+        fileName,
+        source: sourceRaw,
+        xliffTarget: liveTarget,
+        correction: sourceRaw, // verbatim copy, including any inline tags
+        type: 'chinese',
+      });
+    }
+  }
+  return fixes;
+}
+
 // ── Parse + Preview ──────────────────────────────────────
 async function qaParseAndPreview() {
   const btn  = document.getElementById('qa-parse-btn');
@@ -6087,7 +6152,8 @@ async function qaParseAndPreview() {
     const wb   = XLSX.read(qaXlsxBuf, { type: 'array' });
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
     const rawIssues = qaParseAllIssues(rows);
-    if (!rawIssues.length) throw new Error('No fixable issues found in QA report');
+    // Note: we DON'T throw on empty rawIssues here — the Chinese-passthrough
+    // scan below can still add fixes even when the XBench report is empty.
 
     qaRpxBuf = await qaRpxFile.arrayBuffer(); // store so apply() can reuse without re-reading
     const zip = await JSZip.loadAsync(qaRpxBuf);
@@ -6106,6 +6172,19 @@ async function qaParseAndPreview() {
       xliffContent += (xliffContent ? '\n' : '') + content;
     }
     if (!xliffContent) throw new Error('No he-IL SDLXLIFF found in package');
+
+    // Chinese-source passthrough scan (always runs, independent of the
+    // XBench report). Adds fixes for segments whose source is predominantly
+    // Chinese and whose target was translated away from the source.
+    const chineseFixes = qaScanChinesePassthrough(xliffByMatchName);
+    const issueKeys = new Set(rawIssues.map(i => `${i.fileName || '?'}|${i.segId}`));
+    let chinesePassthroughAdded = 0;
+    for (const cf of chineseFixes) {
+      const k = `${cf.fileName}|${cf.segId}`;
+      if (!issueKeys.has(k)) { rawIssues.push(cf); chinesePassthroughAdded++; }
+    }
+    if (!rawIssues.length)
+      throw new Error('No fixable issues found in QA report and no Chinese-source mismatches detected.');
 
     // Count tracked-change segments (proofreader's pending edits) so we can
     // surface this to the user — affects how the apply step writes targets.
@@ -6189,9 +6268,12 @@ async function qaParseAndPreview() {
            Upload the missing .sdlxliff file(s) alongside the report to include them.
          </div>`
       : '';
+    const chineseNote = chinesePassthroughAdded > 0
+      ? ` &nbsp;·&nbsp; <span style="color:#fca5a5">${chinesePassthroughAdded} Chinese-source passthrough</span>`
+      : '';
     document.getElementById('qa-summary').innerHTML =
       trackBanner + missingBanner +
-      `<strong>${qaParsedFixes.length}</strong> segments to fix &nbsp;·&nbsp; ${directN} direct &nbsp;·&nbsp; ${aiN} GPT-4o &nbsp;·&nbsp; <span style="color:#94a3b8">${skipped} skipped (already correct)${missingSegs ? ` · ${missingSegs} segId not found in file` : ''}</span>`;
+      `<strong>${qaParsedFixes.length}</strong> segments to fix &nbsp;·&nbsp; ${directN} direct &nbsp;·&nbsp; ${aiN} GPT-4o &nbsp;·&nbsp; <span style="color:#94a3b8">${skipped} skipped (already correct)${missingSegs ? ` · ${missingSegs} segId not found in file` : ''}</span>${chineseNote}`;
 
     const modeLabel = m => ({
       direct:            '<span style="color:#34d399;font-size:.7rem">direct</span>',
@@ -6210,7 +6292,9 @@ async function qaParseAndPreview() {
             ? `<span style="background:#06b6d433;color:#67e8f9;padding:1px 5px;border-radius:4px">Whitespace</span>`
             : f.type === 'uppercase'
               ? `<span style="background:#f59e0b33;color:#fbbf24;padding:1px 5px;border-radius:4px">Case</span>`
-              : `<span style="background:#0891b233;color:#67e8f9;padding:1px 5px;border-radius:4px">Inconsistency</span>`;
+              : f.type === 'chinese'
+                ? `<span style="background:#dc262633;color:#fca5a5;padding:1px 5px;border-radius:4px" title="Source is predominantly Chinese — target will be replaced with the source verbatim">CN source</span>`
+                : `<span style="background:#0891b233;color:#67e8f9;padding:1px 5px;border-radius:4px">Inconsistency</span>`;
       // "Proofread" badge: live text differs from glossary AND the proofreader
       // touched this segment. Visible as a warning but DEFAULT CHECKED — the
       // user opted into "apply everything"; they can uncheck to honor the
