@@ -9935,7 +9935,51 @@ async function dtTranslate() {
     } else if (ext === 'pptx') {
       result = await dtTranslatePptx(dtFile, sourceLang, targetLang, model, apiKey, { bar, txt });
     } else if (ext === 'xlsx') {
-      if (dtLocTestEnabled) {
+      // Auto-detect a loc-test paper even if the user forgot to check the
+      // box. If the xlsx has a header row with both "source" and "target"
+      // columns AND a glossary has been loaded, the only sane interpretation
+      // is loc-test mode — running generic mode would translate every cell
+      // including the source column, destroying the deliverable.
+      let useLocTest = dtLocTestEnabled;
+      if (!useLocTest && dtLocTestGlossary.length > 0) {
+        try {
+          const probe = await dtLocTestReadXlsxRows(dtFile);
+          for (let i = 0; i < Math.min(probe.length, 6); i++) {
+            const lowered = (probe[i] || []).map(c => (c || '').toString().trim().toLowerCase());
+            if (lowered.includes('source') && lowered.includes('target')) {
+              useLocTest = true;
+              dtLocTestEnabled = true;
+              const cb = document.getElementById('dt-loctest-enable');
+              if (cb) cb.checked = true;
+              showAdminToast('🧪 Auto-enabled Localization Test Mode (detected source/target columns + glossary loaded)');
+              break;
+            }
+          }
+        } catch { /* probe failed — fall through to manual routing */ }
+      }
+      // If user disabled loc-test mode but the file STILL looks like a test
+      // paper, warn before nuking the source column.
+      if (!useLocTest) {
+        try {
+          const probe2 = await dtLocTestReadXlsxRows(dtFile);
+          for (let i = 0; i < Math.min(probe2.length, 6); i++) {
+            const lowered = (probe2[i] || []).map(c => (c || '').toString().trim().toLowerCase());
+            if (lowered.includes('source') && lowered.includes('target')) {
+              const proceed = confirm(
+                '⚠️ This .xlsx has "source" and "target" columns — it looks like a localization test paper.\n\n' +
+                'Generic mode will translate EVERY string cell, including the source column and headers, destroying the deliverable.\n\n' +
+                'OK = proceed with generic mode anyway (DANGEROUS)\nCancel = stop, let me enable Localization Test Mode first'
+              );
+              if (!proceed) throw new Error('Cancelled — enable 🧪 Localization Test Mode and re-run');
+              break;
+            }
+          }
+        } catch (e) {
+          if (/Cancelled/.test(e.message)) throw e;
+          /* probe failed — proceed silently */
+        }
+      }
+      if (useLocTest) {
         result = await dtTranslateLocTestXlsx(dtFile, sourceLang, targetLang, model, apiKey, { bar, txt });
       } else {
         result = await dtTranslateXlsx(dtFile, sourceLang, targetLang, model, apiKey, { bar, txt });
