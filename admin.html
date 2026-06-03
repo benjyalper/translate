@@ -11187,35 +11187,44 @@ async function dtLocTestTranslateOne(args) {
     }
   }
 
-  const sys = `You are a senior English→Hebrew localization translator working on a paid translation test for a major tech client. Your translation will be graded: 1 major error = -25, 1 minor error = -5, passing score = 90.
+  // ── PLAIN-TEXT mode (not JSON) ─────────────────────────────────────
+  // JSON mode + GPT-5.4's reasoning tokens + an empty `context` column
+  // turned out to be a deadly combo: when context is empty the model
+  // burns 3-4k reasoning tokens trying to infer tone/register, hits the
+  // completion cap before emitting the JSON, and returns `{}` (which
+  // parses cleanly but yields an empty translation). It also tends to
+  // emit `&#10;` literals for real newlines under JSON mode. Plain text
+  // sidesteps both issues — the model just outputs Hebrew, we strip any
+  // wrapping noise, and we're done.
+  const sys = `You are a professional English→Hebrew localization translator for TikTok.
 
-YOU MUST FOLLOW THE STYLE GUIDE AND GLOSSARY EXACTLY. Deviations are scored as errors.
+STYLE GUIDE (apply these rules — they are graded):
+${styleGuide || '(none provided — use professional Israeli Hebrew, gender-neutral with slash form for verbs, conversational casual register, free translation over literal where it sounds more natural)'}
 
-═══ STYLE GUIDE ═══
-${styleGuide || '(none provided — use professional Israeli Hebrew, second-person plural for app UI, natural register matching the source tone, free translation over literal where appropriate)'}
+${fixed.length ? `GLOSSARY (use these exact Hebrew renderings — these are binding):
+${fixed.map(s => '  • ' + s).join('\n')}` : ''}${dnt.length ? `
 
-═══ GLOSSARY (BINDING) ═══
-${fixed.length ? 'Use these exact Hebrew renderings when the corresponding English term appears in the source:\n' + fixed.map(s => '  • ' + s).join('\n') : '(no glossary matches for this segment — translate naturally)'}
-${dnt.length ? '\nDO NOT TRANSLATE these terms — keep them in English exactly as written:\n' + dnt.map(s => '  • ' + s).join('\n') : ''}
+DO NOT TRANSLATE these terms — keep them in English exactly as written:
+${dnt.map(s => '  • ' + s).join('\n')}` : ''}
 
-═══ PLACEHOLDER PROTECTION ═══
-Tokens that look like ⟦PH0⟧, ⟦PH1⟧, ⟦PH2⟧… are MASKED PLACEHOLDERS. Output them VERBATIM in their natural position in the Hebrew sentence. Never alter, translate, or remove them.
+PLACEHOLDERS: any token shaped like ⟦PH0⟧, ⟦PH1⟧, ⟦PH2⟧ etc. is a MASKED PLACEHOLDER. Output it verbatim in the natural Hebrew position. Never alter or remove.
 
-═══ TASK ═══
-Translate the following English string into Hebrew.
+OUTPUT RULES:
+- Output ONLY the Hebrew translation.
+- No prefix like "Translation:" or "Hebrew:".
+- No quotes around the translation.
+- No commentary, no explanation, no markdown.
+- Preserve any newlines from the source as actual newlines.${retry ? `
 
-OUTPUT FORMAT: JSON only, exactly:
-{ "translation": "…Hebrew text with placeholders intact…" }
+⚠️ RETRY: a previous attempt returned empty. Output the Hebrew now. Do not deliberate — translate directly.` : ''}`;
 
-No commentary, no explanations, no markdown.${retry ? `
-
-═══ RETRY NOTICE ═══
-A previous attempt at this same segment returned EMPTY. Do NOT return an empty translation. Emit the Hebrew text under the "translation" key. Keep your output BRIEF — do not include any internal reasoning, just the final Hebrew.` : ''}`;
-
+  // Build the user message. Always include the source. Context is optional;
+  // when missing we still proceed — the style guide gives enough guidance.
   const userParts = [];
-  if (key) userParts.push(`STRING KEY: ${key}`);
-  if (context && context.trim()) userParts.push(`CONTEXT (where this string appears / what it does):\n${context.trim()}`);
-  userParts.push(`SOURCE (English):\n${source}`);
+  if (key) userParts.push(`KEY: ${key}`);
+  if (context && context.trim()) userParts.push(`CONTEXT:\n${context.trim()}`);
+  userParts.push(`ENGLISH:\n${source}`);
+  userParts.push(`HEBREW:`);
   const user = userParts.join('\n\n');
 
   const r = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -11223,14 +11232,12 @@ A previous attempt at this same segment returned EMPTY. Do NOT return an empty t
     headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model,
-      response_format: { type: 'json_object' },
+      // No response_format: { type: 'json_object' } — plain text path.
       messages: [{ role: 'system', content: sys }, { role: 'user', content: user }],
-      // Bumped from 800 to 4000: GPT-5.4 uses internal reasoning tokens that
-      // count against this cap; an 800-budget routinely truncates the visible
-      // output before the JSON closes, leaving us with {"translation": ""} or
-      // unparseable fragments. 4000 covers any single segment in the test
-      // paper with plenty of headroom.
-      max_completion_tokens: 4000,
+      // 16000 cap: GPT-5.4 reasoning tokens count here. Single-segment
+      // translation needs only ~200 output tokens, but reasoning can eat
+      // several thousand. Generous cap removes truncation as a failure mode.
+      max_completion_tokens: 16000,
     }),
   });
   if (!r.ok) {
@@ -11243,38 +11250,54 @@ A previous attempt at this same segment returned EMPTY. Do NOT return an empty t
     dtCurrentRun.outputTokens += j.usage.completion_tokens || 0;
     dtCurrentRun.batches++;
   }
-  // Capture finish_reason so we can see in the console whether the empty
-  // output was a truncation (length) vs the model genuinely returning blank.
   const finishReason = j.choices?.[0]?.finish_reason;
-  let raw = j.choices?.[0]?.message?.content || '{}';
+  let raw = j.choices?.[0]?.message?.content || '';
+  // Strip markdown fences if any.
   raw = raw.replace(/^```[a-z]*\n?/i, '').replace(/```$/, '').trim();
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    console.warn('[loctest] non-JSON response for source:', source.slice(0, 80), '· raw:', raw.slice(0, 200), '· finish:', finishReason);
-    // Last-ditch: if the model returned plain text, use it directly.
-    if (raw && !raw.startsWith('{')) return raw.trim();
-    throw new Error('Model returned invalid JSON for a segment');
+  // If the model still wrapped in JSON despite plain-text mode, peel it.
+  if (raw.startsWith('{') && raw.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(raw);
+      const KNOWN_KEYS = ['translation', 'hebrew', 'he', 'text', 'output', 'result', 'answer'];
+      let inner = '';
+      for (const k of KNOWN_KEYS) {
+        if (typeof parsed[k] === 'string' && parsed[k].trim()) { inner = parsed[k]; break; }
+      }
+      if (!inner && parsed && typeof parsed === 'object') {
+        for (const v of Object.values(parsed)) {
+          if (typeof v === 'string' && v.trim()) { inner = v; break; }
+        }
+      }
+      if (inner) raw = inner;
+    } catch { /* not actually JSON — keep as-is */ }
   }
-  // Lenient extraction — translate may come back under any of several keys.
-  // Try known keys first, then fall back to the first non-empty string value
-  // in the object (handles the case where the model uses an idiosyncratic
-  // key name like "result" or "he").
-  const KNOWN_KEYS = ['translation', 'hebrew', 'he', 'text', 'output', 'result', 'answer'];
-  let result = '';
-  for (const k of KNOWN_KEYS) {
-    if (typeof parsed[k] === 'string' && parsed[k].trim()) { result = parsed[k]; break; }
-  }
-  if (!result && parsed && typeof parsed === 'object') {
-    for (const v of Object.values(parsed)) {
-      if (typeof v === 'string' && v.trim()) { result = v; break; }
+  // Strip common leading-label noise: "Translation:", "Hebrew:", "תרגום:" etc.
+  raw = raw.replace(/^(translation|hebrew|target|תרגום|עברית)\s*[:：]\s*/i, '').trim();
+  // Strip wrapping quotes (straight, curly, or Hebrew gershayim).
+  if (raw.length >= 2) {
+    const first = raw[0], last = raw[raw.length - 1];
+    if ((first === '"' && last === '"') ||
+        (first === "'" && last === "'") ||
+        (first === '“' && last === '”') ||
+        (first === '‘' && last === '’')) {
+      raw = raw.slice(1, -1);
     }
   }
-  if (!result) {
-    console.warn('[loctest] empty translation. Source:', source.slice(0, 80), '· finish:', finishReason, '· parsed keys:', Object.keys(parsed || {}), '· raw:', raw.slice(0, 200));
+  // Decode HTML/XML entities that the model sometimes emits in place of
+  // real characters (especially &#10; for newlines).
+  raw = raw
+    .replace(/&#10;/g, '\n')
+    .replace(/&#13;/g, '\r')
+    .replace(/&#9;/g, '\t')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&'); // last, to avoid double-decoding
+  if (!raw.trim()) {
+    console.warn('[loctest] empty translation. Source:', source.slice(0, 80), '· finish:', finishReason, '· usage:', j.usage);
   }
-  return result.toString();
+  return raw;
 }
 
 // ── RTF: not XML — uses backslash control words and {…} groups. We
