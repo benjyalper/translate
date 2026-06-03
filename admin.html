@@ -11180,15 +11180,21 @@ function dtLocTestPatchTargetCell(sheetXml, rowNum, colLetter, text) {
 // and a tight token cap. Used only when the full call has come back empty
 // twice already. Preserves placeholder tokens by instruction.
 async function dtLocTestTranslateMinimal({ source, model, apiKey }) {
+  // Force gpt-4o regardless of user-selected model: it's a non-reasoning
+  // model that always produces output. The whole point of the fallback
+  // is to ESCAPE whatever reasoning-budget exhaustion was eating gpt-5.4's
+  // visible output. Quality is slightly lower but never empty.
+  const fallbackModel = 'gpt-4o';
   const reqBody = {
-    model,
+    model: fallbackModel,
     messages: [
       { role: 'system', content: 'You translate English text into Hebrew. Output only the Hebrew translation, no commentary, no quotes, no prefix. If the input contains tokens like ⟦PH0⟧, ⟦PH1⟧ etc., output them verbatim in the Hebrew sentence.' },
       { role: 'user', content: source },
     ],
-    max_completion_tokens: 2000,
+    // gpt-4o uses max_tokens (not max_completion_tokens) and no reasoning.
+    max_tokens: 2000,
+    temperature: 0.2,
   };
-  if (/^gpt-5/i.test(model)) reqBody.reasoning_effort = 'low';
   try {
     const r = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
