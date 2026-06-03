@@ -11083,19 +11083,25 @@ async function dtTranslateLocTestXlsx(file, sourceLang, targetLang, model, apiKe
         styleGuide,
         model,
         apiKey,
-        // Retry: tell the model the previous attempt was empty and to focus
-        // on emitting non-empty Hebrew under the "translation" key only.
         retry: attempt > 0,
       });
       if (heMasked && heMasked.trim()) break;
       if (attempt === 0) console.warn(`[loctest] row ${seg.rowNum} empty on first try, retrying…`);
     }
+    // Last-resort fallback: strip ALL scaffolding and ask the model to
+    // translate directly. Quality is lower (no style guide, no glossary,
+    // no context) but it guarantees a non-empty cell, which is far better
+    // than blank in a graded test. The user reviews it manually anyway.
+    if (!heMasked || !heMasked.trim()) {
+      console.warn(`[loctest] row ${seg.rowNum} still empty after retry — trying minimal fallback`);
+      heMasked = await dtLocTestTranslateMinimal({ source: masked, model, apiKey });
+    }
     if (heMasked && heMasked.trim()) {
       translations[i] = dtLocTestUnmaskPlaceholders(heMasked, placeholders);
     } else {
-      translations[i] = ''; // leave the cell empty so missing rows are obvious
+      translations[i] = '';
       failedRows.push(seg.rowNum);
-      console.warn(`[loctest] row ${seg.rowNum} FAILED after retry. Source:`, seg.source.slice(0, 80));
+      console.warn(`[loctest] row ${seg.rowNum} FAILED even with minimal fallback. Source:`, seg.source.slice(0, 80));
     }
     ui.bar.style.width = (15 + (i + 1) / segments.length * 75) + '%';
     const failNote = failedRows.length ? ` · ${failedRows.length} failed` : '';
@@ -11169,6 +11175,43 @@ function dtLocTestPatchTargetCell(sheetXml, rowNum, colLetter, text) {
   return sheetXml.replace(/<\/sheetData>/, `<row r="${rowNum}">${newCell}</row></sheetData>`);
 }
 
+// Minimal-prompt fallback. No style guide, no glossary, no context — just
+// a bare "translate this to Hebrew" call with the smallest possible prompt
+// and a tight token cap. Used only when the full call has come back empty
+// twice already. Preserves placeholder tokens by instruction.
+async function dtLocTestTranslateMinimal({ source, model, apiKey }) {
+  const reqBody = {
+    model,
+    messages: [
+      { role: 'system', content: 'You translate English text into Hebrew. Output only the Hebrew translation, no commentary, no quotes, no prefix. If the input contains tokens like ⟦PH0⟧, ⟦PH1⟧ etc., output them verbatim in the Hebrew sentence.' },
+      { role: 'user', content: source },
+    ],
+    max_completion_tokens: 2000,
+  };
+  if (/^gpt-5/i.test(model)) reqBody.reasoning_effort = 'low';
+  try {
+    const r = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify(reqBody),
+    });
+    if (!r.ok) return '';
+    const j = await r.json();
+    if (dtCurrentRun && j.usage) {
+      dtCurrentRun.inputTokens  += j.usage.prompt_tokens     || 0;
+      dtCurrentRun.outputTokens += j.usage.completion_tokens || 0;
+      dtCurrentRun.batches++;
+    }
+    let raw = (j.choices?.[0]?.message?.content || '').trim();
+    raw = raw.replace(/^["'“‘](.*)["'”’]$/s, '$1');
+    raw = raw.replace(/^(translation|hebrew|target|תרגום|עברית)\s*[:：]\s*/i, '').trim();
+    return raw;
+  } catch (e) {
+    console.warn('[loctest] minimal fallback failed:', e.message);
+    return '';
+  }
+}
+
 // Single-segment GPT call with full context: style guide + glossary slice +
 // context column + key + source. Returns the Hebrew string (still masked —
 // the caller unmasks).
@@ -11233,18 +11276,24 @@ PUNCTUATION (CRITICAL — graded):
   userParts.push(`HEBREW:`);
   const user = userParts.join('\n\n');
 
+  const reqBody = {
+    model,
+    // No response_format: { type: 'json_object' } — plain text path.
+    messages: [{ role: 'system', content: sys }, { role: 'user', content: user }],
+    // 16000 cap: GPT-5.4 reasoning tokens count here. Single-segment
+    // translation needs only ~200 output tokens, but reasoning can eat
+    // several thousand. Generous cap removes truncation as a failure mode.
+    max_completion_tokens: 16000,
+  };
+  // GPT-5.x reasoning models: cap deliberation effort. Default ('medium')
+  // was consuming the entire 16000-token budget on segments without
+  // context, returning empty content. 'low' produces visible output
+  // reliably while still allowing the model to apply style/glossary rules.
+  if (/^gpt-5/i.test(model)) reqBody.reasoning_effort = 'low';
   const r = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model,
-      // No response_format: { type: 'json_object' } — plain text path.
-      messages: [{ role: 'system', content: sys }, { role: 'user', content: user }],
-      // 16000 cap: GPT-5.4 reasoning tokens count here. Single-segment
-      // translation needs only ~200 output tokens, but reasoning can eat
-      // several thousand. Generous cap removes truncation as a failure mode.
-      max_completion_tokens: 16000,
-    }),
+    body: JSON.stringify(reqBody),
   });
   if (!r.ok) {
     const j = await r.json().catch(() => ({}));
