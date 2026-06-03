@@ -11214,7 +11214,13 @@ OUTPUT RULES:
 - No prefix like "Translation:" or "Hebrew:".
 - No quotes around the translation.
 - No commentary, no explanation, no markdown.
-- Preserve any newlines from the source as actual newlines.${retry ? `
+- Preserve any newlines from the source as actual newlines.
+
+PUNCTUATION (CRITICAL — graded):
+- **Mirror the source's terminal punctuation EXACTLY.** If the source ends with a period (.), the Hebrew translation MUST end with a period. If with ! or ? or …, match it. Do not silently drop terminal punctuation.
+- Preserve mid-sentence punctuation: commas (per Hebrew grammar), em-dashes, ellipses.
+- **EXCEPTION (no period):** if the string is clearly a button label, menu item, heading, title, single short toast, acronym, or abbreviation — per the style guide — do NOT add a period even if the source lacks one. (Source without period in these contexts → Hebrew also without period.)
+- Hebrew quotation marks: straight double quotes "…" not curly “…”.${retry ? `
 
 ⚠️ RETRY: a previous attempt returned empty. Output the Hebrew now. Do not deliberate — translate directly.` : ''}`;
 
