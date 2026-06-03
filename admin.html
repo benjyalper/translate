@@ -10934,11 +10934,15 @@ async function dtLocTestReadXlsxRows(file) {
     const rowNum = parseInt(rm[1], 10);
     const inner = rm[2];
     const cells = [];
-    const cellRe = /<c\b([^>]*)>([\s\S]*?)<\/c>|<c\b([^/>]*)\/>/g;
+    // Self-close alternative MUST come first: in `[^>]*` the open-close form
+    // greedily consumes the `/` before `>`, then lazily eats forward to the
+    // next `</c>` — silently swallowing the following cell. Putting the
+    // self-close form first lets it match cleanly when present.
+    const cellRe = /<c\b([^>]*)\/>|<c\b([^>]*)>([\s\S]*?)<\/c>/g;
     let cm;
     while ((cm = cellRe.exec(inner)) !== null) {
-      const attrs = cm[1] || cm[3] || '';
-      const body  = cm[2] || '';
+      const attrs = cm[1] || cm[2] || '';
+      const body  = cm[3] || '';
       const refM = /\br="([A-Z]+)(\d+)"/.exec(attrs);
       if (!refM) continue;
       const colIdx = dtLocTestColRefToIdx(refM[1]);
