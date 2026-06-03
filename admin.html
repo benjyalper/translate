@@ -11064,23 +11064,52 @@ async function dtTranslateLocTestXlsx(file, sourceLang, targetLang, model, apiKe
   ui.bar.style.width = '15%';
 
   // Translate one-by-one for quality. 39 × ~1s = ~40s; trivial cost.
+  // On empty result we retry once with a stronger prompt directive — empties
+  // are usually transient (truncation, off-shape JSON) rather than a hard
+  // refusal, so a single retry typically rescues them.
   const translations = new Array(segments.length);
+  const failedRows = [];
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i];
     const matches = dtLocTestFindGlossaryMatches(seg.source, dtLocTestGlossary);
     const { masked, placeholders } = dtLocTestMaskPlaceholders(seg.source);
-    const heMasked = await dtLocTestTranslateOne({
-      source: masked,
-      context: seg.context,
-      key: seg.key,
-      glossaryMatches: matches,
-      styleGuide,
-      model,
-      apiKey,
-    });
-    translations[i] = dtLocTestUnmaskPlaceholders(heMasked, placeholders);
+    let heMasked = '';
+    for (let attempt = 0; attempt < 2; attempt++) {
+      heMasked = await dtLocTestTranslateOne({
+        source: masked,
+        context: seg.context,
+        key: seg.key,
+        glossaryMatches: matches,
+        styleGuide,
+        model,
+        apiKey,
+        // Retry: tell the model the previous attempt was empty and to focus
+        // on emitting non-empty Hebrew under the "translation" key only.
+        retry: attempt > 0,
+      });
+      if (heMasked && heMasked.trim()) break;
+      if (attempt === 0) console.warn(`[loctest] row ${seg.rowNum} empty on first try, retrying…`);
+    }
+    if (heMasked && heMasked.trim()) {
+      translations[i] = dtLocTestUnmaskPlaceholders(heMasked, placeholders);
+    } else {
+      translations[i] = ''; // leave the cell empty so missing rows are obvious
+      failedRows.push(seg.rowNum);
+      console.warn(`[loctest] row ${seg.rowNum} FAILED after retry. Source:`, seg.source.slice(0, 80));
+    }
     ui.bar.style.width = (15 + (i + 1) / segments.length * 75) + '%';
-    ui.txt.textContent = `Translating ${i + 1} / ${segments.length}…`;
+    const failNote = failedRows.length ? ` · ${failedRows.length} failed` : '';
+    ui.txt.textContent = `Translating ${i + 1} / ${segments.length}${failNote}…`;
+  }
+
+  if (failedRows.length) {
+    console.warn('[loctest] Failed rows after retry:', failedRows);
+    // Defer the alert until after the file is written so the user still gets
+    // a download — they can re-run the tool to retry just the failures by
+    // running the partial file back through.
+    setTimeout(() => {
+      alert(`⚠️ ${failedRows.length} of ${segments.length} segments came back empty after one retry.\n\nFailed rows: ${failedRows.join(', ')}\n\nThe downloaded file has these cells left empty so they're easy to spot. You can re-run the tool to retry, or fill them in manually.\n\nOpen DevTools console for per-row diagnostic info.`);
+    }, 500);
   }
 
   ui.txt.textContent = 'Writing translated cells…';
@@ -11144,7 +11173,7 @@ function dtLocTestPatchTargetCell(sheetXml, rowNum, colLetter, text) {
 // context column + key + source. Returns the Hebrew string (still masked —
 // the caller unmasks).
 async function dtLocTestTranslateOne(args) {
-  const { source, context, key, glossaryMatches, styleGuide, model, apiKey } = args;
+  const { source, context, key, glossaryMatches, styleGuide, model, apiKey, retry } = args;
 
   // Format glossary matches: separate DNT (Do Not Translate) entries from translatables.
   const dnt = [];
@@ -11178,7 +11207,10 @@ Translate the following English string into Hebrew.
 OUTPUT FORMAT: JSON only, exactly:
 { "translation": "…Hebrew text with placeholders intact…" }
 
-No commentary, no explanations, no markdown.`;
+No commentary, no explanations, no markdown.${retry ? `
+
+═══ RETRY NOTICE ═══
+A previous attempt at this same segment returned EMPTY. Do NOT return an empty translation. Emit the Hebrew text under the "translation" key. Keep your output BRIEF — do not include any internal reasoning, just the final Hebrew.` : ''}`;
 
   const userParts = [];
   if (key) userParts.push(`STRING KEY: ${key}`);
@@ -11193,7 +11225,12 @@ No commentary, no explanations, no markdown.`;
       model,
       response_format: { type: 'json_object' },
       messages: [{ role: 'system', content: sys }, { role: 'user', content: user }],
-      max_completion_tokens: 800,
+      // Bumped from 800 to 4000: GPT-5.4 uses internal reasoning tokens that
+      // count against this cap; an 800-budget routinely truncates the visible
+      // output before the JSON closes, leaving us with {"translation": ""} or
+      // unparseable fragments. 4000 covers any single segment in the test
+      // paper with plenty of headroom.
+      max_completion_tokens: 4000,
     }),
   });
   if (!r.ok) {
@@ -11206,11 +11243,38 @@ No commentary, no explanations, no markdown.`;
     dtCurrentRun.outputTokens += j.usage.completion_tokens || 0;
     dtCurrentRun.batches++;
   }
+  // Capture finish_reason so we can see in the console whether the empty
+  // output was a truncation (length) vs the model genuinely returning blank.
+  const finishReason = j.choices?.[0]?.finish_reason;
   let raw = j.choices?.[0]?.message?.content || '{}';
   raw = raw.replace(/^```[a-z]*\n?/i, '').replace(/```$/, '').trim();
   let parsed;
-  try { parsed = JSON.parse(raw); } catch { throw new Error('Model returned invalid JSON for a segment'); }
-  return (parsed.translation || '').toString();
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    console.warn('[loctest] non-JSON response for source:', source.slice(0, 80), '· raw:', raw.slice(0, 200), '· finish:', finishReason);
+    // Last-ditch: if the model returned plain text, use it directly.
+    if (raw && !raw.startsWith('{')) return raw.trim();
+    throw new Error('Model returned invalid JSON for a segment');
+  }
+  // Lenient extraction — translate may come back under any of several keys.
+  // Try known keys first, then fall back to the first non-empty string value
+  // in the object (handles the case where the model uses an idiosyncratic
+  // key name like "result" or "he").
+  const KNOWN_KEYS = ['translation', 'hebrew', 'he', 'text', 'output', 'result', 'answer'];
+  let result = '';
+  for (const k of KNOWN_KEYS) {
+    if (typeof parsed[k] === 'string' && parsed[k].trim()) { result = parsed[k]; break; }
+  }
+  if (!result && parsed && typeof parsed === 'object') {
+    for (const v of Object.values(parsed)) {
+      if (typeof v === 'string' && v.trim()) { result = v; break; }
+    }
+  }
+  if (!result) {
+    console.warn('[loctest] empty translation. Source:', source.slice(0, 80), '· finish:', finishReason, '· parsed keys:', Object.keys(parsed || {}), '· raw:', raw.slice(0, 200));
+  }
+  return result.toString();
 }
 
 // ── RTF: not XML — uses backslash control words and {…} groups. We
