@@ -1284,6 +1284,50 @@
           </div>
         </div>
 
+        <!-- ── 🧪 LOCALIZATION TEST MODE (glossary + style guide + context-aware) ──
+             Off by default. When enabled with an .xlsx whose header row contains
+             "source" / "target" / "context" columns (case-insensitive), the
+             translator runs in column-aware mode: only the source column is
+             translated, with glossary lookups and per-row context fed into GPT,
+             and placeholders ({...}, %s, %d%, \n, ICU plural keys) are masked
+             during the round-trip so they survive verbatim. -->
+        <details id="dt-loctest-wrap" style="margin-bottom:.7rem;border:1px solid rgba(168,85,247,.25);border-radius:8px;background:rgba(168,85,247,.04)">
+          <summary style="padding:.55rem .8rem;cursor:pointer;font-size:.82rem;color:#c4b5fd;font-weight:600;user-select:none">
+            🧪 Localization Test Mode <span style="font-weight:400;color:#94a3b8;font-size:.74rem">(glossary + style guide + context-column-aware; .xlsx only)</span>
+          </summary>
+          <div style="padding:.2rem .8rem .8rem .8rem;display:flex;flex-direction:column;gap:.6rem">
+            <label style="display:flex;align-items:center;gap:.5rem;font-size:.8rem;color:#e2e8f0">
+              <input type="checkbox" id="dt-loctest-enable" onchange="dtLocTestToggle()" style="margin:0"/>
+              <span>Enable for this .xlsx run</span>
+            </label>
+            <div>
+              <label style="font-size:.74rem;color:#94a3b8;display:block;margin-bottom:.3rem">Glossary file (.xlsx with columns <code style="color:#a5b4fc">Terms | … | Translation rule | he-IL (Hebrew)</code>)</label>
+              <label style="display:flex;align-items:center;gap:.5rem;padding:.55rem .7rem;background:#0a0a14;border:1px dashed #6d28d9;border-radius:6px;cursor:pointer;color:#cbd5e1;font-size:.78rem">
+                <span>📚 Choose glossary .xlsx</span>
+                <input type="file" id="dt-loctest-glossary" accept=".xlsx" style="display:none" onchange="dtLocTestOnGlossary(this)"/>
+              </label>
+              <div id="dt-loctest-glossary-status" style="margin-top:.3rem;font-size:.72rem;color:#94a3b8;min-height:1rem"></div>
+            </div>
+            <div>
+              <label style="font-size:.74rem;color:#94a3b8;display:block;margin-bottom:.3rem">Style guide text (paste from Lark / Google Doc / PDF — or extract from screenshots below)</label>
+              <textarea id="dt-loctest-styleguide" rows="6" placeholder="Paste the full style guide text here, OR use screenshot extraction below. Examples of rules it might contain:&#10;- Adopt free translation over literal/word-for-word.&#10;- Use second-person plural for app UI.&#10;- Sentence case for buttons.&#10;- Punctuation handling for Hebrew.&#10;…etc." style="width:100%;padding:.55rem .7rem;background:#0a0a14;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.78rem;font-family:inherit;line-height:1.5;resize:vertical"></textarea>
+            </div>
+            <div style="border-top:1px dashed rgba(168,85,247,.2);padding-top:.6rem">
+              <label style="font-size:.74rem;color:#94a3b8;display:block;margin-bottom:.3rem">📷 Or extract style guide from screenshots (one GPT-5.4 vision call → fills textarea above)</label>
+              <label style="display:flex;align-items:center;gap:.5rem;padding:.55rem .7rem;background:#0a0a14;border:1px dashed #6d28d9;border-radius:6px;cursor:pointer;color:#cbd5e1;font-size:.78rem">
+                <span>🖼️ Choose 1 or more screenshots (.png / .jpg / .webp)</span>
+                <input type="file" id="dt-loctest-sg-images" accept="image/png,image/jpeg,image/webp" multiple style="display:none" onchange="dtLocTestOnSgImages(this)"/>
+              </label>
+              <div id="dt-loctest-sg-images-status" style="margin-top:.3rem;font-size:.72rem;color:#94a3b8;min-height:1rem"></div>
+              <button class="tbtn" id="dt-loctest-sg-extract" onclick="dtLocTestExtractStyleGuide()" style="margin-top:.4rem;width:auto;padding:.5rem 1rem;font-size:.78rem;background:#1e1b4b;color:#a5b4fc" disabled>📷 Extract style guide from images</button>
+            </div>
+            <div style="font-size:.7rem;color:#64748b;line-height:1.5">
+              <strong style="color:#94a3b8">What this mode does differently:</strong>
+              translates only the <code style="color:#a5b4fc">source</code> column into the <code style="color:#a5b4fc">target</code> column · feeds the <code style="color:#a5b4fc">context</code> column into each GPT call · matches glossary terms in each source string and pins them to their fixed Hebrew renderings · honors <code style="color:#a5b4fc">DNT</code> ("Do Not Translate") glossary rules · masks placeholders like <code style="color:#a5b4fc">{s_num}</code>, <code style="color:#a5b4fc">%d%</code>, <code style="color:#a5b4fc">\n</code>, ICU <code style="color:#a5b4fc">one:</code>/<code style="color:#a5b4fc">other:</code> keys so they survive untouched · processes one segment at a time for max quality.
+            </div>
+          </div>
+        </details>
+
         <!-- Pre-flight stats appear here after file upload, then update
              live during the run, then show actual numbers when done. -->
         <div id="dt-stats" style="display:none;margin-bottom:.7rem;padding:.55rem .8rem;background:rgba(79,70,229,.06);border:1px solid rgba(79,70,229,.2);border-radius:8px;font-size:.78rem;color:#cbd5e1;line-height:1.5"></div>
@@ -9582,6 +9626,16 @@ let dtCurrentRun = null;
 // instantly without re-extracting the file.
 let dtPreflightStatsCache = null;
 
+// ── Localization Test Mode state ─────────────────────────────────────────
+// dtLocTestGlossary: array of { term, he, rule, def } parsed from the glossary
+//   xlsx. Empty until the user uploads one. Used by dtLocTestFindGlossaryMatches.
+// dtLocTestEnabled: mirror of the UI checkbox so dtTranslate() can route.
+let dtLocTestGlossary = [];
+let dtLocTestEnabled = false;
+// Style-guide screenshot extraction: holds the user-selected images as
+// File objects until they click "Extract style guide from images".
+let dtLocTestSgImages = [];
+
 // Per-million-token prices — keep in sync with the model dropdown options.
 const DT_PRICES = {
   'gpt-5.4':      { in: 2.50, out: 15.00 },
@@ -9881,7 +9935,11 @@ async function dtTranslate() {
     } else if (ext === 'pptx') {
       result = await dtTranslatePptx(dtFile, sourceLang, targetLang, model, apiKey, { bar, txt });
     } else if (ext === 'xlsx') {
-      result = await dtTranslateXlsx(dtFile, sourceLang, targetLang, model, apiKey, { bar, txt });
+      if (dtLocTestEnabled) {
+        result = await dtTranslateLocTestXlsx(dtFile, sourceLang, targetLang, model, apiKey, { bar, txt });
+      } else {
+        result = await dtTranslateXlsx(dtFile, sourceLang, targetLang, model, apiKey, { bar, txt });
+      }
     } else if (ext === 'mqxlz' || ext === 'mqxliff') {
       result = await dtTranslateMq(dtFile, ext, sourceLang, targetLang, model, apiKey, { bar, txt });
     } else {
@@ -10631,6 +10689,528 @@ async function dtTranslateXlsx(file, sourceLang, targetLang, model, apiKey, ui) 
   const baseName = file.name.replace(/\.xlsx$/i, '');
   const tag = targetLang === 'he' ? '_HE' : '_EN';
   return { blob, name: `${baseName}${tag}.xlsx`, count: translatable.length };
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// LOCALIZATION TEST MODE
+// ═════════════════════════════════════════════════════════════════════════
+// Designed for vendor/agency translation tests that ship as:
+//   1. A test paper .xlsx with `project | keys | context | source | target`
+//      columns (extra columns are tolerated; header names are matched
+//      case-insensitively).
+//   2. A glossary .xlsx with `Terms | Definition | Part of speech |
+//      Translation rule | he-IL (Hebrew)` columns.
+//   3. A free-form style guide (pasted into a textarea).
+//
+// Differences vs the generic dtTranslateXlsx path:
+//   - Reads sheet structure (not just sharedStrings) so we know which column
+//     is source vs target vs context.
+//   - Translates one segment at a time (39 segments × ~1s ≈ trivial cost)
+//     so each row gets its own context, glossary slice, and full attention.
+//   - Glossary matches are detected per-segment and pinned in the prompt;
+//     DNT entries become hard "do not translate" instructions.
+//   - Placeholders ({s_num}, %d%, \n, ICU one:/other:) are masked with
+//     sentinel tokens before the GPT call and restored after, so they
+//     can never be paraphrased away.
+//   - Writes output as inline-string cells in the target column,
+//     preserving every other cell, style, and shared-string untouched.
+// ═════════════════════════════════════════════════════════════════════════
+
+function dtLocTestToggle() {
+  dtLocTestEnabled = document.getElementById('dt-loctest-enable').checked;
+}
+
+// Parse a glossary .xlsx into [{ term, he, rule, def }] — used to find
+// matches in each source segment at translate time.
+async function dtLocTestOnGlossary(input) {
+  const file = input.files && input.files[0];
+  const status = document.getElementById('dt-loctest-glossary-status');
+  if (!file) { status.textContent = ''; dtLocTestGlossary = []; return; }
+  status.textContent = '⏳ Parsing glossary…';
+  try {
+    const rows = await dtLocTestReadXlsxRows(file);
+    // Find header row — first row whose lowercased cells include 'terms'.
+    let headerIdx = -1;
+    for (let i = 0; i < Math.min(rows.length, 5); i++) {
+      const lowered = rows[i].map(c => (c || '').toString().trim().toLowerCase());
+      if (lowered.includes('terms') || lowered.includes('term')) { headerIdx = i; break; }
+    }
+    if (headerIdx < 0) headerIdx = 0;
+    const header = rows[headerIdx].map(c => (c || '').toString().trim().toLowerCase());
+    const colTerm  = header.findIndex(h => h === 'terms' || h === 'term' || h === 'english' || h === 'en');
+    const colHe    = header.findIndex(h => /he[-_]?il/i.test(h) || /hebrew/i.test(h) || h === 'he');
+    const colRule  = header.findIndex(h => /translation\s*rule/i.test(h) || /rule/i.test(h));
+    const colDef   = header.findIndex(h => /definition/i.test(h) || /description/i.test(h));
+    if (colTerm < 0 || colHe < 0) {
+      throw new Error('Glossary must have a Terms column and a Hebrew (he-IL) column');
+    }
+    const out = [];
+    for (let i = headerIdx + 1; i < rows.length; i++) {
+      const r = rows[i] || [];
+      const term = (r[colTerm] || '').toString().trim();
+      const he   = (r[colHe]   || '').toString().trim();
+      const rule = colRule >= 0 ? (r[colRule] || '').toString().trim() : '';
+      const def  = colDef  >= 0 ? (r[colDef]  || '').toString().trim() : '';
+      if (!term) continue;
+      out.push({ term, he, rule, def });
+    }
+    dtLocTestGlossary = out;
+    status.innerHTML = `📚 <strong style="color:#a5b4fc">${out.length}</strong> glossary entries loaded`;
+  } catch (e) {
+    dtLocTestGlossary = [];
+    status.innerHTML = `❌ <span style="color:#f87171">${e.message}</span>`;
+    console.error('[loctest:glossary]', e);
+  }
+}
+
+// ── Style-guide screenshot ingest ──────────────────────────────────
+// User pastes the Lark style guide as screenshots when copy/paste is
+// blocked. We hold the File objects, then on "Extract" send them all
+// to GPT-5.4 vision in one call and dump the extracted text into the
+// styleguide textarea so the user can review/edit before translating.
+function dtLocTestOnSgImages(input) {
+  const files = [...(input.files || [])];
+  dtLocTestSgImages = files;
+  const status = document.getElementById('dt-loctest-sg-images-status');
+  const btn = document.getElementById('dt-loctest-sg-extract');
+  if (!files.length) {
+    status.textContent = '';
+    btn.disabled = true;
+    return;
+  }
+  const totalKB = (files.reduce((s, f) => s + f.size, 0) / 1024).toFixed(0);
+  status.innerHTML = `🖼️ <strong style="color:#a5b4fc">${files.length}</strong> image${files.length===1?'':'s'} ready (${totalKB} KB) — click extract`;
+  btn.disabled = false;
+}
+
+// Read a File as a base64 data URL.
+function dtLocTestFileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = () => reject(new Error('Failed to read ' + file.name));
+    fr.readAsDataURL(file);
+  });
+}
+
+async function dtLocTestExtractStyleGuide() {
+  const apiKey = getApiKey();
+  if (!apiKey) { showAdminToast('❌ Set your OpenAI key first'); return; }
+  if (!dtLocTestSgImages.length) { showAdminToast('❌ Pick screenshots first'); return; }
+
+  const btn = document.getElementById('dt-loctest-sg-extract');
+  const status = document.getElementById('dt-loctest-sg-images-status');
+  const ta = document.getElementById('dt-loctest-styleguide');
+  btn.disabled = true;
+  status.innerHTML = `⏳ Encoding ${dtLocTestSgImages.length} image${dtLocTestSgImages.length===1?'':'s'}…`;
+
+  try {
+    const dataUrls = await Promise.all(dtLocTestSgImages.map(dtLocTestFileToDataUrl));
+    status.innerHTML = `⏳ Calling GPT-5.4 vision to extract style guide…`;
+
+    const userContent = [
+      { type: 'text', text:
+`These screenshots are pages of a Hebrew localization style guide from a Lark document.
+Extract the FULL TEXT of the style guide as clean, structured Markdown.
+
+RULES:
+- Preserve every rule, every bullet, every example. Do not summarize.
+- If a rule has Hebrew examples, include them verbatim in Hebrew.
+- If a rule has DO / DON'T examples, label them clearly.
+- Use Markdown headings for sections and "- " for bullets.
+- Output ONLY the extracted style guide text. No preamble, no commentary.` },
+      ...dataUrls.map(url => ({ type: 'image_url', image_url: { url, detail: 'high' } })),
+    ];
+
+    const r = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-5.4',
+        messages: [{ role: 'user', content: userContent }],
+        max_completion_tokens: 4000,
+      }),
+    });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      throw new Error(j.error?.message || ('OpenAI ' + r.status));
+    }
+    const j = await r.json();
+    const text = (j.choices?.[0]?.message?.content || '').trim();
+    if (!text) throw new Error('Empty response from model');
+    // If the textarea already has content, append; otherwise replace.
+    if (ta.value.trim()) {
+      ta.value = ta.value.trim() + '\n\n--- Extracted from screenshots ---\n\n' + text;
+    } else {
+      ta.value = text;
+    }
+    const usage = j.usage || {};
+    const inTok = usage.prompt_tokens || 0, outTok = usage.completion_tokens || 0;
+    // Vision input tokens are ~$2.50/M for gpt-5.4 same as text; rough estimate:
+    const cost = (inTok / 1e6) * 2.50 + (outTok / 1e6) * 15.00;
+    status.innerHTML = `✅ <strong style="color:#86efac">Extracted ${text.length.toLocaleString()} chars</strong> · ${inTok.toLocaleString()} in + ${outTok.toLocaleString()} out tokens · ${dtFmtCost(cost)} · <strong style="color:#a5b4fc">review the textarea above and edit if needed</strong>`;
+  } catch (e) {
+    status.innerHTML = `❌ <span style="color:#f87171">${e.message}</span>`;
+    console.error('[loctest:extract-sg]', e);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// Generic xlsx → 2D array reader (parses sharedStrings + sheet1).
+// Returns [[cellA1, cellB1, …], [cellA2, cellB2, …], …] with sparse cells
+// padded with empty strings up to the max column seen in that row.
+async function dtLocTestReadXlsxRows(file) {
+  const buf = await file.arrayBuffer();
+  const zip = await JSZip.loadAsync(buf);
+  const sstFile = zip.file('xl/sharedStrings.xml');
+  const sst = [];
+  if (sstFile) {
+    const xml = await sstFile.async('text');
+    const re = /<si\b[^>]*>([\s\S]*?)<\/si>/g;
+    let m;
+    while ((m = re.exec(xml)) !== null) {
+      // Concatenate all <t>…</t> within the <si>.
+      const inner = m[1];
+      let text = '';
+      const tRe = /<t\b[^>]*>([\s\S]*?)<\/t>/g;
+      let tm;
+      while ((tm = tRe.exec(inner)) !== null) text += dtXmlUnescape(tm[1]);
+      sst.push(text);
+    }
+  }
+  // Pick the first sheet (sheet1.xml) — test papers always use sheet 1.
+  const sheetFile = zip.file('xl/worksheets/sheet1.xml');
+  if (!sheetFile) throw new Error('Workbook has no sheet1');
+  const sheetXml = await sheetFile.async('text');
+  const rowRe = /<row\b[^>]*\br="(\d+)"[^>]*>([\s\S]*?)<\/row>/g;
+  const out = [];
+  let rm;
+  while ((rm = rowRe.exec(sheetXml)) !== null) {
+    const rowNum = parseInt(rm[1], 10);
+    const inner = rm[2];
+    const cells = [];
+    const cellRe = /<c\b([^>]*)>([\s\S]*?)<\/c>|<c\b([^/>]*)\/>/g;
+    let cm;
+    while ((cm = cellRe.exec(inner)) !== null) {
+      const attrs = cm[1] || cm[3] || '';
+      const body  = cm[2] || '';
+      const refM = /\br="([A-Z]+)(\d+)"/.exec(attrs);
+      if (!refM) continue;
+      const colIdx = dtLocTestColRefToIdx(refM[1]);
+      const tM = /\bt="([^"]+)"/.exec(attrs);
+      const type = tM ? tM[1] : 'n';
+      let value = '';
+      if (type === 's') {
+        const vM = /<v>([^<]*)<\/v>/.exec(body);
+        if (vM) value = sst[parseInt(vM[1], 10)] || '';
+      } else if (type === 'inlineStr' || type === 'str') {
+        let txt = '';
+        const tRe = /<t\b[^>]*>([\s\S]*?)<\/t>/g;
+        let tm;
+        while ((tm = tRe.exec(body)) !== null) txt += dtXmlUnescape(tm[1]);
+        value = txt;
+      } else {
+        const vM = /<v>([^<]*)<\/v>/.exec(body);
+        if (vM) value = vM[1];
+      }
+      cells[colIdx] = value;
+    }
+    // Pad sparse cells with empty string.
+    const maxCol = cells.length;
+    for (let i = 0; i < maxCol; i++) if (cells[i] === undefined) cells[i] = '';
+    out[rowNum - 1] = cells;
+  }
+  // Fill any gap rows so the array index = (row number - 1).
+  for (let i = 0; i < out.length; i++) if (!out[i]) out[i] = [];
+  return out;
+}
+
+// Excel column letters → 0-based index. "A"→0, "Z"→25, "AA"→26.
+function dtLocTestColRefToIdx(letters) {
+  let n = 0;
+  for (let i = 0; i < letters.length; i++) n = n * 26 + (letters.charCodeAt(i) - 64);
+  return n - 1;
+}
+// 0-based index → Excel column letters.
+function dtLocTestIdxToColRef(idx) {
+  let n = idx + 1, s = '';
+  while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); }
+  return s;
+}
+
+// Find matching glossary entries for a source string. Returns entries whose
+// `term` appears in `src` (case-insensitive, longest term first). Caps at
+// the top 25 matches to keep the prompt sane on long sentences.
+function dtLocTestFindGlossaryMatches(src, glossary) {
+  if (!src || !glossary || !glossary.length) return [];
+  const lower = src.toLowerCase();
+  const hits = [];
+  for (const g of glossary) {
+    if (!g.term) continue;
+    const t = g.term.toLowerCase();
+    if (t.length < 2) continue;
+    // Word-boundary check for short Latin terms; substring for everything else.
+    if (/^[a-z0-9]+$/.test(t) && t.length <= 6) {
+      const re = new RegExp(`\\b${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+      if (re.test(src)) hits.push(g);
+    } else if (lower.includes(t)) {
+      hits.push(g);
+    }
+  }
+  // Longest term first — so "AI Alive" wins over "AI" when both match.
+  hits.sort((a, b) => b.term.length - a.term.length);
+  return hits.slice(0, 25);
+}
+
+// Placeholder masking. Sources contain things like:
+//   {s_friendsName}  {num}  {date}  {s_num}
+//   %d%  %s
+//   \n
+//   one:  other:  (Android plural keys, on their own line followed by content)
+// We replace each occurrence with a sentinel ⟦PH0⟧, ⟦PH1⟧, … and return a
+// map back. After the GPT call we restore. Sentinels use angle brackets that
+// don't normally appear in either language, so collisions are vanishingly
+// rare. GPT-5.4 is instructed to pass them through verbatim.
+function dtLocTestMaskPlaceholders(src) {
+  const placeholders = [];
+  let i = 0;
+  const sub = (match) => {
+    const token = `⟦PH${i}⟧`;
+    placeholders.push({ token, original: match });
+    i++;
+    return token;
+  };
+  let out = src;
+  // Curly-brace placeholders: {anything}
+  out = out.replace(/\{[^{}\n]+\}/g, sub);
+  // Percent-style: %d%, %s, %1$s, %d
+  out = out.replace(/%[0-9]*\$?[a-zA-Z]/g, sub);
+  out = out.replace(/%[a-zA-Z]%/g, sub);
+  // Literal \n in source (escape sequence text, not actual newline).
+  out = out.replace(/\\n/g, sub);
+  // Android plural keys at line start.
+  out = out.replace(/(^|\n)(one|other|zero|two|few|many):/g, (m, p1, p2) => p1 + sub(p2 + ':'));
+  return { masked: out, placeholders };
+}
+
+function dtLocTestUnmaskPlaceholders(text, placeholders) {
+  let out = text;
+  for (const { token, original } of placeholders) {
+    // Replace ALL occurrences just in case GPT echoed one twice.
+    out = out.split(token).join(original);
+  }
+  return out;
+}
+
+// ── Main entry point: localization-test translation of an .xlsx ──
+async function dtTranslateLocTestXlsx(file, sourceLang, targetLang, model, apiKey, ui) {
+  if (!dtLocTestGlossary.length) {
+    throw new Error('Localization Test Mode is enabled but no glossary loaded. Upload the glossary .xlsx first, or uncheck the mode.');
+  }
+  const styleGuide = (document.getElementById('dt-loctest-styleguide').value || '').trim();
+  if (!styleGuide) {
+    if (!confirm('No style guide text provided. Continue with glossary only? (Click Cancel to paste the style guide first.)')) {
+      throw new Error('Cancelled — paste style guide and re-run');
+    }
+  }
+
+  ui.txt.textContent = 'Reading test paper…';
+  ui.bar.style.width = '8%';
+
+  const buf = await file.arrayBuffer();
+  const zip = await JSZip.loadAsync(buf);
+  const sheetFile = zip.file('xl/worksheets/sheet1.xml');
+  if (!sheetFile) throw new Error('Test paper has no sheet1');
+  let sheetXml = await sheetFile.async('text');
+
+  // Pull rows out the same way as dtLocTestReadXlsxRows, but keep the
+  // raw header/source/target column indices for later patching.
+  const rows = await dtLocTestReadXlsxRows(file);
+  // Find the header row — first row containing both "source" and "target"
+  // (case-insensitive). The TikTok GienTech sheet has it at row 2.
+  let headerRowIdx = -1;
+  for (let i = 0; i < Math.min(rows.length, 6); i++) {
+    const lowered = (rows[i] || []).map(c => (c || '').toString().trim().toLowerCase());
+    if (lowered.includes('source') && lowered.includes('target')) { headerRowIdx = i; break; }
+  }
+  if (headerRowIdx < 0) {
+    throw new Error('No header row with "source" and "target" columns found. The xlsx must have a header row identifying the source and target columns.');
+  }
+  const headerCells = rows[headerRowIdx].map(c => (c || '').toString().trim().toLowerCase());
+  const colSourceIdx  = headerCells.indexOf('source');
+  const colTargetIdx  = headerCells.indexOf('target');
+  const colContextIdx = headerCells.indexOf('context'); // -1 if absent
+  const colKeysIdx    = headerCells.findIndex(h => h === 'keys' || h === 'key' || h === 'string id');
+  const targetColLetter = dtLocTestIdxToColRef(colTargetIdx);
+
+  // Collect data rows = rows after the header with non-empty source.
+  const segments = [];
+  for (let i = headerRowIdx + 1; i < rows.length; i++) {
+    const r = rows[i] || [];
+    const src = (r[colSourceIdx] || '').toString();
+    if (!src.trim()) continue;
+    // Skip "Total words"-style summary rows: source empty but other cells filled.
+    segments.push({
+      rowNum: i + 1, // 1-based for XML
+      source: src,
+      context: colContextIdx >= 0 ? (r[colContextIdx] || '').toString() : '',
+      key:     colKeysIdx    >= 0 ? (r[colKeysIdx]    || '').toString() : '',
+    });
+  }
+  if (!segments.length) throw new Error('No translatable rows found below the header row.');
+
+  ui.txt.textContent = `Translating ${segments.length} segments one at a time…`;
+  ui.bar.style.width = '15%';
+
+  // Translate one-by-one for quality. 39 × ~1s = ~40s; trivial cost.
+  const translations = new Array(segments.length);
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    const matches = dtLocTestFindGlossaryMatches(seg.source, dtLocTestGlossary);
+    const { masked, placeholders } = dtLocTestMaskPlaceholders(seg.source);
+    const heMasked = await dtLocTestTranslateOne({
+      source: masked,
+      context: seg.context,
+      key: seg.key,
+      glossaryMatches: matches,
+      styleGuide,
+      model,
+      apiKey,
+    });
+    translations[i] = dtLocTestUnmaskPlaceholders(heMasked, placeholders);
+    ui.bar.style.width = (15 + (i + 1) / segments.length * 75) + '%';
+    ui.txt.textContent = `Translating ${i + 1} / ${segments.length}…`;
+  }
+
+  ui.txt.textContent = 'Writing translated cells…';
+  // Patch sheet XML: for each segment, replace (or insert) the target-column
+  // cell with an inline-string cell containing the Hebrew translation.
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    sheetXml = dtLocTestPatchTargetCell(sheetXml, seg.rowNum, targetColLetter, translations[i]);
+  }
+  zip.file('xl/worksheets/sheet1.xml', sheetXml);
+
+  const blob = await zip.generateAsync({
+    type: 'blob',
+    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 6 },
+  });
+  const baseName = file.name.replace(/\.xlsx$/i, '');
+  return { blob, name: `${baseName}_HE.xlsx`, count: segments.length };
+}
+
+// Patch one cell at row N, column targetColLetter, inserting `text` as an
+// inline string. If the cell already exists (even if empty), replace it
+// while preserving the `s="…"` style attribute. If absent, insert at the
+// end of the row.
+function dtLocTestPatchTargetCell(sheetXml, rowNum, colLetter, text) {
+  const cellRef = colLetter + rowNum;
+  const escaped = dtXmlEscape(text);
+  // 1. Self-closed: <c r="E3" s="2"/>
+  const selfRe = new RegExp(`<c\\b([^/>]*?\\br="${cellRef}"[^/>]*?)/>`);
+  const selfM = selfRe.exec(sheetXml);
+  if (selfM) {
+    const attrs = selfM[1]
+      .replace(/\bt="[^"]*"/g, '') // drop any prior type
+      .trim();
+    const newCell = `<c ${attrs} t="inlineStr"><is><t xml:space="preserve">${escaped}</t></is></c>`.replace(/\s+/g, ' ').replace(/ >/g, '>');
+    return sheetXml.replace(selfRe, newCell);
+  }
+  // 2. Open-close: <c r="E3" s="2">…</c>
+  const openRe = new RegExp(`<c\\b([^>]*?\\br="${cellRef}"[^>]*?)>[\\s\\S]*?</c>`);
+  const openM = openRe.exec(sheetXml);
+  if (openM) {
+    const attrs = openM[1]
+      .replace(/\bt="[^"]*"/g, '')
+      .trim();
+    const newCell = `<c ${attrs} t="inlineStr"><is><t xml:space="preserve">${escaped}</t></is></c>`.replace(/\s+/g, ' ').replace(/ >/g, '>');
+    return sheetXml.replace(openRe, newCell);
+  }
+  // 3. Cell absent — insert before the </row> of the matching row.
+  const rowRe = new RegExp(`(<row\\b[^>]*\\br="${rowNum}"[^>]*>[\\s\\S]*?)</row>`);
+  const rowM = rowRe.exec(sheetXml);
+  const newCell = `<c r="${cellRef}" t="inlineStr"><is><t xml:space="preserve">${escaped}</t></is></c>`;
+  if (rowM) {
+    return sheetXml.replace(rowRe, `$1${newCell}</row>`);
+  }
+  // No such row — append a new row at the end of <sheetData>.
+  return sheetXml.replace(/<\/sheetData>/, `<row r="${rowNum}">${newCell}</row></sheetData>`);
+}
+
+// Single-segment GPT call with full context: style guide + glossary slice +
+// context column + key + source. Returns the Hebrew string (still masked —
+// the caller unmasks).
+async function dtLocTestTranslateOne(args) {
+  const { source, context, key, glossaryMatches, styleGuide, model, apiKey } = args;
+
+  // Format glossary matches: separate DNT (Do Not Translate) entries from translatables.
+  const dnt = [];
+  const fixed = [];
+  for (const g of glossaryMatches) {
+    if (/dnt|do\s*not\s*translate|don'?t\s*translate/i.test(g.rule) ||
+        /dnt|do\s*not\s*translate/i.test(g.he)) {
+      dnt.push(g.term);
+    } else if (g.he) {
+      fixed.push(`"${g.term}" → "${g.he}"`);
+    }
+  }
+
+  const sys = `You are a senior English→Hebrew localization translator working on a paid translation test for a major tech client. Your translation will be graded: 1 major error = -25, 1 minor error = -5, passing score = 90.
+
+YOU MUST FOLLOW THE STYLE GUIDE AND GLOSSARY EXACTLY. Deviations are scored as errors.
+
+═══ STYLE GUIDE ═══
+${styleGuide || '(none provided — use professional Israeli Hebrew, second-person plural for app UI, natural register matching the source tone, free translation over literal where appropriate)'}
+
+═══ GLOSSARY (BINDING) ═══
+${fixed.length ? 'Use these exact Hebrew renderings when the corresponding English term appears in the source:\n' + fixed.map(s => '  • ' + s).join('\n') : '(no glossary matches for this segment — translate naturally)'}
+${dnt.length ? '\nDO NOT TRANSLATE these terms — keep them in English exactly as written:\n' + dnt.map(s => '  • ' + s).join('\n') : ''}
+
+═══ PLACEHOLDER PROTECTION ═══
+Tokens that look like ⟦PH0⟧, ⟦PH1⟧, ⟦PH2⟧… are MASKED PLACEHOLDERS. Output them VERBATIM in their natural position in the Hebrew sentence. Never alter, translate, or remove them.
+
+═══ TASK ═══
+Translate the following English string into Hebrew.
+
+OUTPUT FORMAT: JSON only, exactly:
+{ "translation": "…Hebrew text with placeholders intact…" }
+
+No commentary, no explanations, no markdown.`;
+
+  const userParts = [];
+  if (key) userParts.push(`STRING KEY: ${key}`);
+  if (context && context.trim()) userParts.push(`CONTEXT (where this string appears / what it does):\n${context.trim()}`);
+  userParts.push(`SOURCE (English):\n${source}`);
+  const user = userParts.join('\n\n');
+
+  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      response_format: { type: 'json_object' },
+      messages: [{ role: 'system', content: sys }, { role: 'user', content: user }],
+      max_completion_tokens: 800,
+    }),
+  });
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    throw new Error(j.error?.message || ('OpenAI ' + r.status));
+  }
+  const j = await r.json();
+  if (dtCurrentRun && j.usage) {
+    dtCurrentRun.inputTokens  += j.usage.prompt_tokens     || 0;
+    dtCurrentRun.outputTokens += j.usage.completion_tokens || 0;
+    dtCurrentRun.batches++;
+  }
+  let raw = j.choices?.[0]?.message?.content || '{}';
+  raw = raw.replace(/^```[a-z]*\n?/i, '').replace(/```$/, '').trim();
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch { throw new Error('Model returned invalid JSON for a segment'); }
+  return (parsed.translation || '').toString();
 }
 
 // ── RTF: not XML — uses backslash control words and {…} groups. We
