@@ -17,6 +17,9 @@
         'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
     }
   </script>
+  <!-- Doc Screenshotter dependencies -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.7.0/mammoth.browser.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <!-- (No ffmpeg.wasm needed — we slice with the browser's native Web Audio API) -->
   <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -689,6 +692,12 @@
           <span class="tm-label">📁 Client / Firm Memory</span>
           <span class="tm-info" tabindex="0">i</span>
           <span class="tm-tip"><span class="tm-tip-title">Client / Firm Memory</span>Per-client correspondence history with a GPT-distilled running memory that informs future replies. Browse past exchanges. Use the 📨 Follow up button on any past message you replied to but never heard back on.</span>
+        </button>
+
+        <button class="toolmap-btn" onclick="scrollToTool('tool-doc-screenshotter')">
+          <span class="tm-label">📸 Doc Screenshotter</span>
+          <span class="tm-info" tabindex="0">i</span>
+          <span class="tm-tip"><span class="tm-tip-title">Doc Screenshotter</span>Upload a PDF or Word document → text re-rendered at font-size 8 → download a ZIP of page-sized PNG screenshots. Everything runs in your browser; useful for cramming long docs into the fewest possible images.</span>
         </button>
       </div>
     </div>
@@ -2245,6 +2254,53 @@
         <div id="er-firms-empty" style="font-size:.78rem;color:#64748b;padding:.6rem 0">No firms yet — generate an email with a client selected, or click "+ Add firm".</div>
         <div id="er-firms-list" style="display:flex;flex-direction:column;gap:.5rem"></div>
       </div><!-- /client-memory card -->
+
+      <!-- ── 📸 DOC SCREENSHOTTER ─────────────────────────────── -->
+      <div class="tool-card" id="tool-doc-screenshotter" style="grid-column:1/-1">
+        <div class="tool-header">
+          <div class="tool-icon">📸</div>
+          <div>
+            <div class="tool-title" data-tool-anchor="tool-doc-screenshotter">Doc Screenshotter</div>
+            <div class="tool-sub">Upload .pdf / .docx → re-render at font-size 8 → ZIP of page-sized PNG screenshots · runs entirely in your browser</div>
+          </div>
+        </div>
+        <div class="tool-divider"></div>
+
+        <div class="tdrop" id="ds-drop" style="cursor:pointer">
+          <input type="file" id="ds-file" accept=".pdf,.docx,.doc" onchange="dsOnFile(this)"/>
+          <div class="tdrop-icon">📄</div>
+          <div class="tdrop-text">Drop a PDF or Word document or click to browse<br><small>Re-flowed at 8pt to need fewer screenshots</small></div>
+        </div>
+        <div class="tdrop-sel" id="ds-file-label"></div>
+
+        <div style="display:flex;align-items:center;gap:.7rem;margin-top:.7rem;flex-wrap:wrap">
+          <label style="font-size:.74rem;color:#94a3b8">Font size:</label>
+          <input type="number" id="ds-fontsize" value="8" min="4" max="24" step="1"
+            style="width:64px;padding:.4rem .55rem;background:#0a0a14;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.78rem;text-align:center"/>
+          <span style="font-size:.7rem;color:#64748b">pt</span>
+          <label style="font-size:.74rem;color:#94a3b8;margin-left:.6rem">Resolution:</label>
+          <select id="ds-scale" style="padding:.4rem .55rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.78rem">
+            <option value="1">1× (small files)</option>
+            <option value="2" selected>2× (sharp)</option>
+            <option value="3">3× (large files)</option>
+          </select>
+        </div>
+
+        <button class="tbtn" id="ds-run-btn" onclick="dsRun()" disabled
+          style="margin-top:.8rem;width:100%;padding:.7rem 1rem;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;font-weight:700;border:none;border-radius:8px;cursor:pointer;font-size:.85rem">
+          📦 Generate screenshots ZIP
+        </button>
+
+        <div id="ds-status" style="display:none;margin-top:.7rem;font-size:.78rem;color:#cbd5e1"></div>
+        <div id="ds-progress-wrap" style="display:none;height:6px;background:#0a0a14;border-radius:4px;overflow:hidden;margin-top:.4rem">
+          <div id="ds-progress" style="height:100%;width:0%;background:linear-gradient(90deg,#4f46e5,#7c3aed);transition:width .2s"></div>
+        </div>
+        <div id="ds-done" style="display:none;margin-top:.6rem;padding:.6rem .9rem;background:#052e1a;border:1px solid #14532d;border-radius:8px;font-size:.8rem;color:#86efac"></div>
+        <div id="ds-error" style="display:none;margin-top:.6rem;padding:.6rem .9rem;background:#1a0000;border:1px solid #7f1d1d;border-radius:8px;font-size:.8rem;color:#fca5a5"></div>
+
+        <!-- Off-screen render stage -->
+        <div id="ds-stage" style="position:fixed;left:-99999px;top:0;z-index:-1;pointer-events:none"></div>
+      </div><!-- /doc-screenshotter card -->
 
     </div><!-- /.tools-grid -->
   </div><!-- /#tools-panel -->
@@ -12595,6 +12651,185 @@ async function erInitSync() {
 
 // Initialise the firm UI + sync on load
 erInitSync();
+
+/* ============================================================
+   📸  DOC SCREENSHOTTER
+   Upload a PDF or DOCX → re-render at font-size 8 → ZIP of PNGs.
+   Pure client-side (pdf.js + mammoth + html2canvas + JSZip already
+   loaded at the top of admin.html).
+   ============================================================ */
+let dsFile = null;
+const DS_PAGE_W = 816;   // 8.5" * 96 dpi
+const DS_PAGE_H = 1056;  // 11"  * 96 dpi
+
+function dsOnFile(input) {
+  dsFile = input.files && input.files[0] ? input.files[0] : null;
+  const lbl = document.getElementById('ds-file-label');
+  const btn = document.getElementById('ds-run-btn');
+  if (dsFile) {
+    lbl.textContent = `📎 ${dsFile.name} (${(dsFile.size/1024).toFixed(1)} KB)`;
+    lbl.style.display = 'block';
+    btn.disabled = false;
+  } else {
+    lbl.textContent = '';
+    lbl.style.display = 'none';
+    btn.disabled = true;
+  }
+  document.getElementById('ds-done').style.display  = 'none';
+  document.getElementById('ds-error').style.display = 'none';
+  document.getElementById('ds-status').style.display = 'none';
+  document.getElementById('ds-progress-wrap').style.display = 'none';
+}
+
+function dsSetStatus(msg, pct) {
+  const s = document.getElementById('ds-status');
+  s.textContent = msg;
+  s.style.display = 'block';
+  if (typeof pct === 'number') {
+    document.getElementById('ds-progress-wrap').style.display = 'block';
+    document.getElementById('ds-progress').style.width = pct + '%';
+  }
+}
+
+async function dsExtract(file) {
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  const buf = await file.arrayBuffer();
+
+  if (ext === 'pdf') {
+    if (!window.pdfjsLib) throw new Error('PDF.js not loaded');
+    const doc = await pdfjsLib.getDocument({ data: buf }).promise;
+    const parts = [];
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i);
+      const content = await page.getTextContent();
+      const lines = new Map();
+      for (const item of content.items) {
+        const y = Math.round(item.transform[5]);
+        if (!lines.has(y)) lines.set(y, []);
+        lines.get(y).push(item.str);
+      }
+      const sorted = Array.from(lines.entries()).sort((a, b) => b[0] - a[0]);
+      parts.push(sorted.map(([, w]) => w.join(' ')).join('\n'));
+    }
+    return { text: parts.join('\n\n') };
+  }
+
+  if (ext === 'docx' || ext === 'doc') {
+    if (!window.mammoth) throw new Error('Mammoth not loaded');
+    const result = await mammoth.convertToHtml({ arrayBuffer: buf });
+    return { html: result.value };
+  }
+
+  throw new Error(`Unsupported file type: .${ext}`);
+}
+
+async function dsRun() {
+  if (!dsFile) return;
+  const btn = document.getElementById('ds-run-btn');
+  const errEl = document.getElementById('ds-error');
+  const doneEl = document.getElementById('ds-done');
+  errEl.style.display = 'none';
+  doneEl.style.display = 'none';
+  btn.disabled = true;
+  btn.textContent = '⏳ Working…';
+
+  try {
+    const fontSize = Math.max(4, Math.min(24, parseInt(document.getElementById('ds-fontsize').value, 10) || 8));
+    const scale    = parseInt(document.getElementById('ds-scale').value, 10) || 2;
+
+    dsSetStatus('Reading file…', 5);
+    const content = await dsExtract(dsFile);
+
+    dsSetStatus('Laying out content…', 15);
+    // Recreate the stage as a direct child of <body> so it's not affected
+    // by any ancestor flex/transform/filter that would zero out its layout
+    let stage = document.getElementById('ds-stage');
+    if (stage) stage.remove();
+    stage = document.createElement('div');
+    stage.id = 'ds-stage';
+    stage.style.cssText = 'position:fixed;left:-99999px;top:0;z-index:-1;pointer-events:none';
+    document.body.appendChild(stage);
+    const inner = document.createElement('div');
+    inner.style.width = DS_PAGE_W + 'px';
+    inner.style.padding = '48px';
+    inner.style.background = '#ffffff';
+    inner.style.color = '#000000';
+    inner.style.fontFamily = 'Arial, Helvetica, sans-serif';
+    inner.style.fontSize = fontSize + 'pt';
+    inner.style.lineHeight = '1.35';
+    inner.style.boxSizing = 'border-box';
+    if (content.html) {
+      inner.innerHTML = content.html;
+      inner.querySelectorAll('*').forEach(el => {
+        el.style.fontSize = fontSize + 'pt';
+        el.style.lineHeight = '1.35';
+      });
+    } else {
+      inner.style.whiteSpace = 'pre-wrap';
+      inner.style.wordBreak = 'break-word';
+      inner.textContent = content.text || '';
+    }
+    stage.appendChild(inner);
+    await new Promise(r => requestAnimationFrame(() => r(null)));
+
+    dsSetStatus('Capturing…', 30);
+    if (!window.html2canvas) throw new Error('html2canvas not loaded');
+    const full = await html2canvas(inner, {
+      backgroundColor: '#ffffff',
+      scale: scale,
+      logging: false,
+      useCORS: true,
+    });
+
+    const pageH = DS_PAGE_H * scale;
+    const total = Math.max(1, Math.ceil(full.height / pageH));
+    if (!window.JSZip) throw new Error('JSZip not loaded');
+    const zip = new JSZip();
+
+    for (let i = 0; i < total; i++) {
+      const pct = 30 + Math.round(((i + 1) / total) * 65);
+      dsSetStatus(`Slicing page ${i + 1} / ${total}…`, pct);
+      const y = i * pageH;
+      const h = Math.min(pageH, full.height - y);
+      const c = document.createElement('canvas');
+      c.width = full.width;
+      c.height = h;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, c.width, c.height);
+      ctx.drawImage(full, 0, y, full.width, h, 0, 0, full.width, h);
+      const blob = await new Promise(res => c.toBlob(b => res(b), 'image/png'));
+      zip.file(`page-${String(i+1).padStart(3,'0')}.png`, blob);
+      await new Promise(r => setTimeout(r, 0));
+    }
+
+    dsSetStatus('Building ZIP…', 98);
+    const zipBlob = await zip.generateAsync({ type: 'blob' });
+    const baseName = dsFile.name.replace(/\.[^/.]+$/, '');
+    const url = URL.createObjectURL(zipBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${baseName}-screenshots.zip`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+
+    dsSetStatus('Done', 100);
+    doneEl.textContent = `✅ ZIP downloaded — ${total} page screenshot${total === 1 ? '' : 's'} at ${fontSize}pt.`;
+    doneEl.style.display = 'block';
+    stage.innerHTML = '';
+  } catch (e) {
+    console.error('[ds]', e);
+    errEl.textContent = `❌ ${e && e.message ? e.message : String(e)}`;
+    errEl.style.display = 'block';
+    document.getElementById('ds-status').style.display = 'none';
+    document.getElementById('ds-progress-wrap').style.display = 'none';
+  } finally {
+    btn.disabled = !dsFile;
+    btn.textContent = '📦 Generate screenshots ZIP';
+  }
+}
 </script>
 </body>
 </html>
