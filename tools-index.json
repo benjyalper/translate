@@ -1,0 +1,237 @@
+{
+  "$schema_note": "Source of truth for the admin tools map. ADMIN_TOOLS_MAP.md mirrors this. Line numbers are 1-based and refer to admin.html unless otherwise specified.",
+  "live_url": "https://translate-production-4ac8.up.railway.app/admin.html",
+  "password_var": { "file": "admin.html", "line": 2319, "name": "ADMIN_PW" },
+  "files": {
+    "ui": "admin.html",
+    "backend": "transcriber/server.js",
+    "scraper": "JobScraper/scraper.js",
+    "dockerfile": "Dockerfile",
+    "nginx": "nginx.conf",
+    "profile": "transcriber/profile.json"
+  },
+  "backend_endpoints": [
+    { "method": "POST",   "path": "/api/whisper",         "line": 298 },
+    { "method": "POST",   "path": "/api/transcribe",      "line": 350 },
+    { "method": "POST",   "path": "/api/trados",          "line": 397 },
+    { "method": "GET",    "path": "/api/download/:file",  "line": 470 },
+    { "method": "POST",   "path": "/api/scrape",          "line": 550 },
+    { "method": "POST",   "path": "/api/assist-apply",    "line": 664 },
+    { "method": "GET",    "path": "/api/status",          "line": 696 },
+    { "method": "GET",    "path": "/api/firms",           "line": 776, "auth": "X-Admin-Token" },
+    { "method": "PUT",    "path": "/api/firms",           "line": 791, "auth": "X-Admin-Token" },
+    { "method": "DELETE", "path": "/api/firms/:id",       "line": 822, "auth": "X-Admin-Token" }
+  ],
+  "tools": [
+    {
+      "id": "tool-audio-transcriber",
+      "emoji": "🎙",
+      "title": "Audio Transcriber",
+      "type": "api",
+      "toolmap_line": 586,
+      "card_lines": [699, 924],
+      "js_prefix": "tc",
+      "js_starts_around": 2776,
+      "endpoints": ["/api/transcribe", "/api/whisper"],
+      "needs": ["OPENAI_API_KEY"]
+    },
+    {
+      "id": "tool-audio-extractor",
+      "emoji": "🎬",
+      "title": "Audio Extractor (MP4 → audio)",
+      "type": "client",
+      "toolmap_line": 592,
+      "card_lines": [927, 992],
+      "js_prefix": "ax",
+      "js_starts_around": 3068
+    },
+    {
+      "id": "tool-voice-cloner",
+      "emoji": "🎤",
+      "title": "Hebrew Voice Cloner (TTS)",
+      "type": "launcher",
+      "toolmap_line": 598,
+      "card_lines": [995, 1019],
+      "js_prefix": "hvc",
+      "js_starts_around": 2571,
+      "standalone_app": { "folder": "../hebrew-voice-tts", "port": 3018 }
+    },
+    {
+      "id": "tool-trados-translator",
+      "emoji": "📦",
+      "title": "Trados SDLPPX Auto-Translator",
+      "type": "api",
+      "toolmap_line": 604,
+      "card_lines": [1022, 1183],
+      "js_prefix": "tr,tm",
+      "js_starts_around": 4341,
+      "endpoints": ["/api/trados"],
+      "needs": ["OPENAI_API_KEY (browser-side)"]
+    },
+    {
+      "id": "tool-memoq-translator",
+      "emoji": "🟣",
+      "title": "memoQ Auto-Translator (.mqout → .mqback)",
+      "type": "client",
+      "toolmap_line": 610,
+      "card_lines": [1186, 1245],
+      "js_prefix": "mq",
+      "js_starts_around": 10300,
+      "needs": ["OPENAI_API_KEY (browser-side)"]
+    },
+    {
+      "id": "tool-doc-translator",
+      "emoji": "🌐",
+      "title": "Document Translator (HE ↔ EN)",
+      "type": "client",
+      "toolmap_line": 616,
+      "card_lines": [1248, 1360],
+      "js_prefix": "dt,dtLocTest",
+      "js_starts_around": 9702,
+      "needs": ["OPENAI_API_KEY (browser-side)"]
+    },
+    {
+      "id": "tool-he-en-perminute",
+      "emoji": "🇮🇱→🇬🇧",
+      "title": "Hebrew Text → English (per-minute formatted)",
+      "type": "client",
+      "toolmap_line": 622,
+      "card_lines": [1363, 1465],
+      "js_prefix": "ht",
+      "js_starts_around": 9405,
+      "needs": ["OPENAI_API_KEY (browser-side)"]
+    },
+    {
+      "id": "tool-verbolabs",
+      "emoji": "📋",
+      "title": "VerboLabs Template Filler (ivrit.ai → English)",
+      "type": "client",
+      "toolmap_line": 628,
+      "card_lines": [1468, 1561],
+      "js_prefix": "vl",
+      "js_starts_around": 8981,
+      "needs": ["OPENAI_API_KEY (browser-side)"]
+    },
+    {
+      "id": "glossary-manager",
+      "emoji": "📖",
+      "title": "Glossary Manager",
+      "type": "client",
+      "toolmap_line": 634,
+      "card_lines": [1564, 1656],
+      "js_prefix": "gm",
+      "js_starts_around": 5014,
+      "storage": "localStorage"
+    },
+    {
+      "id": "tool-xbench",
+      "emoji": "🔧",
+      "title": "XBench QA Report Revisor",
+      "type": "client",
+      "toolmap_line": 640,
+      "card_lines": [1659, 1717],
+      "js_prefix": "qa",
+      "js_starts_around": 5765
+    },
+    {
+      "id": "tool-translation-proofreader",
+      "emoji": "📑",
+      "title": "Translation Proofreader (Hebrew)",
+      "type": "client",
+      "toolmap_line": 646,
+      "card_lines": [1720, 1834],
+      "js_prefix": "pr",
+      "js_starts_around": 6744,
+      "needs": ["OPENAI_API_KEY (browser-side)"]
+    },
+    {
+      "id": "tool-memoq-proofreader",
+      "emoji": "🟣",
+      "title": "memoQ Proofreader (auto-fix)",
+      "type": "client",
+      "toolmap_line": 652,
+      "card_lines": [1838, 1891],
+      "js_prefix": "mqp",
+      "js_starts_around": 10409,
+      "needs": ["OPENAI_API_KEY (browser-side)"]
+    },
+    {
+      "id": "tool-document-proofreader",
+      "emoji": "📄",
+      "title": "Document Proofreader (Hebrew)",
+      "type": "client",
+      "toolmap_line": 658,
+      "card_lines": [1894, 1965],
+      "js_prefix": "dp",
+      "js_starts_around": 7558,
+      "needs": ["OPENAI_API_KEY (browser-side)"]
+    },
+    {
+      "id": "tool-text-checker",
+      "emoji": "✍️",
+      "title": "Text Checker (HE/EN)",
+      "type": "launcher",
+      "toolmap_line": 664,
+      "card_lines": [1968, 1988],
+      "js_prefix": "tcLaunch",
+      "js_starts_around": 2550,
+      "standalone_app": { "folder": "../text-checker", "port": 3019 }
+    },
+    {
+      "id": "tool-subtitle-translator",
+      "emoji": "🎞️",
+      "title": "Subtitle Translator (EN → HE)",
+      "type": "client",
+      "toolmap_line": 670,
+      "card_lines": [1991, 2042],
+      "js_prefix": "st",
+      "js_starts_around": 8064,
+      "needs": ["OPENAI_API_KEY (browser-side)"]
+    },
+    {
+      "id": "tool-subtitle-proofreader",
+      "emoji": "🔍",
+      "title": "Subtitle Proofreader (Hebrew)",
+      "type": "client",
+      "toolmap_line": 676,
+      "card_lines": [2045, 2131],
+      "js_prefix": "sp",
+      "js_starts_around": 8334,
+      "needs": ["OPENAI_API_KEY (browser-side)"]
+    },
+    {
+      "id": "tool-email-response",
+      "emoji": "✉️",
+      "title": "Email Response Generator",
+      "type": "client",
+      "toolmap_line": 682,
+      "card_lines": [2134, 2234],
+      "js_prefix": "er",
+      "js_starts_around": 11936,
+      "needs": ["OPENAI_API_KEY (browser-side)"]
+    },
+    {
+      "id": "tool-firm-memory",
+      "emoji": "📁",
+      "title": "Client / Firm Memory",
+      "type": "api",
+      "toolmap_line": 688,
+      "card_lines": [2237, 2256],
+      "js_prefix": "er",
+      "js_starts_around": 12151,
+      "endpoints": ["/api/firms (GET/PUT/DELETE)", "/api/status"],
+      "needs": ["Postgres (server-side)", "X-Admin-Token (client)"]
+    },
+    {
+      "id": "tool-doc-screenshotter",
+      "emoji": "📸",
+      "title": "Doc Screenshotter",
+      "type": "client",
+      "toolmap_line": 697,
+      "card_lines": [2259, 2304],
+      "js_prefix": "ds",
+      "js_starts_around": 12665,
+      "cdn_libs": ["mammoth.browser", "html2canvas", "pdf.js (existing)", "JSZip (existing)"]
+    }
+  ]
+}
