@@ -2354,6 +2354,7 @@
 
         <div id="kb-status" style="display:none;margin-top:.7rem;font-size:.78rem;color:#cbd5e1;font-family:monospace"></div>
         <div id="kb-answer" style="display:none;margin-top:.8rem;padding:.9rem 1.1rem;background:#0b1220;border:1px solid var(--border);border-radius:10px;font-size:.88rem;line-height:1.55;color:#e2e8f0;white-space:pre-wrap"></div>
+        <button id="kb-copy" onclick="kbCopy()" style="display:none;margin-top:.5rem;padding:.4rem .9rem;background:rgba(79,70,229,.3);border:1px solid rgba(79,70,229,.5);color:#c7d2fe;border-radius:6px;cursor:pointer;font-size:.78rem">📋 Copy answer</button>
         <div id="kb-error" style="display:none;margin-top:.6rem;padding:.6rem .9rem;background:#1a0000;border:1px solid #7f1d1d;border-radius:8px;font-size:.8rem;color:#fca5a5"></div>
       </div><!-- /ask-my-docs card -->
 
@@ -13031,12 +13032,31 @@ async function kbChat(messages) {
   return (await r.json()).choices[0].message;
 }
 
+function kbCopy() {
+  const txt = (document.getElementById('kb-answer').textContent || '').trim();
+  if (!txt) return;
+  const done = () => { if (typeof showAdminToast === 'function') showAdminToast('✅ Answer copied!', 2000); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(txt).then(done, () => kbCopyFallback(txt, done));
+  } else {
+    kbCopyFallback(txt, done);
+  }
+}
+function kbCopyFallback(txt, done) {
+  const ta = document.createElement('textarea');
+  ta.value = txt; ta.style.cssText = 'position:fixed;left:-9999px;top:0';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); if (done) done(); } catch (e) {}
+  ta.remove();
+}
+
 async function kbAsk() {
   const q = (document.getElementById('kb-q').value || '').trim();
   const ans = document.getElementById('kb-answer');
   const err = document.getElementById('kb-error');
   const st  = document.getElementById('kb-status');
-  err.style.display = 'none'; ans.style.display = 'none';
+  const cp  = document.getElementById('kb-copy');
+  err.style.display = 'none'; ans.style.display = 'none'; cp.style.display = 'none';
   if (!q) return;
   if (!getApiKey()) { promptApiKey(); return; }
   const btn = document.getElementById('kb-ask-btn');
@@ -13072,6 +13092,7 @@ async function kbAsk() {
     st.style.display = 'none';
     ans.textContent = final;
     ans.style.display = 'block';
+    cp.style.display = 'inline-block';
   } catch (e) {
     st.style.display = 'none';
     err.textContent = '❌ ' + (e && e.message ? e.message : String(e));
