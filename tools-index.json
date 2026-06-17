@@ -232,6 +232,20 @@
       "js_prefix": "ds",
       "js_starts_around": 12665,
       "cdn_libs": ["mammoth.browser", "html2canvas", "pdf.js (existing)", "JSZip (existing)"]
+    },
+    {
+      "id": "tool-ask-docs",
+      "emoji": "📚",
+      "title": "Ask My Docs (Knowledge Base)",
+      "type": "client",
+      "toolmap_line": 703,
+      "card_lines": [2311, 2344],
+      "js_prefix": "kb",
+      "js_starts_around": 12875,
+      "needs": ["OPENAI_API_KEY (browser-side)"],
+      "data_file": "kb/features.json",
+      "ingestion": "../localization-bot/extract_llm.py (run locally → regenerates kb/features.json)",
+      "model": "gpt-5.4"
     }
   ]
 }

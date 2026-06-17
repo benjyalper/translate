@@ -699,6 +699,12 @@
           <span class="tm-info" tabindex="0">i</span>
           <span class="tm-tip"><span class="tm-tip-title">Doc Screenshotter</span>Upload a PDF or Word document → text re-rendered at font-size 8 → download a ZIP of page-sized PNG screenshots. Everything runs in your browser; useful for cramming long docs into the fewest possible images.</span>
         </button>
+
+        <button class="toolmap-btn" onclick="scrollToTool('tool-ask-docs')">
+          <span class="tm-label">📚 Ask My Docs</span>
+          <span class="tm-info" tabindex="0">i</span>
+          <span class="tm-tip"><span class="tm-tip-title">Ask My Docs (Knowledge Base)</span>Ask questions in plain language about your ingested reference docs (starting with the TikTok Feature Briefing). Answers are grounded only in the data — list/count queries are exact, every answer cites the source feature + page, and it says so when something isn't in the docs. Uses gpt-5.4.</span>
+        </button>
       </div>
     </div>
 
@@ -2301,6 +2307,41 @@
         <!-- Off-screen render stage -->
         <div id="ds-stage" style="position:fixed;left:-99999px;top:0;z-index:-1;pointer-events:none"></div>
       </div><!-- /doc-screenshotter card -->
+
+      <!-- ── 📚 ASK MY DOCS (KNOWLEDGE BASE) ───────────────────── -->
+      <div class="tool-card" id="tool-ask-docs" style="grid-column:1/-1">
+        <div class="tool-header">
+          <div class="tool-icon">📚</div>
+          <div>
+            <div class="tool-title" data-tool-anchor="tool-ask-docs">Ask My Docs</div>
+            <div class="tool-sub">Ask questions about your reference docs · grounded answers with source + page citations · exact list/count queries · gpt-5.4</div>
+          </div>
+        </div>
+        <div class="tool-divider"></div>
+
+        <div id="kb-meta" style="font-size:.74rem;color:#94a3b8;margin-bottom:.6rem">Loading knowledge base…</div>
+
+        <textarea id="kb-q" rows="3"
+          placeholder="e.g. How many Music features are there, and list them?  ·  What are the localization notes for Travel Destination?  ·  Which features use placeholders like {s_aoi}?"
+          style="width:100%;padding:.7rem;background:#0a0a14;border:1px solid var(--border);border-radius:8px;color:#e2e8f0;font-size:.85rem;resize:vertical;box-sizing:border-box"
+          onkeydown="if((event.ctrlKey||event.metaKey)&&event.key==='Enter'){event.preventDefault();kbAsk();}"></textarea>
+
+        <div style="display:flex;gap:.6rem;margin-top:.6rem;flex-wrap:wrap;align-items:center">
+          <button class="tbtn" id="kb-ask-btn" onclick="kbAsk()"
+            style="padding:.7rem 1.2rem;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;font-weight:700;border:none;border-radius:8px;cursor:pointer;font-size:.85rem">
+            🔍 Ask
+          </button>
+          <select id="kb-dataset" title="Limit to one document"
+            style="padding:.5rem .6rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.78rem">
+            <option value="">All documents</option>
+          </select>
+          <span style="font-size:.7rem;color:#64748b">Ctrl+Enter to ask · answers cite source + page</span>
+        </div>
+
+        <div id="kb-status" style="display:none;margin-top:.7rem;font-size:.78rem;color:#cbd5e1;font-family:monospace"></div>
+        <div id="kb-answer" style="display:none;margin-top:.8rem;padding:.9rem 1.1rem;background:#0b1220;border:1px solid var(--border);border-radius:10px;font-size:.88rem;line-height:1.55;color:#e2e8f0;white-space:pre-wrap"></div>
+        <div id="kb-error" style="display:none;margin-top:.6rem;padding:.6rem .9rem;background:#1a0000;border:1px solid #7f1d1d;border-radius:8px;font-size:.8rem;color:#fca5a5"></div>
+      </div><!-- /ask-my-docs card -->
 
     </div><!-- /.tools-grid -->
   </div><!-- /#tools-panel -->
@@ -12830,6 +12871,178 @@ async function dsRun() {
     btn.textContent = '📦 Generate screenshots ZIP';
   }
 }
+
+// ── 📚 ASK MY DOCS (KNOWLEDGE BASE) ───────────────────────────
+// Browser-side grounded Q&A over a bundled knowledge base (kb/features.json).
+// Reliability "router": list/count/filter run as exact JS over the records
+// (via OpenAI tool-calling), while gpt-5.4 handles the language. Mirrors ask.py.
+const KB_MODEL = 'gpt-5.4';
+let kbData = null;     // raw kb/features.json
+let kbRecords = [];    // flattened records, each tagged with _source / _dataset
+
+async function kbLoad() {
+  if (kbData) return kbData;
+  const r = await fetch('kb/features.json', { cache: 'no-store' });
+  if (!r.ok) throw new Error('Could not load kb/features.json (HTTP ' + r.status + ')');
+  kbData = await r.json();
+  kbRecords = [];
+  (kbData.datasets || []).forEach(ds => {
+    (ds.records || []).forEach(rec => {
+      kbRecords.push(Object.assign({ _source: ds.title, _dataset: ds.id }, rec));
+    });
+  });
+  return kbData;
+}
+
+function kbAsText(v) {
+  if (Array.isArray(v)) return v.map(x => String(x)).join(', ');
+  return v == null ? '' : String(v);
+}
+
+// Tool 1: exact, code-computed filter/list/count over the records.
+function kbFilter({ dataset = '', category = '', sync_date = '', text_contains = '' } = {}) {
+  const tc = (text_contains || '').toLowerCase();
+  return kbRecords.filter(r => {
+    if (dataset && r._dataset !== dataset) return false;
+    if (category && kbAsText(r.category).toLowerCase() !== category.toLowerCase()) return false;
+    if (sync_date && r.sync_date !== sync_date) return false;
+    if (tc) {
+      const blob = ['title','feature_overview','user_flow','content_type','target_audience','localization_notes','key_prefix','summary']
+        .map(k => kbAsText(r[k])).join(' ').toLowerCase();
+      if (!blob.includes(tc)) return false;
+    }
+    return true;
+  }).map(r => ({ source: r._source, title: r.title, category: r.category,
+                 sync_date: r.sync_date, pages: r.pages, key_prefix: r.key_prefix || '' }));
+}
+
+// Tool 2: fetch full records whose title matches (case-insensitive substring).
+function kbDetails({ titles = [] } = {}) {
+  const out = [], seen = new Set();
+  (titles || []).forEach(t => {
+    const tl = String(t).toLowerCase();
+    kbRecords.forEach(r => {
+      if (r.title.toLowerCase().includes(tl) && !seen.has(r.title)) { seen.add(r.title); out.push(r); }
+    });
+  });
+  return out;
+}
+
+const KB_SYSTEM = `You are a precise assistant for a localization translator on TikTok / social-media projects.
+You answer ONLY from the reference-document records, retrieved via the provided tools.
+
+How to work:
+- For "list / how many / which / by category / by date" questions, ALWAYS use filter_features so the
+  result is exact and complete. Never enumerate from memory.
+- For questions about a record's content, use get_feature_details to fetch full records.
+- Answer only from retrieved data. If it isn't there, say "That isn't in the documents."
+- Cite sources like: [Source] [Category] Title (sync DATE, p.PAGES).
+- Quote exact values (all key prefixes, placeholders like {s_aoi}, etc.) — never drop any.
+- Be concise and practical.`;
+
+const KB_TOOLS = [
+  { type: 'function', function: {
+      name: 'filter_features',
+      description: 'Exactly filter/list/count records by dataset, category, sync_date, and/or a text substring. Use for any list/count/which question.',
+      parameters: { type: 'object', properties: {
+        dataset: { type: 'string', description: 'Dataset id to restrict to (optional)' },
+        category: { type: 'string', description: "Exact category, e.g. 'Music', 'Creation', 'TTLS'" },
+        sync_date: { type: 'string', description: 'Exact sync date YYYY/MM/DD' },
+        text_contains: { type: 'string', description: "Substring to search across all fields, e.g. '{s_aoi}' or 'paywall'" }
+      } } } },
+  { type: 'function', function: {
+      name: 'get_feature_details',
+      description: 'Fetch full records (all fields) for records whose title contains the given strings.',
+      parameters: { type: 'object', properties: {
+        titles: { type: 'array', items: { type: 'string' }, description: "Title substrings, e.g. ['Melor','Travel Destination']" }
+      }, required: ['titles'] } } }
+];
+
+async function kbChat(messages) {
+  const apiKey = getApiKey();
+  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: KB_MODEL, temperature: 0, tools: KB_TOOLS, messages })
+  });
+  if (!r.ok) throw new Error('OpenAI ' + r.status + ': ' + (await r.text()).slice(0, 300));
+  return (await r.json()).choices[0].message;
+}
+
+async function kbAsk() {
+  const q = (document.getElementById('kb-q').value || '').trim();
+  const ans = document.getElementById('kb-answer');
+  const err = document.getElementById('kb-error');
+  const st  = document.getElementById('kb-status');
+  err.style.display = 'none'; ans.style.display = 'none';
+  if (!q) return;
+  if (!getApiKey()) { promptApiKey(); return; }
+  const btn = document.getElementById('kb-ask-btn');
+  btn.disabled = true;
+  st.style.display = 'block'; st.textContent = '⏳ Thinking…';
+  try {
+    await kbLoad();
+    const dataset = document.getElementById('kb-dataset').value;
+    const pool = dataset ? kbRecords.filter(r => r._dataset === dataset) : kbRecords;
+    const catalog = pool.map(r =>
+      `- [${r._source}] [${r.category || ''}] ${r.title} (sync ${r.sync_date || 'n/a'}, p.${JSON.stringify(r.pages || [])})`
+    ).join('\n');
+    const messages = [
+      { role: 'system', content: KB_SYSTEM },
+      { role: 'user', content: `CATALOG OF ${pool.length} RECORDS:\n${catalog}\n\nQUESTION: ${q}` }
+    ];
+    const dispatch = { filter_features: kbFilter, get_feature_details: kbDetails };
+    let final = '(no answer produced)';
+    for (let i = 0; i < 6; i++) {
+      const msg = await kbChat(messages);
+      if (!msg.tool_calls || !msg.tool_calls.length) { final = msg.content || '(empty response)'; break; }
+      messages.push(msg);
+      for (const tc of msg.tool_calls) {
+        let args = {};
+        try { args = JSON.parse(tc.function.arguments || '{}'); } catch (e) {}
+        const fn = dispatch[tc.function.name];
+        const result = fn ? fn(args) : { error: 'unknown tool ' + tc.function.name };
+        const n = Array.isArray(result) ? result.length + ' record(s)' : '';
+        st.textContent = '🔧 ' + tc.function.name + '(' + JSON.stringify(args) + ') → ' + n;
+        messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) });
+      }
+    }
+    st.style.display = 'none';
+    ans.textContent = final;
+    ans.style.display = 'block';
+  } catch (e) {
+    st.style.display = 'none';
+    err.textContent = '❌ ' + (e && e.message ? e.message : String(e));
+    err.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// Populate dataset dropdown + meta line once the page is ready.
+async function kbInit() {
+  try {
+    await kbLoad();
+    const sel = document.getElementById('kb-dataset');
+    if (sel) {
+      (kbData.datasets || []).forEach(ds => {
+        const o = document.createElement('option');
+        o.value = ds.id;
+        o.textContent = ds.title + ' (' + (ds.records || []).length + ')';
+        sel.appendChild(o);
+      });
+    }
+    const meta = document.getElementById('kb-meta');
+    if (meta) {
+      const nds = (kbData.datasets || []).length;
+      meta.textContent = `📚 ${kbRecords.length} records across ${nds} document${nds === 1 ? '' : 's'} · grounded answers with source + page citations`;
+    }
+  } catch (e) {
+    const meta = document.getElementById('kb-meta');
+    if (meta) meta.textContent = '⚠️ ' + (e && e.message ? e.message : String(e));
+  }
+}
+kbInit();
 </script>
 </body>
 </html>

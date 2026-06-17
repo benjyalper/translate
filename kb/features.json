@@ -1,0 +1,1468 @@
+{
+  "schema": "adar1-knowledge-base/v1",
+  "generated": "2026-06-17",
+  "datasets": [
+    {
+      "id": "tiktok-feature-briefing",
+      "title": "TikTok Project Feature Briefing",
+      "source_file": "TikTok Project Feature Briefing - Feishu Docs.pdf",
+      "record_type": "feature_briefing",
+      "records": [
+        {
+          "sync_date": "2026/06/10",
+          "num": 1,
+          "category": "Music",
+          "title": "Melor",
+          "pages": [
+            1,
+            2
+          ],
+          "project": "aop",
+          "key_prefixes": [
+            "melor_",
+            "paywall_"
+          ],
+          "feature_overview": "Melor is SoundOn's AI-powered tool that creates stunning visual assets for your music, aiming to engage fans on social platforms while clarifying the transition from free to paid features.",
+          "user_flow": "1. Log in to SoundOn 2. Go to 'Promotion' tab 3. Click 'Auto-generate video' 4. Choose your style and export",
+          "content_type": "Title & Desc, Button, CTA, Tooltip, Dialog, Banner, Empty State, Tab",
+          "target_audience": "This feature is for music creators on SoundOn. It is for users who make visual content and need to understand free vs paid access in Melor.",
+          "localization_notes": "",
+          "summary": "Melor is an AI tool that generates visual assets for music, with a focus on clarifying paid features for users.",
+          "key_prefix": "melor_, paywall_",
+          "_note": "localization_notes removed (bled in from next feature '\"Explore\" Landing page')"
+        },
+        {
+          "sync_date": "2026/05/22",
+          "num": 1,
+          "category": "Creation",
+          "title": "\"Explore\" Landing page",
+          "pages": [
+            2
+          ],
+          "project": "TT_Client",
+          "key_prefixes": [
+            "Creation_openExplore_"
+          ],
+          "feature_overview": "Prompt users to set home feed to 'Explore'. 'Explore' tab (another name 'Community') is designed for dual-column layout and users with shared interests and discussion points. User can change back to default 'For you' feed also.",
+          "user_flow": "",
+          "content_type": [
+            "Half-sheet",
+            "Toast - CTA button"
+          ],
+          "target_audience": "",
+          "localization_notes": "Keep title and CTA button as concise as possible. Focus on user engagement as we want more users to land on 'Explore'. Use day-to-day expressions. Avoid stiff or wordy languages.",
+          "summary": "The 'Explore' landing page encourages users to engage with shared interests and discussions.",
+          "key_prefix": "Creation_openExplore_"
+        },
+        {
+          "sync_date": "2026/04/22",
+          "num": 1,
+          "category": "TTLS-ID dining",
+          "title": "TikTok GO Central Hub MVP",
+          "pages": [
+            3
+          ],
+          "project": "TTLS - TikTok GO Central Hub",
+          "key_prefixes": [
+            "ttGoCentralHub_"
+          ],
+          "feature_overview": "We are building the TikTok GO central hub, a dedicated space within TikTok for local services. This feature aims to provide merchants with a new operational channel and create a destination for users to discover, revisit, and repurchase deals for dining, and other local activities.",
+          "user_flow": "Homepage New user deal Deal entrance and subpage Order entrance and subpage",
+          "content_type": [
+            "Title & Desc",
+            "Button",
+            "CTA",
+            "Tooltip",
+            "Dialog",
+            "Banner",
+            "Empty State",
+            "Tab"
+          ],
+          "target_audience": "",
+          "localization_notes": "• Keep calls-to-action (CTAs) like \"Claim\" and \"More deals\" concise and compelling.\n• The tone should be encouraging and value-focused (e.g., \"Welcome offer\", \"Up to X% off\").\n• For empty states, ensure the messaging is clear and direct, guiding the user on what to do next (e.g., \"No internet connection. Connect to the internet and try again.\").\n• Translate \"Brand Offers\" contextually, ensuring they feel natural and exciting in the target language.\n• \"Flash Sale\" is a DNT. Please do not translate it.",
+          "summary": "The TikTok GO Central Hub MVP provides a dedicated space for local services, enabling users to discover and engage with dining deals and activities.",
+          "key_prefix": "ttGoCentralHub_"
+        },
+        {
+          "sync_date": "2026/03/30",
+          "num": 1,
+          "category": "TTLS",
+          "title": "Travel Destination",
+          "pages": [
+            3,
+            4
+          ],
+          "project": "TTLS",
+          "key_prefixes": [
+            "travelDestination_"
+          ],
+          "feature_overview": "This feature introduces a destination-centric travel hub within TikTok, aiming to create an integrated user journey that combines inspirational content with bookable travel products like hotels and attractions.",
+          "user_flow": "Entrance to Attraction POI page, Hotel recommendation, Travel recommendation",
+          "content_type": [
+            "Page Header",
+            "Filter Label",
+            "CTA Button",
+            "Card Title & Description",
+            "Rating Line"
+          ],
+          "target_audience": "",
+          "localization_notes": "Please pay attention to variables such as {s_aoi} (Area of Interest, e.g., a city name) and {s_poiRating} (Point of Interest rating). Ensure they are correctly placed within the translated strings. Maintain consistency for common UI elements. For example, the 'View' CTA should be translated uniformly across the feature. The rating format combines a numerical rating with a category. Ensure this structure is respected (e.g., '{s_poiRating} · {s_secondaryCategory}').",
+          "summary": "The Travel Destination feature provides a comprehensive travel planning hub within TikTok, integrating discovery and booking functionalities.",
+          "key_prefix": "travelDestination_"
+        },
+        {
+          "sync_date": "2026/03/30",
+          "num": 2,
+          "category": "TTLS",
+          "title": "US/JP Accommodation Shelf Localization",
+          "pages": [
+            4,
+            5
+          ],
+          "project": "TTLS",
+          "key_prefixes": [
+            "ttls_accShelf_sellingPointInfo"
+          ],
+          "feature_overview": "This feature enhances the hotel booking experience on TikTok for US and Japanese users by revamping the hotel shelf UI. It aims to build trust and improve conversion by providing clearer, more transparent information, including detailed price breakdowns (per night, taxes), multi-OTA comparisons, and localized selling points.",
+          "user_flow": "OTAs will be displayed in different tabs on the Shelf sub-page.",
+          "content_type": [
+            "Label",
+            "Button",
+            "Title",
+            "Panel",
+            "Tag",
+            "Navigation",
+            "Message",
+            "Link"
+          ],
+          "target_audience": "US and Japanese users",
+          "localization_notes": "• Maintain a concise and clear tone, especially for button CTAs ( Book now , Go to {s_otaName} ) and labels ( From {s_price} ). • When translating informational content, such as in the 'Price details' panel, ensure the language is simple and direct to avoid ambiguity about pricing policies. • For empty states or error messages (e.g., 'No rooms available'), the tone should be helpful and guide the user to the next step, like viewing similar stays. • For the Japanese linguists, please refer to this Figma file (https://www.figma.com/design/StXhZXMapBHnIzONJEuAMF/TikTok-Japan-market-feature-figma?node-id=312-2&p=f&t=6uo10zvWNvCb7a7n-0) for the Japanese UIs. Other team members can also check the EN figma for the user journey. You need to use the provided Japanese translations, as they're provided by the local team and approved by the JP linguist team.",
+          "summary": "The feature revamps the hotel shelf UI on TikTok to enhance the booking experience for US and Japanese users.",
+          "key_prefix": "ttls_accShelf_sellingPointInfo"
+        },
+        {
+          "sync_date": "2026/03/18",
+          "num": 1,
+          "category": "TTLS - ID dining",
+          "title": "Indonesia PMK-37 Tax Regulation Compliance",
+          "pages": [
+            6
+          ],
+          "project": "FE_i18n",
+          "key_prefixes": [
+            "ttls_indoPMK37_"
+          ],
+          "feature_overview": "To comply with Indonesia's PMK 37/2025 regulation, this feature automates a 0.5% withholding tax for eligible merchants starting May 1, 2026. The Q1 project involves integrating with the tax engine for NPWP validation, calculating withholdings, and issuing WHT slips. It aims to ensure regulatory compliance while providing a clear process for merchants to submit exemption documents and manage their tax obligations on the platform.",
+          "user_flow": "Manage certificate, Tax exemption documents, Statement letter",
+          "content_type": [
+            "Banner",
+            "Button",
+            "Dialog",
+            "Description"
+          ],
+          "target_audience": "",
+          "localization_notes": "• Non-translatable terms: NPWP, IDR, PMK 37, WHT. Please refer to the context. • Maintain consistent capitalization and punctuation for UI elements as shown in the preview texts. • CTAs should be concise and use an imperative tone (e.g., 'Submit certifications,' 'Manage certifications'). • Ensure accuracy of regulatory terms like 'withholding tax' and 'exemption.' • Follow standard Indonesian formatting for dates and currency (IDR).",
+          "summary": "This feature automates compliance with Indonesia's PMK 37/2025 regulation regarding withholding tax for eligible merchants.",
+          "key_prefix": "ttls_indoPMK37_"
+        },
+        {
+          "sync_date": "2026/03/18",
+          "num": 2,
+          "category": "TTLS - ID dining",
+          "title": "SMB Self-Service Onboarding Process Construction",
+          "pages": [
+            6,
+            7
+          ],
+          "project": "FE_i18n",
+          "key_prefixes": [
+            "ttlsMerchant_smbOnboarding_"
+          ],
+          "feature_overview": "This feature streamlines the onboarding process for Small and Medium-sized Businesses (SMBs) in the Indonesian dining industry. It simplifies qualification requirements and integrates business preparation tasks into a clearer workflow. The goal is to lower onboarding barriers, allowing SMBs (merchants with fewer than 20 POIs) to complete all pre-operation tasks more efficiently.",
+          "user_flow": "1. Onboarding task 1 -> 2. Onboarding task 2 -> 3. Onboarding task 3 -> 4. Onboarding task 4 -> Finish",
+          "content_type": [
+            "Title & Desc",
+            "Link",
+            "Button",
+            "Tooltip",
+            "Field Label",
+            "Certification Instructions"
+          ],
+          "target_audience": "Small and Medium-sized Businesses (SMBs) in the Indonesian dining industry",
+          "localization_notes": "• Maintain a professional and encouraging tone to guide new merchants through the onboarding process. • Pay attention to character limits for button labels and titles to avoid UI truncation issues. • Follow standard capitalization rules for titles and labels (e.g., Title Case for buttons). • Ensure consistency with platform-specific terminology, such as 'Nomor Induk Berusaha (NIB)', 'POI', and 'Statement Letter'. • Some strings contain legal or financial terms. Please ensure translations are precise and legally appropriate for the target market (Indonesia).",
+          "summary": "This feature enhances the onboarding experience for SMBs in the Indonesian dining sector by simplifying processes and requirements.",
+          "key_prefix": "ttlsMerchant_smbOnboarding_"
+        },
+        {
+          "sync_date": "2026/03/18",
+          "num": 3,
+          "category": "Customer Service",
+          "title": "Version management tool for FAQ management on ByteHi",
+          "pages": [
+            7
+          ],
+          "project": "ByteHi",
+          "key_prefixes": [
+            "csp_knowledgeBase_version"
+          ],
+          "feature_overview": "Optimize the Version Management functionality within the ByteHi Knowledge Base Configuration module. Building upon existing Activity Logs, this update adds Content Change Records. Goal: Ensure full traceability of content changes to meet external audit and legal compliance requirements.",
+          "user_flow": "Users can view and restore historical snapshots from any point in time.",
+          "content_type": "Headers, tabs, buttons, popup titles, body text and buttons, metadata fields, and toast messages",
+          "target_audience": "",
+          "localization_notes": "Please make sure you fully understand the user flow before translating so the content is coherent and natural. Please keep your translation clear and concise. For internal or technical terms you're not familiar with, feel free to raise a query for clarification.",
+          "summary": "The feature enhances version management in ByteHi's Knowledge Base by adding content change records for better traceability.",
+          "key_prefix": "csp_knowledgeBase_version"
+        },
+        {
+          "sync_date": "2026/03/11",
+          "num": 1,
+          "category": "Creation",
+          "title": "AI Remix",
+          "pages": [
+            7,
+            8
+          ],
+          "project": "TikTok_Client",
+          "key_prefixes": [
+            "remix_"
+          ],
+          "feature_overview": "AI Remix is a feature within Camera that lets you recreate and remix videos with prompt.",
+          "user_flow": "Entrance -> Voice Input prompt",
+          "content_type": [
+            "Title",
+            "CTA button",
+            "tab",
+            "description",
+            "prompt",
+            "inbox notif"
+          ],
+          "target_audience": "",
+          "localization_notes": "Language style should be clear and conversational, resonating with TikTok's creators.",
+          "summary": "AI Remix allows users to recreate and remix videos using voice prompts.",
+          "key_prefix": "remix_"
+        },
+        {
+          "sync_date": "2026/03/11",
+          "num": 2,
+          "category": "Creation",
+          "title": "Cast",
+          "pages": [
+            9,
+            10
+          ],
+          "project": "TikTok_Client",
+          "key_prefixes": [
+            "aicast_"
+          ],
+          "feature_overview": "Cast is a feature that supports users to generate short videos with prompt, remix videos by mentioning their own or others’ ID avatars (AI Self ID). Users need to set up their AI Self ID to use this feature.",
+          "user_flow": "Entrance -> Input prompt -> Co-star @ more people -> Recreation and @ other to co-star complete -> Record AI Self ID -> Edit profile -> Record oneself -> Recording ID generation -> ID management -> Cast tab on user profile -> Cast tab -> Uncast post -> Cast tab (with Permission management post)",
+          "content_type": "Title, CTA button, tab, description, prompt, inbox notif",
+          "target_audience": "",
+          "localization_notes": "Some languages have benchmarked OpenAI's Sora (a similar product to TikTok's Cast feature) to get insights into terminology and style. KO: Sora 2 Benchmarking Korean TH: Sora 2 Benchmarking Thai VI: Sora 2 Benchmarking Vietnamese ES-LATAM: Sora 2 Benchmarking_Spanish-Latam",
+          "summary": "The Cast feature allows users to create and remix short videos using AI Self IDs.",
+          "key_prefix": "aicast_"
+        },
+        {
+          "sync_date": "2026/03/04",
+          "num": 1,
+          "category": "Search",
+          "title": "CSI AI Planner & homepage icon texts",
+          "pages": [
+            10
+          ],
+          "project": "Search",
+          "key_prefixes": [
+            "aiPlanner_"
+          ],
+          "feature_overview": "The AI Planner is a coaching system in Creator Search Insight (CSI) for TikTok creators. It helps them set goals, establish a content rhythm, and receive daily actionable suggestions over 21-day cycles. By connecting goals, rhythm, content, and feedback, it guides creators toward sustainable growth and builds long-term trust with the platform.",
+          "user_flow": "AI planner user journey through CSI homepage and its affiliate pages.",
+          "content_type": [
+            "Page title",
+            "Section header",
+            "Icon label",
+            "intro texts"
+          ],
+          "target_audience": "TikTok creators",
+          "localization_notes": "• Maintain an encouraging, creative, and user-friendly tone, as this feature acts as a 'personal coach.' • Ensure key terms are consistent: 'AI Planner,' 'Creator Search Insight,' 'cycle.' • CTAs should be clear and concise (e.g., 'Create plan,' 'View plan,' 'Update my details'). • When localizing placeholder text in input fields (e.g., 'I’d like tips on...'), ensure the translation serves as a clear example for the user. • Pay attention to pluralization for terms like 'suggestion' vs. 'suggestions' to match the context accurately. • Please refer to the character limit requirement for strings with the 'CSI_icon_text' tag.",
+          "summary": "The AI Planner assists TikTok creators in setting goals and receiving actionable content suggestions to foster sustainable growth.",
+          "key_prefix": "aiPlanner_"
+        },
+        {
+          "sync_date": "2026/01/30",
+          "num": 1,
+          "category": "Search",
+          "title": "AI Canvas Module",
+          "pages": [
+            11
+          ],
+          "project": "FE_i18n",
+          "key_prefixes": [
+            "csiAIcanvas_"
+          ],
+          "feature_overview": "AI Canvas helps TikTok Search creators turn decision-making topics into informative photo-text posts. From the CSI details page, creators open the AI Canvas entry, keep or edit the topic, upload up to eight photos, and add a description. AI generates a structured draft that can be reviewed and edited before applying text onto the photos and producing final images, with supporting pages for education, loading states, and publishing.",
+          "user_flow": "Creators open AI Canvas, edit topic, upload photos, add description, review AI-generated draft, apply text, produce final images.",
+          "content_type": "Title & Desc, Button, CTA, Link, Placeholder, Uploader, Loading State",
+          "target_audience": "",
+          "localization_notes": "• Tone of Voice: Maintain an encouraging, creative, and user-friendly tone. The language should feel helpful and inspiring, not overly technical. • Terminology: Keep key terms consistent. 'AI Canvas' is the feature name; preserve capitalization of 'AI' and product names. • Action Text: Use concise, imperative commands for CTAs such as 'View example' and 'Add photo'. • Constraints & Numbers: Keep limits exact (e.g., 'up to 8 photos', '60 secs'); do not change numerical values. • Loading Messages: For strings like 'Analyzing your idea...' or 'Almost there...', keep the progressive aspect and ellipsis pattern consistent and natural. Please use transcreation for loading messages. • Clarity of Ideas: Clearly distinguish between 'idea', 'content', and 'layout' to avoid ambiguity in target languages.",
+          "summary": "The AI Canvas Module enables creators to transform decision-making topics into engaging photo-text posts with AI assistance.",
+          "key_prefix": "csiAIcanvas_"
+        },
+        {
+          "sync_date": "2026/01/28",
+          "num": 1,
+          "category": "Social",
+          "title": "Story Reveal",
+          "pages": [
+            11,
+            12
+          ],
+          "project": "TikTok_Client",
+          "key_prefixes": [
+            "storyReveal_"
+          ],
+          "feature_overview": "This feature aims to introduce a new form of interactive story publishing and a new format of story (with the dual camera). It allows users to post stories that can only be viewed after posting, encouraging social interaction and daily posting habits.",
+          "user_flow": "1. Creation: New flip camera format, post hidden story, receive daily push to post with friends at the same time. 2. Consumption: Post to unlock all story reveals (for 24 hours).",
+          "content_type": [
+            "Tooltip",
+            "Toast",
+            "Toggle",
+            "Tittle",
+            "Button"
+          ],
+          "target_audience": "",
+          "localization_notes": "Keep the feature name short and concise. Make it engaging to users.",
+          "summary": "The Story Reveal feature introduces an interactive story format that requires users to post to view, enhancing social connections and encouraging daily engagement.",
+          "key_prefix": "storyReveal_"
+        },
+        {
+          "sync_date": "2026/01/23",
+          "num": 1,
+          "category": "Music",
+          "title": "P00 Artist Campaign",
+          "pages": [
+            12,
+            13
+          ],
+          "project": "TikTok_Client",
+          "key_prefixes": [
+            "p00_",
+            "P00Artist_"
+          ],
+          "feature_overview": "Confidentiality is quite important for this artist, so if there's a way, plz keep this project to limited people only!",
+          "user_flow": "",
+          "content_type": "",
+          "target_audience": "",
+          "localization_notes": "We suggest that you work with the keys starting with \"p00\" altogether in order to ensure the term and tone consistency although they are in 3 projects. This is a critical campaign. Please avoid literal translations.",
+          "summary": "This feature focuses on a confidential artist campaign requiring limited access.",
+          "key_prefix": "p00_, P00Artist_"
+        },
+        {
+          "sync_date": "2025/12/31",
+          "num": 1,
+          "category": "PIPO",
+          "title": "TTLS Sales Earning Pending",
+          "pages": [
+            13,
+            14
+          ],
+          "project": "PIPO_SDK",
+          "key_prefixes": [
+            "pipo_payin_ttls_gmv_"
+          ],
+          "feature_overview": "Sellers earn money from their shops, known as Sales Earnings, which are divided into Available Balance and Estimated Pending Balance to provide clarity and flexibility in purchasing collaboration creator packages.",
+          "user_flow": "Sellers can use both Available Balance and Estimated Pending Balance to purchase collaboration creator packages, allowing immediate activation of orders.",
+          "content_type": "Informational / guidance text.",
+          "target_audience": "",
+          "localization_notes": "• Keep balance names consistent: “Available Balance” and “Estimated Pending Balance. • Keep neighboring texts in consistent form. e.g. From available balance; From est. pending balance",
+          "summary": "The feature allows sellers to use both confirmed and unverified earnings to purchase collaboration packages.",
+          "key_prefix": "pipo_payin_ttls_gmv_"
+        },
+        {
+          "sync_date": "2025/12/31",
+          "num": 2,
+          "category": "Product Infra",
+          "title": "VOC (Voice of Customer) Platform",
+          "pages": [
+            14
+          ],
+          "project": "TikTok_Client",
+          "key_prefixes": [
+            "voc_"
+          ],
+          "feature_overview": "A user feedback analysis and follow-up platform built by the experience operations team for the internal TikTok community, dedicated to helping businesses optimize product and service experiences through productization.",
+          "user_flow": "",
+          "content_type": [
+            "Informational",
+            "guidance text"
+          ],
+          "target_audience": "Internal-only audience",
+          "localization_notes": "This platform will be used by internal TikTok teams only and should not be adapted as customer-facing content. The platform currently supports en and zh-Hans only.",
+          "summary": "The VOC platform enables managers to see key business issues clearly from overall to the local level.",
+          "key_prefix": "voc_"
+        },
+        {
+          "sync_date": "2025/12/26",
+          "num": 1,
+          "category": "PIPO",
+          "title": "Cash Advance new landing page (MY, VN, TH, ID only)",
+          "pages": [
+            14,
+            15,
+            16
+          ],
+          "project": "PIPO_SDK",
+          "key_prefixes": [
+            "pipo_cashadv_lp_cash_advance"
+          ],
+          "feature_overview": "We're launching Cash Advance's new landing page on TT Shop Seller Center (webapp)",
+          "user_flow": "",
+          "content_type": [
+            "Title",
+            "Button link",
+            "CTA",
+            "Banner"
+          ],
+          "target_audience": "",
+          "localization_notes": "Ensure \"incomplete strings\" is cohesively translated in the context. e.g. \"after 5am the next day\" is placed after title \"Get settlements\". Title (slogan) should be clear and catchy. e.g. Ship today, get paid tomorrow",
+          "summary": "The feature introduces a new landing page for Cash Advance on the TT Shop Seller Center.",
+          "key_prefix": "pipo_cashadv_lp_cash_advance"
+        },
+        {
+          "sync_date": "2025/12/19",
+          "num": 1,
+          "category": "Creation",
+          "title": "Text mode adds AI-generated templates",
+          "pages": [
+            16,
+            17,
+            18
+          ],
+          "project": "TT_Client",
+          "key_prefixes": [
+            "Creation_textImage_"
+          ],
+          "feature_overview": "We'll add AI templates to Text mode, which allows creators to apply custom templates that match the text they entered.",
+          "user_flow": "In-app tutorial, System notif",
+          "content_type": [
+            "Guiding text (tutorial): Title + desc",
+            "Error msg",
+            "Button",
+            "State (status)",
+            "System notif"
+          ],
+          "target_audience": "",
+          "localization_notes": "Ensure in-app tutorial is clear and engaging, prompting users to try the AI template in Text mode. Title and desc should be coherent.",
+          "summary": "The feature introduces AI-generated templates in Text mode for creators.",
+          "key_prefix": "Creation_textImage_"
+        },
+        {
+          "sync_date": "2025/12/19",
+          "num": 2,
+          "category": "Creation",
+          "title": "Editor Pro AI Create supports third-party models",
+          "pages": [
+            18,
+            19
+          ],
+          "project": "TT_Client",
+          "key_prefixes": [
+            "aiCreate_"
+          ],
+          "feature_overview": "Editor Pro AI Create is an AI-powered video/image generation feature that allows creators to generate high quality visual content using a text prompt.",
+          "user_flow": "Create video: [steps not provided]; Create image: [steps not provided]",
+          "content_type": [
+            "Toast",
+            "Popup"
+          ],
+          "target_audience": "",
+          "localization_notes": "Keep the mode names clear and concise; Ensure the translation of desc aligns with the mode, e.g. Mode: High quality; Desc: Cinematic and detailed, supports multi-shots and audio.",
+          "summary": "Editor Pro AI Create enables creators to generate high quality visual content through AI using text prompts.",
+          "key_prefix": "aiCreate_"
+        },
+        {
+          "sync_date": "2025/12/19",
+          "num": 1,
+          "category": "Effect House",
+          "title": "AIGE Web 1.0",
+          "pages": [
+            19,
+            20,
+            21
+          ],
+          "project": "FE_i18n",
+          "key_prefixes": [
+            "aigeWeb_splash_"
+          ],
+          "feature_overview": "We will launch AIGE Web: A light-weight webpage that enables users to create effects via chat and preview the results instantly—without the need to download anything. AIGE Web can be assessed from Effect House website.",
+          "user_flow": "Landing page → Input prompt → Preview effect",
+          "content_type": [
+            "Default prompt",
+            "Button",
+            "Tag"
+          ],
+          "target_audience": "",
+          "localization_notes": "Keep \"AIGE\" as DNT (it's a brand name and well recognized in the context of AI or digital effect). Keep \"/prompt\" as DNT.",
+          "summary": "AIGE Web allows users to create and preview effects through a lightweight webpage without downloads.",
+          "key_prefix": "aigeWeb_splash_"
+        },
+        {
+          "sync_date": "2025/11/28",
+          "num": 1,
+          "category": "Creation",
+          "title": "Editor Pro AI Create supports prompt rewrite and third-party models",
+          "pages": [
+            22
+          ],
+          "project": "TT_Client",
+          "key_prefixes": [
+            "aiCreate_"
+          ],
+          "feature_overview": "Feature iteration for AI Create (an AI-powered video/image generation tool within Editor Pro). AI Create now supports 10-second shorts with multiple clips, narrative structure, and audio. To achieve this, we integrated third-party models and upgraded our internal models.",
+          "user_flow": "",
+          "content_type": [
+            "Tabs",
+            "Desc",
+            "Toast",
+            "status",
+            "labels"
+          ],
+          "target_audience": "",
+          "localization_notes": "• Translate according to where the text will display\n• e.g. Tab name or label should be concise\n• Ensure neighbouring texts use the same form\n• e.g. Create video, Create image",
+          "summary": "AI Create now supports enhanced video/image generation features with third-party model integration.",
+          "key_prefix": "aiCreate_"
+        },
+        {
+          "sync_date": "2025/11/19",
+          "num": 1,
+          "category": "Social",
+          "title": "Creator DM - Reply assistant promotion",
+          "pages": [
+            22,
+            23
+          ],
+          "project": "TikTok_Client",
+          "key_prefixes": [
+            "smartReplies_"
+          ],
+          "feature_overview": "AI Smart Replies is to build an AI chatbot for TikTok creators to reply to direct messages efficiently and boost user engagement.",
+          "user_flow": "Onboarding -> Setup Topics -> Opt-in/Opt-out -> Check online conversation and recalibrate",
+          "content_type": "GTM campaign",
+          "target_audience": "TikTok creators",
+          "localization_notes": "It's a GTM campaign. Pay more attention to translation reliability.",
+          "summary": "The feature provides an AI chatbot to assist TikTok creators in managing direct message replies.",
+          "key_prefix": "smartReplies_"
+        },
+        {
+          "sync_date": "2025/11/19",
+          "num": 2,
+          "category": "Creation",
+          "title": "AI Imagine - prompts",
+          "pages": [
+            24
+          ],
+          "project": "tiktok_client",
+          "key_prefixes": [
+            "aiImagine_chatWindow_stylePrompt_"
+          ],
+          "feature_overview": "Add more preset style and prompt. When users upload a picture to AI Imagine, they can select a preset style and use default prompt to refine their picture.",
+          "user_flow": "",
+          "content_type": "preset style, prompt",
+          "target_audience": "",
+          "localization_notes": "Prompt should align TT's voices. e.g. conversational and approachable. Don't sound like we're instructing users.",
+          "summary": "AI Imagine allows users to enhance their images by selecting preset styles and prompts.",
+          "key_prefix": "aiImagine_chatWindow_stylePrompt_"
+        },
+        {
+          "sync_date": "2025/11/19",
+          "num": 3,
+          "category": "Creation",
+          "title": "AME AIGC Model - presets and prompts",
+          "pages": [
+            24,
+            25
+          ],
+          "project": "BUSI-DMT",
+          "key_prefixes": [
+            "AME_imageAlive_preset_",
+            "AME_keyframeMorph_preset_",
+            "AME_ultrastylization_preset_",
+            "AME_portrait_preset_"
+          ],
+          "feature_overview": "We're adding presets and prompts to AIGC models (Image Alive, Keyframe Morph, Stylization, and Portrait)",
+          "user_flow": "Go to AI Model (effect type), e.g. AI Alive > Select a preset, use prompt > generate pic",
+          "content_type": "Preset names, e.g. Kiss, hug, werewolf, dark magic; Prompt",
+          "target_audience": "",
+          "localization_notes": "Keep preset name clear and concise; Refer to this doc to have a visual understanding of what the presets does",
+          "summary": "This feature introduces presets and prompts for AIGC models to enhance user creativity.",
+          "key_prefix": "AME_imageAlive_preset_, AME_keyframeMorph_preset_, AME_ultrastylization_preset_, AME_portrait_preset_"
+        },
+        {
+          "sync_date": "2025/11/03",
+          "num": 1,
+          "category": "TTLS - LIVE ID dining",
+          "title": "TikTok GO LIVE Console (for id-ID/zh-Hans)",
+          "pages": [
+            25,
+            26,
+            27
+          ],
+          "project": "FE_i18n",
+          "key_prefixes": [
+            "ttlsLIVE_consoleLandingPage_",
+            "ttlsLIVE_couldntAddVoucherPopUp_",
+            "ttlsLIVE_consoleLogInPage_"
+          ],
+          "feature_overview": "We've already translated the UI content for LIVE audiences and hosts. We will start to localize a standalone website—TikTok GO LIVE Console—that creators and their assistants can use to manage relevant matters for a LIVE session, including adding vouchers, starting/pausing/ending a LIVE session, chatting with LIVE audiences, managing LIVE comments, monitoring data in real-time, etc.",
+          "user_flow": "Account login page -> Welcome page -> Log in page -> LIVE flow 1 -> LIVE flow 2 -> Product management 1 -> Product management 2 -> Pin a voucher/product",
+          "content_type": "web UI",
+          "target_audience": "Creators or their assistants who will manage relevant matters for a LIVE session",
+          "localization_notes": "I recommend linguists to refer to LIVE team's Starling projects for relevant translations. The following two are the major LIVE Starling projects: live_client, TikTok_LIVE_FE. Please help refer to the LIVE-related glossary wherever it is applicable. For the following two keys, please note that the team separates them into two lines, but they should be a single sentence: ttlsLIVE_consoleLogInPage_title1, ttlsLIVE_consoleLogInPage_title2. TikTok GO LIVE Console is the product name of the standalone website for creators or their assistants. We should translate it as 'TikTok GO 直播中控台' in Chinese; for Indonesian, please also ensure the translation consistency of 'Console'. Pin is a function that a host can use to pin a product card to the LIVE session when he/she explains it to the LIVE audiences. In this scenario, the translation of pin should be closer to 'showcasing'. For example, it's translated as '讲解' in Chinese. However, in the LIVE chat scenario, the translation of 'pin' should be translated as 'move to top' in translations. As we have both of these two scenarios in the TTLS LIVE content. So please pay attention to it when translating/reviewing. For 'Pin to showcase (ttlsLIVE_consoleLandingPage_liveStarted_vouchersSection_voucherCard_pinHoverDesc)', we might translate it as '开始讲解'.",
+          "summary": "The TikTok GO LIVE Console is a localized web UI for creators and their assistants to manage LIVE sessions effectively.",
+          "key_prefix": "ttlsLIVE_consoleLandingPage_, ttlsLIVE_couldntAddVoucherPopUp_, ttlsLIVE_consoleLogInPage_"
+        },
+        {
+          "sync_date": "2025/10/31",
+          "num": 1,
+          "category": "Creation",
+          "title": "AI Imagine",
+          "pages": [
+            27,
+            28
+          ],
+          "project": "TT_Client",
+          "key_prefixes": [
+            "aiImagine_chatWindow_",
+            "aiImagine_about_"
+          ],
+          "feature_overview": "AI Imagine is a feature that is very similar to a chatbot you can talk to for image generation, image editing, and image styling. You can create images from text, edit existing photos (e.g retouch, enhance colors), or apply styles to existing photos (e.g anime, retro, vintage).",
+          "user_flow": "H5: tells users how to use AI Imagine; UI (previously Visual Poet, now AI Imagine)",
+          "content_type": "UI, H5",
+          "target_audience": "",
+          "localization_notes": "See above.",
+          "summary": "AI Imagine allows users to generate and edit images through a conversational interface.",
+          "key_prefix": "aiImagine_chatWindow_, aiImagine_about_"
+        },
+        {
+          "sync_date": "2025/10/31",
+          "num": 2,
+          "category": "Music campaign",
+          "title": "Wicked for good",
+          "pages": [
+            28,
+            29
+          ],
+          "project": "tiktok_client",
+          "key_prefixes": [
+            "wickedCampaign_"
+          ],
+          "feature_overview": "This H5 campaign for the release of Wicked: For Good will be one of TikTok's tentpole activities of the year, supporting NBC Universal on the Film/TV side while also driving music engagement through Universal Music Group.",
+          "user_flow": "1. Complete challenges to get profile frames. 2. Tracklist. 3. DM (Direct message).",
+          "content_type": "h5 campaign: title, desc, button; FYP: anchor, banner",
+          "target_audience": "",
+          "localization_notes": "Please follow the internal/official translations for profile names. e.g, Emerald City, Broom & Wand, Glinda's Crown, Elphaba's Hat, TBD. Es, es-latam, fr, pt, pt-br, de, it should refer to [Wicked: for good] Profile name translations. Use transcreations to spark users' interests in participating in the campaign and get rewards. e.g. It's not easy being green, but it's powerful. Post a video with \"{s_trackName}\" and the hashtag #WickedForGood, and hit 100 views. Hashtags and movie names should be kept in English. Keep the translation clear and concise. Title should be under 16, desc under 47. We noticed some English descriptions seem overly long. Pls wait for further notice on the exact length limit.",
+          "summary": "The Wicked for Good campaign promotes the film through user engagement challenges and profile customization.",
+          "key_prefix": "wickedCampaign_"
+        },
+        {
+          "sync_date": "2025/10/29",
+          "num": 1,
+          "category": "Creation",
+          "title": "AME AIGC AI model",
+          "pages": [
+            29,
+            30
+          ],
+          "project": "TT_Client",
+          "key_prefixes": [
+            "AME_aiEffects_"
+          ],
+          "feature_overview": "Supports effects creators in generating Image-to-Video AIGC special effects by rewriting prompts.",
+          "user_flow": "Writing prompt to generate.",
+          "content_type": [
+            "AI model name",
+            "AI model desc",
+            "Pop up",
+            "Toast",
+            "Button"
+          ],
+          "target_audience": "",
+          "localization_notes": "Keep AI model names clear, consistent and adhere to industry standards. Follow the length restrictions of button text.",
+          "summary": "This feature enables effects creators to generate special effects using AI by rewriting prompts.",
+          "key_prefix": "AME_aiEffects_"
+        },
+        {
+          "sync_date": "2025/10/22",
+          "num": 1,
+          "category": "Creation",
+          "title": "EoY (end-of-year) recap campaign",
+          "pages": [
+            30,
+            31
+          ],
+          "project": "TT_Client",
+          "key_prefixes": [
+            "eoy2025_"
+          ],
+          "feature_overview": "Add event entries to CREATE tab, For your page (FYP), inbox page to help users easily discover the annual recap activity, fulfilling their desire to create memories and reflect at the end of year.",
+          "user_flow": "Entry point: CREATE tab FYP anchor Camera Inbox Profile banner. After entry: user can choose to generate their 2025 recap post auto-generate recap user-generate recap when there is no access to album.",
+          "content_type": [
+            "Button",
+            "CTA",
+            "Profile banner",
+            "Banner description"
+          ],
+          "target_audience": "",
+          "localization_notes": "Ensure \"recap\" is translated consistently in all scenarios. Recap should ideally be under 8 characters. Language style should be positive and engaging.",
+          "summary": "The feature allows users to create and share their end-of-year recap posts easily.",
+          "key_prefix": "eoy2025_"
+        },
+        {
+          "sync_date": "2025/10/22",
+          "num": 2,
+          "category": "TTLS - LIVE ID dining",
+          "title": "LIVE Host's user journey (for id-ID/zh-Hans/en-GB)",
+          "pages": [
+            31,
+            32
+          ],
+          "project": "TikTok_Client",
+          "key_prefixes": [
+            "ttlsLiveHost_"
+          ],
+          "feature_overview": "Before the end of 2025, the local services team aims to launch LIVE functionality for the dining industry on the Indonesian market, supporting TTLS creators to add products for sales and perform business operations during their LIVE streamings.",
+          "user_flow": "Pre-LIVE: Add vouchers, Voucher list; During LIVE: Perform business operations.",
+          "content_type": "app UI",
+          "target_audience": "Qualified TTLS creators",
+          "localization_notes": "I recommend linguists to refer to LIVE team's Starling projects for relevant translations (for example, the button of 'Pin', and the entrance UI of 'Business'). The following two are the major ones: live_client, TikTok_LIVE_FE. Please help refer to the LIVE-related glossary wherever it is applicable.",
+          "summary": "The feature enables TTLS creators to manage product sales and business operations during their LIVE streams in the Indonesian market.",
+          "key_prefix": "ttlsLiveHost_"
+        },
+        {
+          "sync_date": "2025/10/17",
+          "num": 1,
+          "category": "TTLS - LIVE ID dining",
+          "title": "LIVE C-end User Flow MVP (for id-ID/zh-Hans/en-GB)",
+          "pages": [
+            32,
+            33
+          ],
+          "project": "TikTok_Client",
+          "key_prefixes": [
+            "liveMVPCend_"
+          ],
+          "feature_overview": "Before the end of 2025, the local services team aims to launch LIVE functionality for the dining industry on the Indonesian market, focusing on basic functions and transaction capabilities of the LIVE room.",
+          "user_flow": "The user can watch live and click the product card to check the product shelf or enter a specific product detail page, purchase food & beverage vouchers, and redeem them at an outlet.",
+          "content_type": "app UI",
+          "target_audience": "Logged in users whose age is 18+ and currently lives in Indonesia.",
+          "localization_notes": "When translating general words like item and shelf, please bear in mind that the context is for the TTLS dining shelf or product card in TTLS dining LIVE. I recommend linguists to refer to LIVE team's Starling projects for relevant translations: live_client, TikTok_LIVE_FE.",
+          "summary": "This feature enables Indonesian users to engage with LIVE dining experiences by purchasing and redeeming food and beverage vouchers.",
+          "key_prefix": "liveMVPCend_"
+        },
+        {
+          "sync_date": "2025/10/10",
+          "num": 1,
+          "category": "Privacy",
+          "title": "Well-being missions V2",
+          "pages": [
+            33,
+            34,
+            35,
+            36
+          ],
+          "project": "TikTok_Client",
+          "key_prefixes": [
+            "missionsV2_"
+          ],
+          "feature_overview": "TikTok's well-being missions are a series of short, engaging missions designed to help people develop long-term balanced digital habits, encouraging mindful behaviors through gamified challenges.",
+          "user_flow": "1. Complete a breathing exercise each week for Sleep hours streak. 2. Set and stick to daily time limit. 3. Explore revamped screen time dashboard. 4. Share missions as a Well-being ambassador.",
+          "content_type": "Buttons, modals, UI text, toasts.",
+          "target_audience": "All users > younger audience essentially",
+          "localization_notes": "Please be sure to translate weekday abbreviations (MON, SUN, THU, etc) to the abbreviated format in your language.",
+          "summary": "The feature introduces gamified well-being missions to promote balanced digital habits among users.",
+          "key_prefix": "missionsV2_"
+        },
+        {
+          "sync_date": "2025/09/19",
+          "num": 2,
+          "category": "Music",
+          "title": "Taylor Swift Campaign Phase II: Official launch",
+          "pages": [
+            36,
+            37
+          ],
+          "project": "TikTok_ecosystem",
+          "key_prefixes": [
+            "showgirl_"
+          ],
+          "feature_overview": "We are building a two-phase campaign for Taylor Swift's 12th studio album, The Life of a Showgirl, launching on 3rd October.",
+          "user_flow": "1. Find your inner song from the new album (which song best represents you) 2. Reveal your journey of being a Swiftie on TikTok 3. Share your journey card through chat",
+          "content_type": [
+            "h5 page",
+            "banner",
+            "button",
+            "anchor"
+          ],
+          "target_audience": "",
+          "localization_notes": "• Keep artists and album names as DNT • Keep the translation concise to avoid clutter on H5 • Adopt transcreation when necessary to convey the essence of the source. Avoid being too literal • Voice of tones should be clear, conversational and engaging.",
+          "summary": "This feature is the official launch campaign for Taylor Swift's album, encouraging user engagement through personalized tasks.",
+          "key_prefix": "showgirl_"
+        },
+        {
+          "sync_date": "2025/09/17",
+          "num": 1,
+          "category": "Open Platform",
+          "title": "Organization Monetization",
+          "pages": [
+            37,
+            38
+          ],
+          "project": "TikTok_For_Developers",
+          "key_prefixes": [
+            "devPortal_monetization_"
+          ],
+          "feature_overview": "In support of serving contracted external developers/vendors on TikTok Open Platform at scale, we are productizing the entire fund settlement flow so that developers/vendors can self-serve through the entire fund management journey instead of relying on handholding provided by Ops representatives.",
+          "user_flow": "Monetization enablement, Revenue settlement, Sign legal documents & enter business details, Invoice & payout",
+          "content_type": "technical UI",
+          "target_audience": "Third-party developers/vendor who manage their mini app monetization through TikTok for Developers platform (https://developers.tiktok.com/)",
+          "localization_notes": "Ensure clarity and accuracy of technical terms; Raise a query if you're not sure",
+          "summary": "The feature enables third-party developers to self-manage their monetization processes on the TikTok Open Platform.",
+          "key_prefix": "devPortal_monetization_"
+        },
+        {
+          "sync_date": "2025/09/03",
+          "num": 1,
+          "category": "Music",
+          "title": "Taylor Swift Campaign Phase I: Presave",
+          "pages": [
+            38,
+            39,
+            40,
+            41
+          ],
+          "project": "TikTok_ecosystem",
+          "key_prefixes": [
+            "showgirl_"
+          ],
+          "feature_overview": "Taylor Swift has officially announced her 12th studio album, The Life of a Showgirl, launching on 3rd October. This is one of the most significant music moments of 2025 and an unmatched opportunity for TikTok to position itself as the epicenter of fan excitement, music discovery, and cultural conversation. We are building a two-phase campaign: Phase 1 focuses on teasing the album and driving pre-saves across Spotify and Apple Music, while generating sustained engagement with new gameplay mechanics.",
+          "user_flow": "1. Follow Taylor Swift 2. Presave Album 3. Join TaylorNation 4. Engage with Mystic Door Gameplay revealed after browsing profile frames.",
+          "content_type": [
+            "h5 page",
+            "banner",
+            "button",
+            "anchor"
+          ],
+          "target_audience": "general TikTok users (especially fans)",
+          "localization_notes": "Keep artists and album names as DNT. Ensure banner and title text are concise to prevent truncation, such as 'Ablum out', 'Unlock in', 'Get notified'. Adopt transcreation for descriptive texts such as 'Knock knock… wait till you see what comes through the door!'",
+          "summary": "The feature promotes Taylor Swift's album pre-save campaign on TikTok, enhancing user engagement through gameplay mechanics.",
+          "key_prefix": "showgirl_"
+        },
+        {
+          "sync_date": "2025/08/22",
+          "num": 1,
+          "category": "Open Platform",
+          "title": "In-App Ads(IAAs) sandbox",
+          "pages": [
+            41,
+            42
+          ],
+          "project": "TikTok_For_Developers",
+          "key_prefixes": [
+            "devPortal_sandbox_IAA_"
+          ],
+          "feature_overview": "Enable developers to add IAA ad placement in the sandbox environment and run through the IAA functionality in the sandbox environment.",
+          "user_flow": "Developers can add ad placements in the sandbox environment and debug the IAA functionality.",
+          "content_type": "technical UI",
+          "target_audience": "Developers who add and test their mini apps at TikTok for Developers platform (https://developers.tiktok.com/)",
+          "localization_notes": "Make sure you translate technical/industrial terms like IAA(In-App Ad) or IAP(In-App Purchase) correctly. Do your own research when translating some 'technical' content. Raise a query if you don't understand something.",
+          "summary": "This feature allows developers to integrate and test In-App Ads within a sandbox environment.",
+          "key_prefix": "devPortal_sandbox_IAA_"
+        },
+        {
+          "sync_date": "2025/08/20",
+          "num": 1,
+          "category": "Open Platform",
+          "title": "Native Runtime",
+          "pages": [
+            42
+          ],
+          "project": "TikTok_For_Developers",
+          "key_prefixes": [
+            "nativeRuntime__"
+          ],
+          "feature_overview": "\"Native Runtime\" is a program to support the continued global growth of lightweight applications such as mini games on TikTok. This initiative aims to build a self-developed, TikTok-led native runtime environment that will serve TikTok's future mini game ecosystem.",
+          "user_flow": "Create an App, Add test users, Create a sandbox, Upload mini game code assets",
+          "content_type": "technical UI",
+          "target_audience": "Developers who add and test their mini apps at TikTok for Developers platform (https://developers.tiktok.com/)",
+          "localization_notes": "Ensure clarity and accuracy of technical terms; Raise a query if you're not sure",
+          "summary": "The Native Runtime feature enables developers to create, debug, and publish mini games on TikTok.",
+          "key_prefix": "nativeRuntime__"
+        },
+        {
+          "sync_date": "2025/07/30",
+          "num": 1,
+          "category": "TTLS",
+          "title": "B-end Support Merchants Use Rebate (ID, zh-Hans only)",
+          "pages": [
+            43,
+            44
+          ],
+          "project": "TTLS",
+          "key_prefixes": [
+            "ttlsMerchantRebate_"
+          ],
+          "feature_overview": "We're introducing a Rebate feature on the merchant platform to allow merchants to get rebates from merchant commissions earned through successful transactions on the platform.",
+          "user_flow": "Clicking Confirm will bring them to the Rebate details page. Once confirmed, settlement will be moved to the 'Settlement details' tab. Merchants can also export their rebate history.",
+          "content_type": "Data tables, charts, buttons, modals, tooltips, desktop/web UI",
+          "target_audience": "Dining merchants",
+          "localization_notes": "",
+          "summary": "The feature allows merchants to receive rebates from commissions earned through successful transactions.",
+          "key_prefix": "ttlsMerchantRebate_",
+          "_note": "localization_notes removed (bled in from next feature 'Creator Marketplace for Agency (ID, JV, JP only)')"
+        },
+        {
+          "sync_date": "2025/07/22",
+          "num": 1,
+          "category": "TTLS",
+          "title": "Creator Marketplace for Agency (ID, JV, JP only)",
+          "pages": [
+            44,
+            45
+          ],
+          "project": "FE_i18n",
+          "key_prefixes": [
+            "ttlsAgencyCreatorMarketplace_"
+          ],
+          "feature_overview": "Creator Marketplace for Agency is a feature within the TikTok GO for Agencies platform, designed to help creator agencies discover and recruit qualified TikTok GO creators.",
+          "user_flow": "Search and invite creators, view creator details, manage additional modals, send invitations, manage creators whose collaborations are expiring soon.",
+          "content_type": [
+            "Data tables",
+            "charts",
+            "buttons",
+            "modals",
+            "tooltips",
+            "desktop/web UI"
+          ],
+          "target_audience": "Admins of creator agencies",
+          "localization_notes": "N/A",
+          "summary": "The feature enables creator agencies to efficiently find, invite, and manage TikTok GO creators.",
+          "key_prefix": "ttlsAgencyCreatorMarketplace_"
+        },
+        {
+          "sync_date": "2025/07/22",
+          "num": 2,
+          "category": "Creation",
+          "title": "POV",
+          "pages": [
+            45,
+            46
+          ],
+          "project": "TT_Client",
+          "key_prefixes": [
+            "creationPov_"
+          ],
+          "feature_overview": "Add 'POV' to the video text editor to foster personal expressions.",
+          "user_flow": "Text editor > POV > auto-insert POV > POV panel (recommends multiple POV themes) > Apply POV",
+          "content_type": [
+            "POV loading message (e.g. Crafting viral POVs... 🔥)",
+            "POV tab name"
+          ],
+          "target_audience": "social media-savvy users",
+          "localization_notes": "PM strongly suggests keeping POV or Point of View in English to increase global users' awareness of this trend and to maintain consistency in perception.",
+          "summary": "The feature allows users to add a 'POV' tag to their videos, enhancing personal expression.",
+          "key_prefix": "creationPov_"
+        },
+        {
+          "sync_date": "2025/07/18",
+          "num": 1,
+          "category": "Creation",
+          "title": "Adding AI Alive to main camera // AI Alive 入口加入主拍",
+          "pages": [
+            46
+          ],
+          "project": "TT_Client",
+          "key_prefixes": [
+            "aiAlivePost_"
+          ],
+          "feature_overview": "AI Alive was previously only in Story, now it can be accessed from the main camera flow. Users can make their photo move by inputting prompts. They can also apply effects to the result.",
+          "user_flow": "Shoot a photo > photo editing panel > AI Alive > enter prompt > done; For You feed > 'Recreate with my photo' anchor > photo album > select photo > AI Alive > enter prompt > done",
+          "content_type": "Effects such as 'Overlay' and 'Vertical Grid'",
+          "target_audience": "",
+          "localization_notes": "",
+          "summary": "AI Alive can now be accessed from the main camera, allowing users to animate their photos with prompts and effects.",
+          "key_prefix": "aiAlivePost_"
+        },
+        {
+          "sync_date": "2025/07/18",
+          "num": 1,
+          "category": "TTLS-Affiliate",
+          "title": "Creator leadboard",
+          "pages": [
+            47,
+            48,
+            50
+          ],
+          "project": "TT_Client",
+          "key_prefixes": [
+            "ttlsCreatorLeaderboard_"
+          ],
+          "feature_overview": "We will introduce the creator leadboard mechanism for creators in order to encourage them to participate in the competition, and to earn rewards. Leadboard competition will set task goals and corresponding rewards within the task cycle. The creators will be rewarded based on their completion status and ranks on the leadboard.",
+          "user_flow": "Entrance -> Pop-up -> Contest page",
+          "content_type": "",
+          "target_audience": "creators",
+          "localization_notes": "The content in {s_contestName}, {s_winnerRange} will be set up by the operation team. {s_contestName} will be the competition name the operation team created. {s_winnerRange} will be the rank range set up by the operation team, such as 'Top 1-3', 'Top 4-10'. And we will manage the localization of these separately. Please keep in mind when you are translating the content with these placeholders.",
+          "summary": "The creator leadboard encourages participation and rewards creators based on their performance in competitions.",
+          "key_prefix": "ttlsCreatorLeaderboard_"
+        },
+        {
+          "sync_date": "2025/07/04",
+          "num": 1,
+          "category": "Music",
+          "title": "SoundOn Melor 2.0",
+          "pages": [
+            50
+          ],
+          "project": "aop",
+          "key_prefixes": [
+            "melor_"
+          ],
+          "feature_overview": "Melor is SoundOn's AI-powered tool that creates stunning visual assets for your music. Our AI understands your song's lyrics and vibe to generate matching visuals that engage your fans on social platforms.",
+          "user_flow": "Step 1: Generate music concept art; Step 2: Edit music video; Step 3: Generate storyboard.",
+          "content_type": "visual assets, music video, concept art, storyboard",
+          "target_audience": "SoundOn artists",
+          "localization_notes": "",
+          "summary": "Melor generates AI-driven visual assets for music to enhance fan engagement.",
+          "key_prefix": "melor_"
+        },
+        {
+          "sync_date": "2025/06/27",
+          "num": 1,
+          "category": "Music",
+          "title": "Deezer 3-month free trial",
+          "pages": [
+            50,
+            51
+          ],
+          "project": "TT_Client",
+          "key_prefixes": [
+            "deezerOffer_h5_",
+            "deezerOffer_"
+          ],
+          "feature_overview": "Collaborate with Deezer to distribute free-premium offers to TikTok users. The main entrances are DSP panels, feed cards, pushes, and music detail page.",
+          "user_flow": "",
+          "content_type": "",
+          "target_audience": "TikTok users",
+          "localization_notes": "Priority language: French",
+          "summary": "This feature offers TikTok users a 3-month free trial of Deezer's premium service.",
+          "key_prefix": "deezerOffer_h5_, deezerOffer_"
+        },
+        {
+          "sync_date": "2025/06/25",
+          "num": 1,
+          "category": "Music",
+          "title": "Paywall Value-added service",
+          "pages": [
+            51,
+            52
+          ],
+          "project": "aop",
+          "key_prefixes": [
+            "paywall_"
+          ],
+          "feature_overview": "SoundOn now offers paid add-ons to amplify artists' music's reach and enhance their experience.",
+          "user_flow": "Artists can select paid add-ons during the onboarding process and complete the checkout.",
+          "content_type": "modal, Manage page",
+          "target_audience": "artists",
+          "localization_notes": "",
+          "summary": "SoundOn provides paid add-ons to enhance artists' music distribution and support.",
+          "key_prefix": "paywall_"
+        },
+        {
+          "sync_date": "2025/06/25",
+          "num": 2,
+          "category": "Creation",
+          "title": "Photo comment supporting editing // 图评支持编辑",
+          "pages": [
+            52
+          ],
+          "project": "TT_Client",
+          "key_prefixes": [
+            "editingPhotoComment_"
+          ],
+          "feature_overview": "We are allowing users to edit their photo comments before posting to elevate photo comment consumption experience.",
+          "user_flow": "",
+          "content_type": "",
+          "target_audience": "",
+          "localization_notes": "",
+          "summary": "Users can edit their photo comments before posting.",
+          "key_prefix": "editingPhotoComment_"
+        },
+        {
+          "sync_date": "2025/06/25",
+          "num": 3,
+          "category": "PGC Campaign",
+          "title": "Landing page of Global PGC Ambassador Program",
+          "pages": [
+            52,
+            53
+          ],
+          "project": "TikTok-Ecosystem",
+          "key_prefixes": [
+            "pgc_highQuality_"
+          ],
+          "feature_overview": "The Ambassador project recruits creators from the US, UK, Germany, and Japan to produce showcase videos that promote high-quality content creation on TikTok.",
+          "user_flow": "Creators are invited to produce videos, which are then aggregated on a dedicated landing page for user promotion.",
+          "content_type": "showcase videos, landing page",
+          "target_audience": "creators from the US, UK, Germany, and Japan",
+          "localization_notes": "Keys ending with '_bio' are based on creator content. Keys ending with '_tag' are for UI use; US/UK content in EN, JP content in JP, DE content in DE, and other languages in EN.",
+          "summary": "The feature includes a landing page for the Global PGC Ambassador Program to showcase high-quality content from selected creators.",
+          "key_prefix": "pgc_highQuality_"
+        },
+        {
+          "sync_date": "2025/06/25",
+          "num": 4,
+          "category": "PIPO",
+          "title": "TikTok Creator Card",
+          "pages": [
+            53
+          ],
+          "project": "PIPO_SDK",
+          "key_prefixes": [
+            "creatorCard_"
+          ],
+          "feature_overview": "We're launching a new virtual payment card, TikTok Creator Card, that is exclusive to creators. Currently, creators can only receive their rewards through payouts to their payment methods like bank accounts and paypal and are charged a withdrawal fee. With this card, their rewards are credited to the card instantly and at no fee. They can use the card like any other payment card, to shop within and outside of TikTok. Creators will be invited to apply for the virtual card for free.",
+          "user_flow": "this batch covers pre-onboarding, account creation, and post-onboarding",
+          "content_type": "",
+          "target_audience": "creators",
+          "localization_notes": "",
+          "summary": "The TikTok Creator Card allows creators to receive rewards instantly and without fees, enabling them to shop both within and outside of TikTok.",
+          "key_prefix": "creatorCard_"
+        },
+        {
+          "sync_date": "2025/06/20",
+          "num": 1,
+          "category": "Music",
+          "title": "Payin function for Paywall",
+          "pages": [
+            53,
+            54,
+            55
+          ],
+          "project": "aop",
+          "key_prefixes": [
+            "payin_"
+          ],
+          "feature_overview": "SoundOn now offers paid add-ons to amplify artists' music's reach and enhance experience.",
+          "user_flow": "",
+          "content_type": "",
+          "target_audience": "",
+          "localization_notes": "",
+          "summary": "The Payin function for Paywall allows users to purchase paid add-ons for enhanced music experiences on SoundOn.",
+          "key_prefix": "payin_"
+        },
+        {
+          "sync_date": "2025/06/04",
+          "num": 2,
+          "category": "Music",
+          "title": "Play full song",
+          "pages": [
+            55,
+            56
+          ],
+          "project": "TT_Client",
+          "key_prefixes": [
+            "playFullSong_"
+          ],
+          "feature_overview": "Add the play full song ability to Apple Music users in TikTok for My Music and SDP surfaces.",
+          "user_flow": "",
+          "content_type": [
+            "My music",
+            "Music Detail Page"
+          ],
+          "target_audience": "Apple Music users",
+          "localization_notes": "",
+          "summary": "This feature allows Apple Music users to play full songs within TikTok.",
+          "key_prefix": "playFullSong_"
+        },
+        {
+          "sync_date": "2025/06/04",
+          "num": 3,
+          "category": "Social",
+          "title": "Game Effect Challenges -Playoff",
+          "pages": [
+            56
+          ],
+          "project": "TikTok_Client",
+          "key_prefixes": [
+            "dm_playoff_"
+          ],
+          "feature_overview": "Playoff is a new DM feature where two users can take turns playing a game to compete for the highest score.",
+          "user_flow": "User first taps 'Playoff' on the action bar, then selects a game. That user plays the game first. The other plays the game and sees who has the highest score.",
+          "content_type": "game",
+          "target_audience": "",
+          "localization_notes": "Please note that the new feature 'Playoff' was renamed to 'Games'. For this feature, we've translated 99 game names, but a few more game names need to be translated.",
+          "summary": "Playoff allows two users to compete in games within DM for the highest score.",
+          "key_prefix": "dm_playoff_"
+        },
+        {
+          "sync_date": "2025/05/30",
+          "num": 1,
+          "category": "PGC",
+          "title": "TikTok Publisher Suite",
+          "pages": [
+            57
+          ],
+          "project": "OGC_Business",
+          "key_prefixes": [
+            "publisherSuite_"
+          ],
+          "feature_overview": "TikTok Publisher Suite is the platform for TikTok Publishers (including Movie, TV, News and Sports IP holders) to manage and monitor their authorized campaigns, activities, and their TikTok accounts. It will add much-needed additional functionality, particularly around data analytics & reporting, to support a broader range of verticals.",
+          "user_flow": "",
+          "content_type": "",
+          "target_audience": "TikTok Publishers, including Movie, TV, News and Sports IP holders",
+          "localization_notes": "",
+          "summary": "TikTok Publisher Suite provides an all-in-one solution for Publishers to manage campaigns and gain insights.",
+          "key_prefix": "publisherSuite_"
+        },
+        {
+          "sync_date": "2025/05/23",
+          "num": 1,
+          "category": "Music",
+          "title": "Addison rae Top Artist Campaign",
+          "pages": [
+            57,
+            58,
+            59,
+            60,
+            61
+          ],
+          "project": "TikTok_Ecosystem",
+          "key_prefixes": [
+            "addisonCampaign_"
+          ],
+          "feature_overview": "This music campaign will launch on TikTok in early June, allowing users to engage with Addison Rae's new album through various interactive features.",
+          "user_flow": "FYP banner -> Music detail page -> Campaign landing page",
+          "content_type": "profile frames, TikTok videos",
+          "target_audience": "",
+          "localization_notes": "Language style should be inspiring and encouraging, adhering to music industry terms.",
+          "summary": "The Addison Rae Top Artist Campaign engages users with interactive features related to her new album.",
+          "key_prefix": "addisonCampaign_"
+        },
+        {
+          "sync_date": "2025/04/25",
+          "num": 1,
+          "category": "TTLS - POI Review",
+          "title": "Local Explorer-related content",
+          "pages": [
+            61,
+            62,
+            63,
+            64
+          ],
+          "project": "TTLS",
+          "key_prefixes": [
+            "ttlsLocalExplorerRules_",
+            "localExplorerProgram_",
+            "ttlsLocalExplorerSystem_",
+            "localExplorerPerks_"
+          ],
+          "feature_overview": "The local explorer level is a recognition of users who post reviews related to Local Services on TikTok, reflecting their contributions and influence within the community. Users earn experience points (Exp) by submitting genuine location reviews, which help them level up and unlock more privileges and rewards.",
+          "user_flow": "Users submit genuine location reviews to earn experience points (Exp) and level up within the Local Explorer system.",
+          "content_type": "location reviews, stars rating, review text, review pictures",
+          "target_audience": "",
+          "localization_notes": "1. Use 'Lv. (level)' for translation of 'Lv.' and ensure consistency. 2. XP should be DNT; if written out as experience points, it should be localized. 3. Refer to the TTLS naming survey for the localized name of 'Local Explorer' and check translations.",
+          "summary": "The feature incentivizes users to post location reviews by implementing a level system that rewards contributions with experience points and exclusive benefits.",
+          "key_prefix": "ttlsLocalExplorerRules_, localExplorerProgram_, ttlsLocalExplorerSystem_, localExplorerPerks_"
+        },
+        {
+          "sync_date": "2025/04/16",
+          "num": 3,
+          "category": "TTLS-Affiliate",
+          "title": "Creator self matchmaking - \"Post to Earn Commission\"",
+          "pages": [
+            64,
+            65,
+            66,
+            67
+          ],
+          "project": "FE_i18n",
+          "key_prefixes": [
+            "ttlsAffiliateCreatorSelfMatch_"
+          ],
+          "feature_overview": "To encourage creators to create more posts on POIs, we built the 'Post to earn commission' product capability along with the core paths where creators browse POI pages.",
+          "user_flow": "After clicking the anchor, it will lead creators to the post process.",
+          "content_type": "anchor button",
+          "target_audience": "creators",
+          "localization_notes": "Please help ensure your translation is as concise as possible. For Simplified Chinese user 9838, please use the translation '带货赚钱'.",
+          "summary": "The feature allows creators to earn commissions by posting about eligible POIs.",
+          "key_prefix": "ttlsAffiliateCreatorSelfMatch_"
+        },
+        {
+          "sync_date": "2025/03/12",
+          "num": 1,
+          "category": "TTLS-POI",
+          "title": "Address bar navigation information optimization",
+          "pages": [
+            68,
+            69,
+            70,
+            71,
+            72,
+            73
+          ],
+          "project": "TikTok_Client",
+          "key_prefixes": [
+            "ttlsAddressBar_"
+          ],
+          "feature_overview": "This is an optimization task to improve the display of geographic information in the address bar, including more distance information such as distance from landmarks, city centers, or other points of interest.",
+          "user_flow": "Users will see enhanced geographic information in the address bar, including distance from various points of interest.",
+          "content_type": "",
+          "target_audience": "",
+          "localization_notes": "Please help localize m and km in your language. Please ensure the translation is as concise as possible. Please check the screenshot above to see the space we have for this address information.",
+          "summary": "The feature optimizes the address bar to display more detailed geographic information.",
+          "key_prefix": "ttlsAddressBar_"
+        },
+        {
+          "sync_date": "2025/01/03",
+          "num": 1,
+          "category": "TTLS",
+          "title": "TikTok GO Creator Center - Creator Package",
+          "pages": [
+            73,
+            74,
+            75,
+            76,
+            77
+          ],
+          "project": "FE_i18n",
+          "key_prefixes": [
+            "affiliateCenter_"
+          ],
+          "feature_overview": "We added a new feature for TikTok GO creators. Now there will be an entry 'Collaborations for you' in the TikTok GO Creator Center where creators can manage their collaboration tasks from merchants. They can take a promotion task from a merchant and create promotional TikTok videos accordingly.",
+          "user_flow": "Creators click 'Join' on 'Collaborations for you', set task preferences, view collaboration tasks, and complete tasks.",
+          "content_type": "collaboration task card, dashboard",
+          "target_audience": "TikTok GO creators",
+          "localization_notes": "I added 'Collaborations for you' to the multilingual glossary. Please help to ensure the translation consistency of this term. I think we can also refer to the translations of 'Collaboration center' on the TikTok GO for Merchants website as they are related features.",
+          "summary": "The TikTok GO Creator Center now includes a 'Collaborations for you' feature for creators to manage and complete promotional tasks from merchants.",
+          "key_prefix": "affiliateCenter_"
+        },
+        {
+          "sync_date": "2025/01/03",
+          "num": 1,
+          "category": "TTLS",
+          "title": "B-end Closed-loop catering-in-store transactions material binding solution",
+          "pages": [
+            77,
+            78
+          ],
+          "project": "FE_i18n",
+          "key_prefixes": [
+            "ttlsMerchantQRLink_"
+          ],
+          "feature_overview": "This feature provides merchants with materials containing QR codes to enhance offline user engagement with TikTok life services, prompting users to scan codes to buy vouchers and increasing platform GMV.",
+          "user_flow": "Users scan the outlet QR code to access the store's voucher page.",
+          "content_type": "QR code-containing materials such as table stickers, desk cards, posters",
+          "target_audience": "merchants",
+          "localization_notes": "Please refer to the multilingual glossary for relevant terms (redemption, outlet, etc.).",
+          "summary": "The feature enables merchants to use QR code materials in-store to drive customer engagement and sales through TikTok.",
+          "key_prefix": "ttlsMerchantQRLink_"
+        },
+        {
+          "sync_date": "2025/01/03",
+          "num": 3,
+          "category": "TTLS",
+          "title": "B-end Product Selling Points Management",
+          "pages": [
+            79,
+            80
+          ],
+          "project": "FE_i18n",
+          "key_prefixes": [
+            "ttlsMerchant_travelSellingPoint_",
+            "ttlsMerchant_accomSellingPoint_",
+            "ttlsMerchant_productSellingPoint_",
+            "ttlsMerchant_fandbSellingPoint_"
+          ],
+          "feature_overview": "This feature builds a product selling point system for C-end product shelf and PDP, accessible through standard query services and usable in various scenarios.",
+          "user_flow": "Products - Product shelf/PDP POI - Label Search - Card",
+          "content_type": "商品 - 货架/商详 POI - 标签 搜索 - 交易卡",
+          "target_audience": "",
+          "localization_notes": "As most of the keys are selling points, please ensure your translations are as concise as possible.",
+          "summary": "This feature manages product selling points for various industries to enhance user experience on the platform.",
+          "key_prefix": "ttlsMerchant_travelSellingPoint_, ttlsMerchant_accomSellingPoint_, ttlsMerchant_productSellingPoint_, ttlsMerchant_fandbSellingPoint_"
+        },
+        {
+          "sync_date": "2025/01/03",
+          "num": 1,
+          "category": "DM",
+          "title": "🥠 Fortune Cookie // 🥠 幸运饼干",
+          "pages": [
+            80,
+            81,
+            82,
+            83,
+            84,
+            85,
+            86,
+            87,
+            88,
+            89,
+            90,
+            91,
+            92
+          ],
+          "project": "TikTok_Client",
+          "key_prefixes": [
+            "dm_fortuneCookie_"
+          ],
+          "feature_overview": "During the New Year's period, replace the nudge on the action bar with a fortune cookie (a new interactive sticker) to promote interaction and convey New Year wishes among users.",
+          "user_flow": "",
+          "content_type": "interactive sticker",
+          "target_audience": "",
+          "localization_notes": "Some fortune cookie messages might be very Westernized. Therefore, when translating, you can use more neutral or local cultural elements as substitutes.",
+          "summary": "The Fortune Cookie feature replaces the action bar nudge with an interactive sticker to enhance user interaction during the New Year.",
+          "key_prefix": "dm_fortuneCookie_"
+        },
+        {
+          "sync_date": "2025/01/03",
+          "num": 1,
+          "category": "EOY Event",
+          "title": "AI Group Shot",
+          "pages": [
+            92,
+            93,
+            94,
+            95,
+            96,
+            97,
+            98,
+            99,
+            100,
+            101,
+            102,
+            103,
+            104,
+            105,
+            106,
+            107,
+            108,
+            110,
+            111,
+            112,
+            113
+          ],
+          "project": "",
+          "key_prefixes": [
+            "dm_aiGroupShot_"
+          ],
+          "feature_overview": "In private chats and group chats, add an AI Group Shot feature where multiple people (equal or more than 2) can participate to generate an AI-blended image.",
+          "user_flow": "Users select a style with templates of 2 to 5 people, can join in private or group chats, and add multiple photos to a style.",
+          "content_type": "",
+          "target_audience": "",
+          "localization_notes": "Part of these keys were synced to SmartCat for translation last Friday, Sept 6th. Review those already translated keys starting with dm_aiGroupShot_.",
+          "summary": "The AI Group Shot feature allows users to create AI-blended images with multiple participants in chats.",
+          "key_prefix": "dm_aiGroupShot_"
+        }
+      ]
+    }
+  ]
+}

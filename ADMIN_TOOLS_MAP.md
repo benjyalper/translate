@@ -52,7 +52,7 @@ The admin page detects `localhost` vs Railway and either calls the Node API dire
 
 ---
 
-## 3. The 19 tools
+## 3. The 20 tools
 
 Tools are grouped by type:
 
@@ -81,6 +81,7 @@ Tools are grouped by type:
 | 17 | ✉️ | Email Response Generator | 🌐 (OpenAI from browser) | `admin.html:682` | `admin.html:2134-2234` | `er*` |
 | 18 | 📁 | Client / Firm Memory | 🛰 `/api/firms` (Postgres) | `admin.html:688` | `admin.html:2237-2256` | `er*` (shared) |
 | 19 | 📸 | Doc Screenshotter | 🌐 | `admin.html:697` | `admin.html:2259-2304` | `ds*` |
+| 20 | 📚 | Ask My Docs (Knowledge Base) | 🌐 (OpenAI from browser) | `admin.html:703` | `admin.html:2311-2344` | `kb*` |
 
 > Naming quirk: `tcLaunch()` (line 2550) opens the **Text Checker** standalone app. The Audio Transcriber also uses the `tc*` prefix for its own logic (`tcSetMode`, `tcSwitchTab`, etc.). They share a prefix only by coincidence — `tcLaunch` is the only `tc*` function that belongs to Text Checker.
 
@@ -237,6 +238,17 @@ Upload .pdf or .docx → text re-rendered at 8pt → ZIP of page-sized PNG scree
 - **CDN libs loaded in `<head>`:** mammoth.browser, html2canvas (pdf.js + JSZip already present).
 - **Backend:** none.
 - **Note:** the render stage is reparented to `<body>` at run time so parent flex layout doesn't zero out its dimensions.
+
+### 📚 20. Ask My Docs (Knowledge Base) — `tool-ask-docs` *(NEW)*
+Plain-language Q&A over ingested reference documents. Grounded only in the data: list/count/filter queries are exact, every answer cites source + page, and it refuses ("That isn't in the documents.") when the answer isn't present. First dataset is the TikTok Project Feature Briefing (61 feature records).
+
+- **Card UI:** `admin.html:2311-2344`
+- **JS:** `admin.html` — `kb*` family starting at line 12875 (`kbLoad`, `kbFilter`, `kbDetails`, `kbChat`, `kbAsk`, `kbInit`)
+- **Backend:** none — OpenAI called from the browser with `getApiKey()`, model `gpt-5.4`.
+- **Reliability design (a "router"):** `filter_features` / `get_feature_details` run as exact JS over the records (via OpenAI tool-calling), so enumeration/counting is deterministic; the model only does language. Mirrors the standalone `localization-bot/ask.py`.
+- **Data:** `kb/features.json` — bundled knowledge base, format `{ datasets:[{ id, title, source_file, record_type, records:[…] }] }`. Loaded via `fetch('kb/features.json')`; served statically by nginx (and bundled by `COPY . /usr/share/nginx/html/`).
+- **Ingestion (offline):** new source docs are turned into clean structured records by `../localization-bot/extract_llm.py` (LLM-based extraction). Re-run it, drop the updated `kb/features.json` here, and push. Not part of the deployed app.
+- **Needs:** `OPENAI_API_KEY` (browser-side, via the global key bar).
 
 ---
 
