@@ -2321,6 +2321,20 @@
 
         <div id="kb-meta" style="font-size:.74rem;color:#94a3b8;margin-bottom:.6rem">Loading knowledge base…</div>
 
+        <details id="kb-manage" style="margin-bottom:.8rem;border:1px solid var(--border);border-radius:8px;background:#0b1220">
+          <summary style="cursor:pointer;padding:.55rem .85rem;font-size:.8rem;color:#c7d2fe;font-weight:600">➕ Add / manage documents</summary>
+          <div style="padding:.3rem .85rem .85rem">
+            <div class="tdrop" id="kb-drop" style="cursor:pointer">
+              <input type="file" id="kb-file" multiple accept=".pdf,.xlsx,.xls,.csv,.png,.jpg,.jpeg,.webp,.gif" onchange="kbOnFiles(this.files)"/>
+              <div class="tdrop-icon">📄</div>
+              <div class="tdrop-text">Drop PDFs, Excel/CSV, or images — or click to browse<br><small>Processed in your browser with your OpenAI key · stored on this device (IndexedDB) · uses gpt-5.4-mini for extraction</small></div>
+            </div>
+            <div id="kb-ingest-status" style="display:none;margin-top:.6rem;font-size:.76rem;color:#cbd5e1;font-family:monospace"></div>
+            <div id="kb-ingest-error" style="display:none;margin-top:.5rem;padding:.5rem .8rem;background:#1a0000;border:1px solid #7f1d1d;border-radius:8px;font-size:.78rem;color:#fca5a5"></div>
+            <div id="kb-datasets" style="margin-top:.7rem;display:flex;flex-direction:column;gap:.4rem"></div>
+          </div>
+        </details>
+
         <textarea id="kb-q" rows="3"
           placeholder="e.g. How many Music features are there, and list them?  ·  What are the localization notes for Travel Destination?  ·  Which features use placeholders like {s_aoi}?"
           style="width:100%;padding:.7rem;background:#0a0a14;border:1px solid var(--border);border-radius:8px;color:#e2e8f0;font-size:.85rem;resize:vertical;box-sizing:border-box"
@@ -12876,22 +12890,69 @@ async function dsRun() {
 // Browser-side grounded Q&A over a bundled knowledge base (kb/features.json).
 // Reliability "router": list/count/filter run as exact JS over the records
 // (via OpenAI tool-calling), while gpt-5.4 handles the language. Mirrors ask.py.
-const KB_MODEL = 'gpt-5.4';
-let kbData = null;     // raw kb/features.json
-let kbRecords = [];    // flattened records, each tagged with _source / _dataset
+const KB_MODEL = 'gpt-5.4';            // answering model
+const KB_EXTRACT_MODEL = 'gpt-5.4-mini'; // cheap model for ingestion/extraction
+let kbBundled = null;     // bundled kb/features.json (read-only, shipped with the app)
+let kbUploaded = [];      // datasets uploaded on THIS device (IndexedDB)
+let kbAllDatasets = [];   // bundled + uploaded, merged
+let kbRecords = [];       // flattened records, each tagged with _source / _dataset
+let kbIngesting = false;  // re-entrancy guard for uploads
 
-async function kbLoad() {
-  if (kbData) return kbData;
-  const r = await fetch('kb/features.json', { cache: 'no-store' });
-  if (!r.ok) throw new Error('Could not load kb/features.json (HTTP ' + r.status + ')');
-  kbData = await r.json();
+// ---- IndexedDB: uploaded datasets live here, per-device ----
+const KB_DB = 'adar1_kb', KB_STORE = 'datasets';
+function kbIdbOpen() {
+  return new Promise((res, rej) => {
+    const req = indexedDB.open(KB_DB, 1);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains(KB_STORE)) req.result.createObjectStore(KB_STORE, { keyPath: 'id' });
+    };
+    req.onsuccess = () => res(req.result);
+    req.onerror = () => rej(req.error);
+  });
+}
+async function kbIdbAll() {
+  const db = await kbIdbOpen();
+  return new Promise((res, rej) => {
+    const rq = db.transaction(KB_STORE, 'readonly').objectStore(KB_STORE).getAll();
+    rq.onsuccess = () => res(rq.result || []); rq.onerror = () => rej(rq.error);
+  });
+}
+async function kbIdbPut(ds) {
+  const db = await kbIdbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(KB_STORE, 'readwrite'); tx.objectStore(KB_STORE).put(ds);
+    tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error);
+  });
+}
+async function kbIdbDelete(id) {
+  const db = await kbIdbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(KB_STORE, 'readwrite'); tx.objectStore(KB_STORE).delete(id);
+    tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error);
+  });
+}
+
+async function kbLoadBundled() {
+  if (kbBundled) return kbBundled;
+  try {
+    const r = await fetch('kb/features.json', { cache: 'no-store' });
+    kbBundled = r.ok ? await r.json() : { datasets: [] };
+  } catch (e) { kbBundled = { datasets: [] }; }
+  return kbBundled;
+}
+
+// Rebuild the flattened record list from bundled + uploaded datasets.
+async function kbRebuild() {
+  await kbLoadBundled();
+  kbUploaded = await kbIdbAll();
+  kbAllDatasets = [...(kbBundled.datasets || []), ...kbUploaded];
   kbRecords = [];
-  (kbData.datasets || []).forEach(ds => {
+  kbAllDatasets.forEach(ds => {
     (ds.records || []).forEach(rec => {
       kbRecords.push(Object.assign({ _source: ds.title, _dataset: ds.id }, rec));
     });
   });
-  return kbData;
+  return kbAllDatasets;
 }
 
 function kbAsText(v) {
@@ -12907,7 +12968,7 @@ function kbFilter({ dataset = '', category = '', sync_date = '', text_contains =
     if (category && kbAsText(r.category).toLowerCase() !== category.toLowerCase()) return false;
     if (sync_date && r.sync_date !== sync_date) return false;
     if (tc) {
-      const blob = ['title','feature_overview','user_flow','content_type','target_audience','localization_notes','key_prefix','summary']
+      const blob = Object.keys(r).filter(k => !k.startsWith('_'))
         .map(k => kbAsText(r[k])).join(' ').toLowerCase();
       if (!blob.includes(tc)) return false;
     }
@@ -12922,7 +12983,8 @@ function kbDetails({ titles = [] } = {}) {
   (titles || []).forEach(t => {
     const tl = String(t).toLowerCase();
     kbRecords.forEach(r => {
-      if (r.title.toLowerCase().includes(tl) && !seen.has(r.title)) { seen.add(r.title); out.push(r); }
+      const title = (r.title || '');
+      if (title.toLowerCase().includes(tl) && !seen.has(title)) { seen.add(title); out.push(r); }
     });
   });
   return out;
@@ -12981,7 +13043,7 @@ async function kbAsk() {
   btn.disabled = true;
   st.style.display = 'block'; st.textContent = '⏳ Thinking…';
   try {
-    await kbLoad();
+    await kbRebuild();
     const dataset = document.getElementById('kb-dataset').value;
     const pool = dataset ? kbRecords.filter(r => r._dataset === dataset) : kbRecords;
     const catalog = pool.map(r =>
@@ -13019,27 +13081,200 @@ async function kbAsk() {
   }
 }
 
-// Populate dataset dropdown + meta line once the page is ready.
-async function kbInit() {
+// ---- UI: dropdown + meta + dataset list ----
+function kbRefreshUI() {
+  const sel = document.getElementById('kb-dataset');
+  if (sel) {
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">All documents</option>';
+    kbAllDatasets.forEach(ds => {
+      const o = document.createElement('option');
+      o.value = ds.id; o.textContent = ds.title + ' (' + (ds.records || []).length + ')';
+      sel.appendChild(o);
+    });
+    sel.value = cur;
+  }
+  const meta = document.getElementById('kb-meta');
+  if (meta) {
+    const nds = kbAllDatasets.length;
+    meta.textContent = `📚 ${kbRecords.length} records across ${nds} document${nds === 1 ? '' : 's'} · grounded answers with source + page citations`;
+  }
+  kbRenderDatasets();
+}
+
+function kbRenderDatasets() {
+  const wrap = document.getElementById('kb-datasets');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  if (!kbAllDatasets.length) { wrap.innerHTML = '<div style="font-size:.74rem;color:#64748b">No documents yet.</div>'; return; }
+  kbAllDatasets.forEach(ds => {
+    const bundled = (kbBundled.datasets || []).some(b => b.id === ds.id);
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:.6rem;padding:.45rem .65rem;background:#0a0a14;border:1px solid var(--border);border-radius:6px;font-size:.76rem';
+    const label = document.createElement('span');
+    label.style.cssText = 'color:#e2e8f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+    label.textContent = (bundled ? '📦 ' : '🗂 ') + ds.title + '  ·  ' + (ds.records || []).length + ' records';
+    row.appendChild(label);
+    if (bundled) {
+      const tag = document.createElement('span');
+      tag.style.cssText = 'color:#64748b;font-size:.7rem;white-space:nowrap'; tag.textContent = 'bundled';
+      row.appendChild(tag);
+    } else {
+      const del = document.createElement('button');
+      del.textContent = '🗑 Remove';
+      del.style.cssText = 'background:rgba(127,29,29,.3);border:1px solid #7f1d1d;color:#fca5a5;border-radius:6px;padding:.25rem .6rem;cursor:pointer;font-size:.72rem;white-space:nowrap';
+      del.onclick = async () => {
+        if (confirm('Remove "' + ds.title + '" from this device?')) { await kbIdbDelete(ds.id); await kbRebuild(); kbRefreshUI(); }
+      };
+      row.appendChild(del);
+    }
+    wrap.appendChild(row);
+  });
+}
+
+// ---- Ingestion (browser-side) ----
+function kbIngestStatus(msg) { const s = document.getElementById('kb-ingest-status'); if (s) { s.style.display = 'block'; s.textContent = msg; } }
+function kbIngestError(msg) { const e = document.getElementById('kb-ingest-error'); if (e) { e.style.display = 'block'; e.textContent = '❌ ' + msg; } }
+
+async function kbOnFiles(files) {
+  if (kbIngesting) return;            // guard: drop + input change can both fire
+  files = Array.from(files || []);
+  if (!files.length) return;
+  if (!getApiKey()) { promptApiKey(); return; }
+  const errEl = document.getElementById('kb-ingest-error'); if (errEl) errEl.style.display = 'none';
+  kbIngesting = true;
   try {
-    await kbLoad();
-    const sel = document.getElementById('kb-dataset');
-    if (sel) {
-      (kbData.datasets || []).forEach(ds => {
-        const o = document.createElement('option');
-        o.value = ds.id;
-        o.textContent = ds.title + ' (' + (ds.records || []).length + ')';
-        sel.appendChild(o);
-      });
+    for (const f of files) {
+      try {
+        kbIngestStatus('⏳ Processing ' + f.name + ' …');
+        const ds = await kbIngestFile(f);
+        if (ds && ds.records.length) { await kbIdbPut(ds); kbIngestStatus('✅ Added ' + f.name + ' — ' + ds.records.length + ' record(s).'); }
+        else kbIngestError('No content extracted from ' + f.name + '.');
+      } catch (e) {
+        kbIngestError(f.name + ': ' + (e && e.message ? e.message : String(e)));
+      }
+      await kbRebuild(); kbRefreshUI();
     }
-    const meta = document.getElementById('kb-meta');
-    if (meta) {
-      const nds = (kbData.datasets || []).length;
-      meta.textContent = `📚 ${kbRecords.length} records across ${nds} document${nds === 1 ? '' : 's'} · grounded answers with source + page citations`;
-    }
-  } catch (e) {
-    const meta = document.getElementById('kb-meta');
-    if (meta) meta.textContent = '⚠️ ' + (e && e.message ? e.message : String(e));
+  } finally {
+    kbIngesting = false;
+    const inp = document.getElementById('kb-file'); if (inp) inp.value = '';
+  }
+}
+
+async function kbIngestFile(file) {
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  let records;
+  if (ext === 'pdf') records = await kbIngestPdf(file);
+  else if (['xlsx', 'xls', 'csv'].includes(ext)) records = await kbIngestExcel(file);
+  else if (['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext)) records = await kbIngestImage(file);
+  else throw new Error('Unsupported file type .' + ext);
+  return {
+    id: 'up_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+    title: file.name, source_file: file.name, record_type: ext,
+    added: new Date().toISOString(), records
+  };
+}
+
+// PDF → text per page → ~12k-char chunks → LLM structured records
+async function kbIngestPdf(file) {
+  if (!window.pdfjsLib) throw new Error('PDF.js not loaded');
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  const pages = [];
+  for (let p = 1; p <= pdf.numPages; p++) {
+    kbIngestStatus('⏳ ' + file.name + ': reading page ' + p + '/' + pdf.numPages + ' …');
+    const page = await pdf.getPage(p);
+    const content = await page.getTextContent();
+    pages.push(content.items.map(i => i.str).join(' ').replace(/\s+/g, ' ').trim());
+  }
+  const chunks = []; let cur = { text: '', start: 1, end: 1 };
+  for (let i = 0; i < pages.length; i++) {
+    const pageNum = i + 1;
+    if (cur.text && (cur.text.length + pages[i].length) > 12000) { chunks.push(cur); cur = { text: '', start: pageNum, end: pageNum }; }
+    cur.text += (cur.text ? '\n' : '') + pages[i]; cur.end = pageNum;
+  }
+  if (cur.text.trim()) chunks.push(cur);
+  if (!chunks.some(c => c.text.trim())) throw new Error('No selectable text (scanned PDF? In-browser OCR not supported yet — use the local extractor.)');
+  const records = [];
+  for (let c = 0; c < chunks.length; c++) {
+    kbIngestStatus('⏳ ' + file.name + ': extracting ' + (c + 1) + '/' + chunks.length + ' (pages ' + chunks[c].start + '–' + chunks[c].end + ') …');
+    records.push(...await kbExtractRecords(chunks[c].text, chunks[c].start, chunks[c].end));
+  }
+  return records;
+}
+
+// Excel/CSV → each row becomes a record (exact, no LLM call)
+async function kbIngestExcel(file) {
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  let wb;
+  if (ext === 'csv' || ext === 'tsv' || ext === 'txt') {
+    // Read as UTF-8 text so Hebrew / non-Latin glossary terms aren't mangled
+    // (XLSX.read on raw CSV bytes assumes Latin-1 and corrupts Unicode).
+    wb = XLSX.read(await file.text(), { type: 'string' });
+  } else {
+    wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+  }
+  const records = [];
+  wb.SheetNames.forEach(sheet => {
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheet], { defval: '' });
+    rows.forEach((row, idx) => {
+      const keys = Object.keys(row);
+      const titleVal = keys.length ? kbAsText(row[keys[0]]) : '';
+      records.push(Object.assign({ title: (titleVal || (sheet + ' row ' + (idx + 2))).slice(0, 140), sheet: sheet, row: idx + 2 }, row));
+    });
+  });
+  return records;
+}
+
+// Image → GPT-5.4 vision → one record
+async function kbIngestImage(file) {
+  const dataUrl = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => rej(fr.error); fr.readAsDataURL(file); });
+  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + getApiKey(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gpt-5.4', temperature: 0, response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: 'You extract a knowledge-base record from an image (often a UI screenshot or document page). Return STRICT JSON {"title","summary","extracted_text","ui_strings"}: title=short label; summary=one line; extracted_text=ALL visible text verbatim; ui_strings=array of distinct UI strings/labels. Never invent.' },
+        { role: 'user', content: [ { type: 'text', text: 'Extract a record from this image (filename: ' + file.name + ').' }, { type: 'image_url', image_url: { url: dataUrl } } ] }
+      ]
+    })
+  });
+  if (!r.ok) throw new Error('OpenAI vision ' + r.status + ': ' + (await r.text()).slice(0, 200));
+  let obj = {}; try { obj = JSON.parse((await r.json()).choices[0].message.content); } catch (e) {}
+  obj.title = obj.title || file.name;
+  return [obj];
+}
+
+// LLM: messy chunk text → array of clean structured records
+async function kbExtractRecords(text, pageStart, pageEnd) {
+  const sys = `You extract structured records from a chunk of a reference document for a localization translator's knowledge base.
+Return STRICT JSON {"records":[...]}. Each record: {"title": short label, "summary": one line, "content": the key text condensed but preserving exact terms/values/placeholders (e.g. {s_aoi}), "category": a section/topic label if any else "", "key_prefix": any code/key prefix if present else ""}.
+Split distinct topics, sections, features, or table entries into separate records. Never invent. If the chunk has no meaningful content, return {"records":[]}.`;
+  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + getApiKey(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: KB_EXTRACT_MODEL, temperature: 0, response_format: { type: 'json_object' },
+      messages: [ { role: 'system', content: sys }, { role: 'user', content: 'PAGES ' + pageStart + '–' + pageEnd + ':\n' + text } ]
+    })
+  });
+  if (!r.ok) throw new Error('OpenAI ' + r.status + ': ' + (await r.text()).slice(0, 200));
+  let obj = { records: [] }; try { obj = JSON.parse((await r.json()).choices[0].message.content); } catch (e) {}
+  const recs = Array.isArray(obj.records) ? obj.records : [];
+  return recs.map(rec => Object.assign({ pages: [pageStart, pageEnd] }, rec, { title: (rec.title || 'Untitled').slice(0, 140) }));
+}
+
+// ---- Drop-zone wiring + initial load ----
+async function kbInit() {
+  try { await kbRebuild(); kbRefreshUI(); }
+  catch (e) { const meta = document.getElementById('kb-meta'); if (meta) meta.textContent = '⚠️ ' + (e && e.message ? e.message : String(e)); }
+  const dz = document.getElementById('kb-drop');
+  if (dz && !dz._wired) {
+    dz._wired = true;
+    dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+    dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+    dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('drag-over'); if (e.dataTransfer.files.length) kbOnFiles(e.dataTransfer.files); });
   }
 }
 kbInit();
