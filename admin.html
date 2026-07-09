@@ -1810,6 +1810,7 @@
 
           <div style="margin-top:.7rem;display:flex;gap:.7rem;flex-wrap:wrap;align-items:center">
             <button class="tbtn gold" id="pr-dl-btn" onclick="prDownloadRevised()" disabled>⬇ Download Revised .sdlrpx</button>
+            <button class="tbtn" id="pr-dl-sdlxliff-btn" onclick="prDownloadRawSdlxliff()" disabled style="width:auto;padding:.55rem 1rem;font-size:.78rem;background:#1e1b4b;color:#a5b4fc">⬇ Also download raw .sdlxliff</button>
             <span id="pr-selected-count" style="font-size:.78rem;color:#94a3b8">0 fixes approved</span>
             <span style="font-size:.7rem;color:#64748b;margin-left:auto">📌 Only approved fixes will be written into the downloaded file.</span>
           </div>
@@ -7164,8 +7165,10 @@ function prUpdateApprovedCount() {
   const n = prAllIssues.filter(x => x.approved).length;
   const lbl = document.getElementById('pr-selected-count');
   const btn = document.getElementById('pr-dl-btn');
+  const rawBtn = document.getElementById('pr-dl-sdlxliff-btn');
   if (lbl) lbl.textContent = `${n} fix${n===1?'':'es'} approved`;
-  if (btn) btn.disabled = (n === 0);
+  if (btn)    btn.disabled    = (n === 0);
+  if (rawBtn) rawBtn.disabled = (n === 0);
 }
 
 // ─── Trados-native track changes ─────────────────────────────
@@ -7462,14 +7465,14 @@ function prMarkSegmentAsDraft(xml, seg) {
   return xml.substring(0, m.index) + newTag + xml.substring(m.index + m[0].length);
 }
 
-async function prDownloadRevised() {
-  const toApply = prAllIssues.filter(x => x.approved && x.issues.length && x.issues[0].suggestion);
-  if (toApply.length === 0) { showAdminToast('No fixes approved.'); return; }
-  if (!prFile || !prRawSDLXLIFFs.length) { showAdminToast('No file loaded.'); return; }
-
-  const btn = document.getElementById('pr-dl-btn');
-  btn.disabled = true; btn.textContent = '⏳ Applying approved fixes…';
-  const markDraft   = document.getElementById('pr-mark-draft').checked;
+// Load the upload as a zip, apply approved fixes to every sdlxliff inside,
+// and return { zip, files } where `zip` is the loaded JSZip (with the
+// original non-sdlxliff entries still on it, useful for the .sdlrpx path
+// that repackages them) and `files` is the list of revised sdlxliffs.
+// Shared by prDownloadRevised (wraps into .sdlrpx) and prDownloadRawSdlxliff
+// (hands them out raw).
+async function prBuildRevisedSdlxliffs(toApply) {
+  const markDraft    = document.getElementById('pr-mark-draft').checked;
   const trackChanges = document.getElementById('pr-track-changes').checked;
   // Author shown in Trados's rev-defs for each tracked change. Reuse the
   // GEL "Editor name" input (defaults to "Benjy Alper") so the user can
@@ -7477,9 +7480,71 @@ async function prDownloadRevised() {
   const editorInput = document.getElementById('pr-gel-editor');
   const trackAuthor = ((editorInput && editorInput.value) || 'Benjy Alper').trim() || 'Benjy Alper';
 
+  const buf = await prFile.arrayBuffer();
+  const zip = await JSZip.loadAsync(buf);
+  const files = [];
+
+  for (let fi = 0; fi < prRawSDLXLIFFs.length; fi++) {
+    let content = prRawSDLXLIFFs[fi].content;
+    const segs = trExtractSegments(content);
+    const segMap = new Map();
+    segs.forEach(s => segMap.set(s.mid, s));
+    // Dedupe by mid so a single segment can't be track-changed twice in
+    // one download. Without this, a duplicate entry in `toApply` (e.g. the
+    // same seg landing in two batches, or both a Chinese-source push and a
+    // proofreader push) would call prInsertWithTrackChanges twice, nesting
+    // the previous added/deleted pair inside a new <deleted> wrap and
+    // producing the visible "fix struck out and then re-added" artifact.
+    const seenMids = new Set();
+    const applicable = toApply.filter(t => {
+      if (t.fileIdx !== fi) return false;
+      if (seenMids.has(t.mid)) {
+        console.warn(`[proofreader] dropping duplicate fix for mid=${t.mid} in file ${fi} — upstream prAllIssues has a dupe`);
+        return false;
+      }
+      seenMids.add(t.mid);
+      return true;
+    });
+    // Each tracked fix pushes TWO entries here: one for the insertion and
+    // one for the deletion. prInsertWithTrackChanges fills them in.
+    const revsForThisFile = [];
+
+    for (const t of applicable) {
+      const seg = segMap.get(t.mid);
+      if (!seg) continue;
+      const fix = t.issues[0].suggestion;
+      if (trackChanges) {
+        // Native Trados track changes: wrap old+new as sibling <mrk>s
+        // (added before deleted) and register two rev-defs per fix.
+        content = prInsertWithTrackChanges(content, seg, fix, revsForThisFile);
+      } else {
+        // Silent replace of existing target with new Hebrew
+        content = prReplaceTargetText(content, seg, fix);
+      }
+      if (markDraft) content = prMarkSegmentAsDraft(content, seg);
+    }
+
+    if (revsForThisFile.length > 0) {
+      content = prAddRevDefs(content, revsForThisFile, trackAuthor);
+    }
+
+    const check = trValidateXml(content);
+    if (!check.ok) throw new Error(`File ${fi+1} failed XML validation: ${check.message}`);
+    files.push({ relPath: prRawSDLXLIFFs[fi].relPath, content });
+  }
+  return { zip, files };
+}
+
+async function prDownloadRevised() {
+  const toApply = prAllIssues.filter(x => x.approved && x.issues.length && x.issues[0].suggestion);
+  if (toApply.length === 0) { showAdminToast('No fixes approved.'); return; }
+  if (!prFile || !prRawSDLXLIFFs.length) { showAdminToast('No file loaded.'); return; }
+
+  const btn = document.getElementById('pr-dl-btn');
+  btn.disabled = true; btn.textContent = '⏳ Applying approved fixes…';
+
   try {
-    const buf = await prFile.arrayBuffer();
-    const zip = await JSZip.loadAsync(buf);
+    const { zip, files } = await prBuildRevisedSdlxliffs(toApply);
     const outZip = new JSZip();
     // Copy all non-SDLXLIFF files verbatim
     const copyJobs = [];
@@ -7489,56 +7554,8 @@ async function prDownloadRevised() {
       copyJobs.push(entry.async('arraybuffer').then(ab => outZip.file(relPath, ab)));
     });
     await Promise.all(copyJobs);
-
-    // For each SDLXLIFF, apply ONLY the approved fixes targeted at it
-    for (let fi = 0; fi < prRawSDLXLIFFs.length; fi++) {
-      let content = prRawSDLXLIFFs[fi].content;
-      const segs = trExtractSegments(content);
-      const segMap = new Map();
-      segs.forEach(s => segMap.set(s.mid, s));
-      // Dedupe by mid so a single segment can't be track-changed twice in
-      // one download. Without this, a duplicate entry in `toApply` (e.g. the
-      // same seg landing in two batches, or both a Chinese-source push and a
-      // proofreader push) would call prInsertWithTrackChanges twice, nesting
-      // the previous added/deleted pair inside a new <deleted> wrap and
-      // producing the visible "fix struck out and then re-added" artifact.
-      const seenMids = new Set();
-      const applicable = toApply.filter(t => {
-        if (t.fileIdx !== fi) return false;
-        if (seenMids.has(t.mid)) {
-          console.warn(`[proofreader] dropping duplicate fix for mid=${t.mid} in file ${fi} — upstream prAllIssues has a dupe`);
-          return false;
-        }
-        seenMids.add(t.mid);
-        return true;
-      });
-      // Each tracked fix pushes TWO entries here: one for the insertion and
-      // one for the deletion. prInsertWithTrackChanges fills them in.
-      const revsForThisFile = [];
-
-      for (const t of applicable) {
-        const seg = segMap.get(t.mid);
-        if (!seg) continue;
-        const fix = t.issues[0].suggestion;
-        if (trackChanges) {
-          // Native Trados track changes: wrap old+new as sibling <mrk>s
-          // (added before deleted) and register two rev-defs per fix.
-          content = prInsertWithTrackChanges(content, seg, fix, revsForThisFile);
-        } else {
-          // Silent replace of existing target with new Hebrew
-          content = prReplaceTargetText(content, seg, fix);
-        }
-        if (markDraft) content = prMarkSegmentAsDraft(content, seg);
-      }
-
-      if (revsForThisFile.length > 0) {
-        content = prAddRevDefs(content, revsForThisFile, trackAuthor);
-      }
-
-      const check = trValidateXml(content);
-      if (!check.ok) throw new Error(`File ${fi+1} failed XML validation: ${check.message}`);
-      outZip.file(prRawSDLXLIFFs[fi].relPath, content);
-    }
+    // Add each revised sdlxliff
+    for (const f of files) outZip.file(f.relPath, f.content);
 
     btn.textContent = '⏳ Packaging…';
     const outBlob = await outZip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
@@ -7554,6 +7571,58 @@ async function prDownloadRevised() {
   } catch (e) {
     btn.disabled = false;
     btn.textContent = '⬇ Download Revised .sdlrpx';
+    document.getElementById('pr-error').style.display = 'block';
+    document.getElementById('pr-error').textContent = '❌ ' + e.message;
+  }
+}
+
+// Companion to prDownloadRevised: hand the raw revised sdlxliff(s) straight
+// to the user without the .sdlrpx envelope. For clients who can't (or won't)
+// open the return package but can import a bilingual .sdlxliff directly.
+// Single sdlxliff → download that file as-is. Multiple → wrap in a small zip.
+async function prDownloadRawSdlxliff() {
+  const toApply = prAllIssues.filter(x => x.approved && x.issues.length && x.issues[0].suggestion);
+  if (toApply.length === 0) { showAdminToast('No fixes approved.'); return; }
+  if (!prFile || !prRawSDLXLIFFs.length) { showAdminToast('No file loaded.'); return; }
+
+  const btn = document.getElementById('pr-dl-sdlxliff-btn');
+  btn.disabled = true; btn.textContent = '⏳ Applying approved fixes…';
+
+  try {
+    const { files } = await prBuildRevisedSdlxliffs(toApply);
+    const baseName = prFile.name.replace(/\.sdl(pp|rp)x$/i, '');
+
+    let blob, downloadName;
+    if (files.length === 1) {
+      // Single file — hand it out as a plain .sdlxliff. Use the sdlxliff's
+      // own basename (from its position inside the package) so Trados keeps
+      // the language-pair suffix that Studio's file router relies on.
+      const inner = files[0].relPath.split('/').pop();
+      blob = new Blob([files[0].content], { type: 'application/xml' });
+      downloadName = inner.replace(/\.sdlxliff$/i, '_PROOFREAD.sdlxliff');
+    } else {
+      // Multi-file package — zip them. Preserve the internal folder layout
+      // so a reviewer can drop the archive contents next to the original
+      // project without renaming.
+      const zip = new JSZip();
+      for (const f of files) zip.file(f.relPath, f.content);
+      blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+      downloadName = `${baseName}_PROOFREAD_sdlxliff.zip`;
+    }
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = downloadName;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+    const label = files.length === 1 ? '.sdlxliff' : `${files.length} sdlxliffs (zipped)`;
+    showAdminToast(`✅ Wrote ${toApply.length} approved fix${toApply.length===1?'':'es'} — ${label} downloaded.`);
+    btn.textContent = `✓ Downloaded ${files.length === 1 ? '.sdlxliff' : '.zip'}. Re-download?`;
+    btn.disabled = false;
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = '⬇ Also download raw .sdlxliff';
     document.getElementById('pr-error').style.display = 'block';
     document.getElementById('pr-error').textContent = '❌ ' + e.message;
   }
