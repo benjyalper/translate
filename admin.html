@@ -4658,6 +4658,55 @@ function trRewriteTargetLangAttr(xml, newLang) {
     (m, pre, q) => pre + q + newLang + q);
 }
 
+// ─── Return-package .sdlproj rewriter ────────────────────────
+// Turns the incoming .sdlppx's .sdlproj into a proper .sdlrpx .sdlproj so
+// Trados Studio's Import Return Package accepts it as a completed task.
+// Verified against a Trados-Studio-produced return package: it strips
+// AutomaticTasks (they belong to the PM's side of the workflow), flips the
+// ManualTask's status/percent/completedAt to "done", and marks every
+// TaskFile inside as Completed="true". Without this, our sdlrpx keeps the
+// ManualTask as Status="Assigned" PercentComplete="0" — Trados sees an
+// unfinished assignment and refuses to import.
+//
+// Symptom before this ran: PM reports "can't open your return package"
+// on files that structurally look fine but never register as delivered.
+function trMarkSdlprojAsReturn(sdlprojXml) {
+  if (!sdlprojXml) return sdlprojXml;
+  let out = sdlprojXml;
+
+  // 1. Strip <AutomaticTask>…</AutomaticTask> blocks. Trados Studio's own
+  //    return packages carry only the ManualTask — the automatic tasks
+  //    (Analysis, PerfectMatch, ProjectTm, etc.) were the PM's work.
+  out = out.replace(/[ \t]*<AutomaticTask\b[\s\S]*?<\/AutomaticTask>\s*/g, '');
+
+  // 2. Flip the ManualTask's attributes to a Completed state.
+  const nowIso = new Date().toISOString(); // e.g. "2026-07-09T16:37:20.812Z"
+  out = out.replace(/<ManualTask\b([^>]*)>/g, (whole, attrs) => {
+    let a = attrs;
+    if (/Status="Assigned"/.test(a))         a = a.replace(/Status="Assigned"/, 'Status="Completed"');
+    if (/PercentComplete="\d+"/.test(a))     a = a.replace(/PercentComplete="\d+"/, 'PercentComplete="100"');
+    else                                     a = ` PercentComplete="100"` + a;
+    if (/Status="Completed"/.test(a) && !/\bCompletedAt="/.test(a)) {
+      a += ` CompletedAt="${nowIso}"`;
+    }
+    return `<ManualTask${a}>`;
+  });
+
+  // 3. Every TaskFile that remains (i.e. under a ManualTask, since we just
+  //    stripped AutomaticTasks) should be marked Completed="true".
+  out = out.replace(/(<TaskFile\b[^>]*\bCompleted=")false(")/g, '$1true$2');
+
+  return out;
+}
+
+// Non-essential zip entries that a Trados Studio-produced return package
+// omits: translation memories, term bases, prep reports. Keeping them
+// doesn't break the import but bloats the file 10-50×. Used by both the
+// translator and the proofreader when writing the .sdlrpx.
+function trIsReturnPackageJunk(relPath) {
+  return /^(Tm|Termbases|Reports)\//i.test(relPath);
+}
+
 // ─── Glossary helpers ────────────────────────────────────────
 // trGlossary is an array of { source, target } pairs, loaded from
 // file upload or pasted text. Used to prime the GPT system prompt
@@ -5678,10 +5727,22 @@ async function trTranslate() {
     bar.style.width = '20%';
 
     // Copy all original files into output zip
+    // Build a proper Trados return package: skip the PM-side extras
+    // (TMs, term bases, prep reports — see trIsReturnPackageJunk) and
+    // transform the .sdlproj so its ManualTask reads as Completed
+    // (see trMarkSdlprojAsReturn). Without those two, Julia can't import.
     const outZip = new JSZip();
     const copyPromises = [];
     zip.forEach((relPath, entry) => {
-      if (!entry.dir) copyPromises.push(entry.async('arraybuffer').then(ab => outZip.file(relPath, ab)));
+      if (entry.dir) return;
+      if (trIsReturnPackageJunk(relPath)) return;
+      if (/\.sdlproj$/i.test(relPath)) {
+        copyPromises.push(entry.async('string').then(txt => {
+          outZip.file(relPath, trMarkSdlprojAsReturn(txt));
+        }));
+        return;
+      }
+      copyPromises.push(entry.async('arraybuffer').then(ab => outZip.file(relPath, ab)));
     });
     await Promise.all(copyPromises);
 
@@ -7581,11 +7642,21 @@ async function prDownloadRevised() {
   try {
     const { zip, files } = await prBuildRevisedSdlxliffs(toApply);
     const outZip = new JSZip();
-    // Copy all non-SDLXLIFF files verbatim
+    // Build a proper Trados return package: skip PM-side extras
+    // (TMs / termbases / prep reports), transform the .sdlproj so its
+    // ManualTask reads as Completed, copy everything else verbatim.
+    // Without these two steps the PM's Studio refuses to import.
     const copyJobs = [];
     zip.forEach((relPath, entry) => {
       if (entry.dir) return;
       if (/\.sdlxliff$/i.test(relPath)) return;
+      if (trIsReturnPackageJunk(relPath)) return;
+      if (/\.sdlproj$/i.test(relPath)) {
+        copyJobs.push(entry.async('string').then(txt => {
+          outZip.file(relPath, trMarkSdlprojAsReturn(txt));
+        }));
+        return;
+      }
       copyJobs.push(entry.async('arraybuffer').then(ab => outZip.file(relPath, ab)));
     });
     await Promise.all(copyJobs);
