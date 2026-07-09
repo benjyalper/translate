@@ -1139,9 +1139,12 @@
         <div id="tr-results" style="display:none">
           <div class="tres-badges" id="tr-badges"></div>
           <div class="trados-stats" id="tr-stats"></div>
-          <div style="margin-top:.9rem">
+          <div style="margin-top:.9rem;display:flex;gap:.7rem;flex-wrap:wrap;align-items:center">
             <a class="tbtn" id="tr-dl" href="#" style="display:inline-flex;align-items:center;justify-content:center;gap:.4rem;text-decoration:none;padding:.7rem 1.5rem;width:auto">
               ⬇ Download SDLRPX Return Package
+            </a>
+            <a class="tbtn" id="tr-dl-sdlxliff" href="#" style="display:inline-flex;align-items:center;justify-content:center;gap:.4rem;text-decoration:none;padding:.55rem 1rem;width:auto;font-size:.78rem;background:#1e1b4b;color:#a5b4fc" title="Same content as the return package, just without the .sdlrpx envelope. Useful if the client can't import Trados return packages.">
+              ⬇ Also raw .sdlxliff
             </a>
           </div>
           <div style="margin-top:.7rem;font-size:.75rem;color:#64748b">
@@ -5686,6 +5689,10 @@ async function trTranslate() {
     let totalWordsAll = 0, preTransSegsAll = 0, preTransWordsAll = 0;
     let translatedWordsAll = 0, toTranslateWordsAll = 0, copiedAll = 0;
     const allPairs = []; // collected source/target pairs across all files (for TM save)
+    // Collected alongside outZip so we can also expose the raw bilingual
+    // .sdlxliff download for clients who can't import a Trados return
+    // package. Same content as what lands in the .sdlrpx — different envelope.
+    const translatedFiles = [];
     for (let fi = 0; fi < xliffEntries.length; fi++) {
       const { path: relPath, entry } = xliffEntries[fi];
       const rawContent = await entry.async('string');
@@ -5714,6 +5721,7 @@ async function trTranslate() {
       // either complains or polls TM matches against the wrong language.
       const finalContent = trRewriteTargetLangAttr(newContent, trLang);
       outZip.file(relPath, finalContent);
+      translatedFiles.push({ relPath, content: finalContent });
     }
     // Stash for post-actions (TM save, term suggestions)
     window.__trLastPairs = allPairs;
@@ -5722,6 +5730,25 @@ async function trTranslate() {
     bar.style.width = '95%'; txt.textContent = 'Building return package…';
     const outBlob = await outZip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
     const outUrl  = URL.createObjectURL(outBlob);
+
+    // Second envelope: raw bilingual .sdlxliff(s) for clients who can't
+    // import a return package. Single file → hand out as-is (keep the
+    // sdlxliff's own basename so Trados's language-pair suffix survives).
+    // Multiple → zip them, preserving the internal folder layout.
+    let rawUrl, rawName;
+    if (translatedFiles.length === 1) {
+      const inner = translatedFiles[0].relPath.split('/').pop();
+      const rawBlob = new Blob([translatedFiles[0].content], { type: 'application/xml' });
+      rawUrl = URL.createObjectURL(rawBlob);
+      rawName = inner;
+    } else {
+      const rawZip = new JSZip();
+      for (const f of translatedFiles) rawZip.file(f.relPath, f.content);
+      const rawBlob = await rawZip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+      rawUrl = URL.createObjectURL(rawBlob);
+      rawName = trFile.name.replace(/\.sdlppx$/i, '') + '_sdlxliff.zip';
+    }
+
     bar.style.width = '100%'; txt.textContent = '✅ Done!';
     setTimeout(() => prog.classList.remove('show'), 1500);
 
@@ -5768,6 +5795,14 @@ async function trTranslate() {
     const dl = document.getElementById('tr-dl');
     dl.href = outUrl;
     dl.download = trFile.name.replace(/\.sdlppx$/i,'') + '.sdlrpx';
+    const dlRaw = document.getElementById('tr-dl-sdlxliff');
+    if (dlRaw) {
+      dlRaw.href = rawUrl;
+      dlRaw.download = rawName;
+      dlRaw.textContent = translatedFiles.length === 1
+        ? '⬇ Also raw .sdlxliff'
+        : `⬇ Also raw sdlxliff × ${translatedFiles.length} (.zip)`;
+    }
     document.getElementById('tr-results').style.display = 'block';
 
     // Post-actions panel: appears whenever there are translated pairs AND priming
