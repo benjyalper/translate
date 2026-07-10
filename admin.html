@@ -4698,13 +4698,20 @@ function trMarkSdlprojAsReturn(sdlprojXml) {
     }
     // Route on the TaskTemplateId inside the body so we handle any incoming
     // language (Chinese today, Japanese tomorrow) without maintaining a
-    // per-language table.
+    // per-language table. Replace-if-present OR insert-if-missing — some
+    // Studio versions (spotted on incoming .sdlppx from SIMON\wu555 @
+    // Gientech) omit Name/Description entirely on the ManualTask; a
+    // replace-only pattern would silently leave them absent.
+    const setAttr = (attrs, name, value) => {
+      const re = new RegExp(`\\b${name}="[^"]*"`);
+      return re.test(attrs) ? attrs.replace(re, `${name}="${value}"`) : `${attrs} ${name}="${value}"`;
+    };
     if (/Sdl\.ProjectApi\.ManualTask\.Translate\b/.test(body)) {
-      a = a.replace(/\bName="[^"]*"/, 'Name="Translate"');
-      a = a.replace(/\bDescription="[^"]*"/, 'Description="Translate files"');
+      a = setAttr(a, 'Name', 'Translate');
+      a = setAttr(a, 'Description', 'Translate files');
     } else if (/Sdl\.ProjectApi\.ManualTask\.Review\b/.test(body)) {
-      a = a.replace(/\bName="[^"]*"/, 'Name="Review"');
-      a = a.replace(/\bDescription="[^"]*"/, 'Description="Review files"');
+      a = setAttr(a, 'Name', 'Review');
+      a = setAttr(a, 'Description', 'Review files');
     }
     return `<ManualTask${a}>${body}</ManualTask>`;
   });
