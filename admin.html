@@ -4679,9 +4679,16 @@ function trMarkSdlprojAsReturn(sdlprojXml) {
   //    (Analysis, PerfectMatch, ProjectTm, etc.) were the PM's work.
   out = out.replace(/[ \t]*<AutomaticTask\b[\s\S]*?<\/AutomaticTask>\s*/g, '');
 
-  // 2. Flip the ManualTask's attributes to a Completed state.
+  // 2. Flip the ManualTask's attributes to a Completed state, and normalize
+  //    its Name / Description to the English forms Trados Studio itself
+  //    emits ("Translate" / "Review"). Not routing-critical — Studio dispatches
+  //    on TaskTemplateId, not Name — but it matches the byte shape of a
+  //    Studio-generated return package. Incoming packages from Gientech carry
+  //    Chinese defaults ("翻译" / "审校") since their PMs use Studio in zh-CN,
+  //    and PMs occasionally re-check received packages against their own
+  //    "clean" shape.
   const nowIso = new Date().toISOString(); // e.g. "2026-07-09T16:37:20.812Z"
-  out = out.replace(/<ManualTask\b([^>]*)>/g, (whole, attrs) => {
+  out = out.replace(/<ManualTask\b([^>]*)>([\s\S]*?)<\/ManualTask>/g, (whole, attrs, body) => {
     let a = attrs;
     if (/Status="Assigned"/.test(a))         a = a.replace(/Status="Assigned"/, 'Status="Completed"');
     if (/PercentComplete="\d+"/.test(a))     a = a.replace(/PercentComplete="\d+"/, 'PercentComplete="100"');
@@ -4689,7 +4696,17 @@ function trMarkSdlprojAsReturn(sdlprojXml) {
     if (/Status="Completed"/.test(a) && !/\bCompletedAt="/.test(a)) {
       a += ` CompletedAt="${nowIso}"`;
     }
-    return `<ManualTask${a}>`;
+    // Route on the TaskTemplateId inside the body so we handle any incoming
+    // language (Chinese today, Japanese tomorrow) without maintaining a
+    // per-language table.
+    if (/Sdl\.ProjectApi\.ManualTask\.Translate\b/.test(body)) {
+      a = a.replace(/\bName="[^"]*"/, 'Name="Translate"');
+      a = a.replace(/\bDescription="[^"]*"/, 'Description="Translate files"');
+    } else if (/Sdl\.ProjectApi\.ManualTask\.Review\b/.test(body)) {
+      a = a.replace(/\bName="[^"]*"/, 'Name="Review"');
+      a = a.replace(/\bDescription="[^"]*"/, 'Description="Review files"');
+    }
+    return `<ManualTask${a}>${body}</ManualTask>`;
   });
 
   // 3. Every TaskFile that remains (i.e. under a ManualTask, since we just
