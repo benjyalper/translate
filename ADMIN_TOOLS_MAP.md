@@ -82,6 +82,7 @@ Tools are grouped by type:
 | 18 | 📁 | Client / Firm Memory | 🛰 `/api/firms` (Postgres) | `admin.html:688` | `admin.html:2237-2256` | `er*` (shared) |
 | 19 | 📸 | Doc Screenshotter | 🌐 | `admin.html:697` | `admin.html:2259-2304` | `ds*` |
 | 20 | 📚 | Ask My Docs (Knowledge Base) | 🌐 (OpenAI from browser) | `admin.html:703` | `admin.html:2311-2344` | `kb*` |
+| 21 | 🐦 | Starling Copy Deck | 💻 (client-only) | `admin.html:708` | `admin.html:2367-2470` | `sk*` |
 
 > Naming quirk: `tcLaunch()` (line 2550) opens the **Text Checker** standalone app. The Audio Transcriber also uses the `tc*` prefix for its own logic (`tcSetMode`, `tcSwitchTab`, etc.). They share a prefix only by coincidence — `tcLaunch` is the only `tc*` function that belongs to Text Checker.
 
@@ -249,6 +250,18 @@ Plain-language Q&A over ingested reference documents. Grounded only in the data:
 - **Data:** `kb/features.json` — bundled knowledge base, format `{ datasets:[{ id, title, source_file, record_type, records:[…] }] }`. Loaded via `fetch('kb/features.json')`; served statically by nginx (and bundled by `COPY . /usr/share/nginx/html/`).
 - **Ingestion (offline):** new source docs are turned into clean structured records by `../localization-bot/extract_llm.py` (LLM-based extraction). Re-run it, drop the updated `kb/features.json` here, and push. Not part of the deployed app.
 - **Needs:** `OPENAI_API_KEY` (browser-side, via the global key bar).
+
+### 🐦 21. Starling Copy Deck — `tool-starling` *(NEW)*
+Turns a proofread Starling (ByteDance CAT) task into copy-paste-ready segment cards. Starling has **no XLIFF re-import**, so edits only get back in by pasting each cell by hand — this tool makes that fast and lets Benjy paste segments while Claude edits others in the browser at the same time (agree who takes which segments/files first).
+
+- **Card UI:** `admin.html:2367-2470` (self-contained; scoped `.sk-*` styles in an inline `<style>`).
+- **JS:** `admin.html` — `sk*` family before the final `</script>` (`skBuild`, `skNormalize`, `skParseXliff`, `skCardHtml`, `skRenderCards`, `skCopy`, `skDownloadHtml`, `skResetTicks`).
+- **Backend:** none — pure client. No API key needed.
+- **Inputs:** paste/drop (a) a **deck JSON** `{taskId,segments:[{seg,cat,note,src,tgt}]}` that Claude produces; (b) a **corr map** `{"<seg>":{cat,note,target}}`; or (c) a raw proofread **`.xliff`** (renders every `<trans-unit>`).
+- **Features:** per-segment Copy button (copies target verbatim; Starling re-chips `{tokens}`/`<tags>` on paste), category chips + filters (critical/minor/plural/html), "pasted" checkbox + progress bar saved in `localStorage` (`sk-done-<taskId>`), and **⬇ Download as .html** for a standalone portable deck.
+- **Token highlighting:** `{placeholders}`, `{{vars}}`, `%s`, and `<html tags>` are visually tagged in both source and target.
+- **Helper (offline):** `copydeck-gen.mjs` — `node copydeck-gen.mjs <in.xliff> <corr.json> <out.html> <taskId>` builds the same deck as a standalone HTML file. Sample deck: `deck-354460046850.json`.
+- **Workflow:** Benjy exports the task XLIFF from Starling → sends Claude → Claude proofreads (gpt-5.4, placeholders/tags/HTML preserved) + hands back a deck → Benjy pastes it here → copies segment-by-segment into Starling.
 
 ---
 

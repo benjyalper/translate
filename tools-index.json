@@ -246,6 +246,21 @@
       "data_file": "kb/features.json",
       "ingestion": "../localization-bot/extract_llm.py (run locally → regenerates kb/features.json)",
       "model": "gpt-5.4"
+    },
+    {
+      "id": "tool-starling",
+      "emoji": "🐦",
+      "title": "Starling Copy Deck",
+      "type": "client",
+      "toolmap_line": 708,
+      "card_lines": [2367, 2470],
+      "js_prefix": "sk",
+      "js_starts_around": 13595,
+      "needs": [],
+      "purpose": "Starling (ByteDance) CAT has no XLIFF re-import, so proofread edits get back in only by pasting each cell by hand. This tool turns a proofread deck into copy-paste-ready segment cards (Copy button per segment, placeholders/tags kept verbatim, pasted-checkbox + progress in localStorage). Built for pasting segments while Claude edits others in the browser simultaneously.",
+      "inputs": "Accepts (a) a deck JSON {taskId,segments:[{seg,cat,note,src,tgt}]} that Claude produces; (b) a corr map {\"<seg>\":{cat,note,target}}; or (c) a raw proofread .xliff (renders every trans-unit).",
+      "helper_scripts": ["copydeck-gen.mjs (node: xliff+corr.json -> standalone copy-deck .html)"],
+      "sample_data": "deck-354460046850.json"
     }
   ]
 }
