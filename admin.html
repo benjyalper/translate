@@ -2411,7 +2411,7 @@
           <div class="tool-icon">🐦</div>
           <div>
             <div class="tool-title" data-tool-anchor="tool-starling">Starling Copy Deck</div>
-            <div class="tool-sub">Proofread Starling task → copy-paste-ready segment cards (placeholders &amp; tags kept verbatim)</div>
+            <div class="tool-sub">Raw Starling XLIFF → Proofread / Translate with GPT-5.4 → copy-paste-ready segment cards (placeholders &amp; tags kept verbatim)</div>
           </div>
         </div>
         <div class="tool-divider"></div>
@@ -2419,19 +2419,19 @@
         <details style="background:#0f0f17;border:1px solid #2a2a3a;border-radius:8px;padding:.6rem .85rem;font-size:.8rem;color:#cbd5e1">
           <summary style="cursor:pointer;color:#a5b4fc;font-weight:600">ℹ️ How this works — the Starling workflow</summary>
           <div style="margin-top:.6rem;line-height:1.6">
-            Starling has <strong>no re-import</strong>, so edits get back in only by <strong>pasting each cell by hand</strong>. This tool makes that fast, and lets you paste segments <strong>while Claude edits others in the browser</strong> at the same time.
+            Starling has <strong>no re-import</strong>, so edits get back in only by <strong>pasting each cell by hand</strong>. This tool does the whole round trip and lets you paste segments <strong>while Claude edits others in the browser</strong> at the same time.
             <ol style="margin:.5rem 0 .2rem 1.1rem;padding:0">
-              <li><strong>You</strong> open the Starling task → <em>Export → Xliff</em> → download → send Claude the file.</li>
-              <li><strong>Claude</strong> proofreads (gpt-5.4), keeps every placeholder / <code>&lt;tag&gt;</code> / HTML, rebuilds broken tags, and hands you a <strong>deck</strong> (JSON) — or a corrected <code>.xliff</code>.</li>
-              <li><strong>You</strong> paste it below → <em>Build copy deck</em>.</li>
+              <li><strong>You</strong> open the Starling task → <em>Export → Xliff</em> → download → drop the <strong>raw</strong> file below → <em>Build copy deck</em>.</li>
+              <li>Click <strong>📑 Proofread</strong> (fix grammar/terminology + convert to plural gender-neutral) or <strong>🌐 Translate source → HE</strong>. <strong>GPT-5.4</strong> processes every segment in your browser with your OpenAI key, keeping each placeholder / <code>&lt;tag&gt;</code> / HTML verbatim.</li>
+              <li>Review the cards. Segments with a <strong>⚠ tag</strong> hold a real inline tag object — place those in the Starling editor by hand rather than pasting.</li>
               <li>Click <strong>Copy</strong> on a card → paste into the Starling cell (Starling re-chips <code>{tokens}</code> &amp; <code>&lt;tags&gt;</code> automatically) → tick <strong>pasted</strong>. Progress is saved in this browser.</li>
             </ol>
-            <div style="margin-top:.4rem;color:#94a3b8">Working simultaneously? Decide up front <strong>who takes which segments / files</strong> so you don't both edit the same cell. Accepts: the deck JSON Claude gives you, a <code>{"&lt;seg&gt;":{cat,note,target}}</code> map, or a proofread <code>.xliff</code> (renders every segment).</div>
+            <div style="margin-top:.4rem;color:#94a3b8">Working simultaneously? Decide up front <strong>who takes which segments / files</strong> so you don't both edit the same cell. Also accepts a ready deck JSON or a <code>{"&lt;seg&gt;":{cat,note,target}}</code> map that Claude produces — then just skip the GPT step.</div>
           </div>
         </details>
 
-        <label style="font-size:.75rem;color:#94a3b8;display:block;margin:.7rem 0 .3rem">Deck data — paste JSON or a proofread .xliff</label>
-        <textarea id="sk-input" rows="4" placeholder='Paste the deck JSON Claude gives you, e.g. {"taskId":"354...","segments":[{"seg":8,"cat":"critical","note":"...","src":"...","tgt":"..."}]}  — or paste raw XLIFF, or drop a file below.'
+        <label style="font-size:.75rem;color:#94a3b8;display:block;margin:.7rem 0 .3rem">Paste a raw Starling <b>.xliff</b> (then Proofread / Translate below) — or a ready deck JSON</label>
+        <textarea id="sk-input" rows="4" placeholder='Drop the raw .xliff you exported from Starling (or paste it here). Also accepts a ready deck JSON, e.g. {"taskId":"354...","segments":[{"seg":8,"cat":"critical","note":"...","src":"...","tgt":"..."}]}.'
           style="width:100%;padding:.6rem;background:#0a0a14;border:1px solid #2a2a3a;border-radius:8px;color:#e2e8f0;font-size:.78rem;font-family:ui-monospace,Menlo,Consolas,monospace;resize:vertical;box-sizing:border-box"></textarea>
         <div class="tdrop" id="sk-drop" style="margin-top:.5rem;padding:1rem">
           <input type="file" id="sk-file" accept=".json,.xliff,.xml,.txt" onchange="skOnFile(this)"/>
@@ -2444,6 +2444,12 @@
         <div id="sk-error" style="display:none;padding:.6rem .9rem;background:#1a0000;border:1px solid #7f1d1d;border-radius:8px;font-size:.8rem;color:#fca5a5;margin-top:.6rem"></div>
 
         <div id="sk-deck-wrap" style="display:none;margin-top:.9rem">
+          <div id="sk-ai" style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-bottom:.7rem;padding:.6rem .75rem;background:#0f0f17;border:1px solid #2a2a3a;border-radius:9px">
+            <span style="font-size:.75rem;color:#a5b4fc;font-weight:700">✨ GPT-5.4</span>
+            <button class="tbtn" id="sk-ai-proof" onclick="skAI('proofread')" style="width:auto;padding:.4rem .9rem;font-size:.75rem">📑 Proofread targets</button>
+            <button class="tbtn" id="sk-ai-trans" onclick="skAI('translate')" style="width:auto;padding:.4rem .9rem;font-size:.75rem">🌐 Translate source → HE</button>
+            <span id="sk-ai-status" style="font-size:.72rem;color:#94a3b8;flex:1;min-width:120px"></span>
+          </div>
           <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:1rem;flex-wrap:wrap;margin-bottom:.5rem">
             <div class="sk-legend" id="sk-legend"></div>
             <div class="sk-prog"><span id="sk-pcount">0</span>/<span id="sk-ptotal">0</span> pasted
@@ -13715,6 +13721,53 @@ function skDownloadHtml(){
   var b=c.querySelector('.sk-copy');b.addEventListener('click',function(){var t=b.getAttribute('data-copy'),ok=false;try{navigator.clipboard.writeText(t);ok=true;}catch(e){try{var ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();ok=document.execCommand('copy');ta.remove();}catch(e2){}}var p=b.textContent;b.textContent=ok?'Copied \\u2713':'Ctrl+C';b.classList.add('sk-copied');var tg=c.querySelector('.sk-tgt');if(!ok&&tg){var sel=getSelection(),r=document.createRange();r.selectNodeContents(tg);sel.removeAllRanges();sel.addRange(r);}setTimeout(function(){b.textContent=p;b.classList.remove('sk-copied');},1300);});});ref();})();`;
   const doc=`<!doctype html><html lang="he"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Copy deck ${tid}</title><style>${css}</style></head><body><div class="wrap"><header><h1>Copy deck <span>${tid}</span></h1><div class="prog"><span id="pc">0</span>/${total} pasted<div class="bar"><i id="pb"></i></div></div></header><div class="sk-cards">${cards}</div></div><scr`+`ipt>${script}</scr`+`ipt></body></html>`;
   const blob=new Blob([doc],{type:'text/html'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='copydeck-'+(d.taskId||'deck')+'.html'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+}
+/* ── GPT-5.4: proofread / translate the deck in place ─────────────── */
+const SK_AI_BATCH=10;
+function skAiSys(mode){
+  const base='You are a professional English→Hebrew (he-IL) localization specialist for TikTok product UI and help-center content.\n'
+   +'STRICT PRESERVATION (applies to every item):\n'
+   +'- Keep EVERY placeholder and tag byte-for-byte and in the same order and count: {x}, {{x}}, %s, %1$s, HTML like <b>…</b> / <p> / <ul> / <li> / <br>, XLIFF inline tags like <g id="1">…</g> / <x/>, and circled markers ①②③. Never translate, rename, reorder, add, or drop any of them.\n'
+   +'- Keep "TikTok" and other brand / product / feature names in Latin script — do not translate or transliterate them.\n'
+   +'- Hebrew MUST be in לשון רבים — plural, gender-neutral forms (e.g. הצטרפו, שלמו, לחצו, קראו ואשרו) — never masculine singular and never slash forms like שלם/י.\n'
+   +'- Return ONLY the JSON object requested. No commentary, no markdown, no code fences.';
+  if(mode==='translate') return base+'\nTASK: Translate each item\'s English "src" into natural, idiomatic Hebrew.';
+  return base+'\nTASK: Proofread and correct each item\'s Hebrew "tgt" (use "src" as the reference meaning): fix grammar, spelling, terminology, and punctuation, and convert imperatives / second person to plural gender-neutral. Preserve the original meaning. If an item is already correct, return it unchanged.';
+}
+async function skAI(mode){
+  const key=getApiKey(); if(!key){ promptApiKey(); return; }
+  if(!SK.deck||!SK.deck.segments||!SK.deck.segments.length) return;
+  const segs=SK.deck.segments;
+  const pb=document.getElementById('sk-ai-proof'), tb=document.getElementById('sk-ai-trans'), st=document.getElementById('sk-ai-status');
+  pb.disabled=tb.disabled=true; skErr('');
+  const B=SK_AI_BATCH; let changed=0, processed=0, failed=0;
+  try{
+    for(let i=0;i<segs.length;i+=B){
+      const slice=segs.slice(i,i+B);
+      st.style.color='#94a3b8';
+      st.textContent=`✨ ${mode==='translate'?'Translating':'Proofreading'} ${i+1}–${Math.min(i+B,segs.length)} of ${segs.length}…`;
+      const items=slice.map((s,j)=>({i:j+1, src:String(s.src||''), tgt:String(s.tgt||'')}));
+      const user=(mode==='translate'?'Translate the "src" of each item. ':'Proofread the "tgt" of each item. ')
+        +'Return JSON exactly as {"out":[{"i":<number>,"text":"<hebrew>"}]}, one entry per input item, same "i" numbers.\n'
+        +JSON.stringify({items});
+      try{
+        const r=await fetch('https://api.openai.com/v1/chat/completions',{method:'POST',
+          headers:{'Authorization':'Bearer '+key,'Content-Type':'application/json'},
+          body:JSON.stringify({model:'gpt-5.4', temperature:mode==='translate'?0.2:0.1,
+            response_format:{type:'json_object'},
+            messages:[{role:'system',content:skAiSys(mode)},{role:'user',content:user}]})});
+        const data=await r.json();
+        if(!r.ok) throw new Error(data.error?.message||('GPT error '+r.status));
+        const parsed=JSON.parse(data.choices?.[0]?.message?.content||'{}');
+        const arr=parsed.out||parsed.segments||[];
+        arr.forEach(o=>{ const idx=((o.i|0)-1); if(idx>=0&&idx<slice.length&&o.text!=null){ const s=slice[idx]; const nt=String(o.text); processed++; if(nt!==String(s.tgt||'')){ s.tgt=nt; s.note=(mode==='translate'?'✨ translated · gpt-5.4':'✎ proofread · gpt-5.4'); changed++; } } });
+      }catch(e){ failed+=slice.length; console.warn('skAI batch @'+i, e.message); }
+      if(i+B<segs.length) await new Promise(r=>setTimeout(r,250));
+    }
+    skRenderShell(); skRenderCards(); skRefresh();
+    st.style.color = failed? '#fca5a5' : '#4ade80';
+    st.textContent=`✅ ${mode==='translate'?'Translated':'Proofread'} ${processed} · ${changed} changed`+(failed?` · ${failed} failed (see console)`:'');
+  } finally { pb.disabled=tb.disabled=false; }
 }
 // drag-drop wiring for the Starling drop zone
 (function(){ const dz=document.getElementById('sk-drop'); if(dz){ dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('drag-over');}); dz.addEventListener('dragleave',()=>dz.classList.remove('drag-over')); dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('drag-over'); const f=e.dataTransfer.files[0]; if(f){const inp=document.getElementById('sk-file'); const dt=new DataTransfer(); dt.items.add(f); inp.files=dt.files; skOnFile(inp);}}); } })();

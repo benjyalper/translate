@@ -82,7 +82,7 @@ Tools are grouped by type:
 | 18 | 📁 | Client / Firm Memory | 🛰 `/api/firms` (Postgres) | `admin.html:688` | `admin.html:2237-2256` | `er*` (shared) |
 | 19 | 📸 | Doc Screenshotter | 🌐 | `admin.html:697` | `admin.html:2259-2304` | `ds*` |
 | 20 | 📚 | Ask My Docs (Knowledge Base) | 🌐 (OpenAI from browser) | `admin.html:703` | `admin.html:2311-2344` | `kb*` |
-| 21 | 🐦 | Starling Copy Deck | 💻 (client-only) | `admin.html:708` | `admin.html:2367-2470` | `sk*` |
+| 21 | 🐦 | Starling Copy Deck | 💻 client + GPT-5.4 (browser key) | `admin.html:708` | `admin.html:2367-2470` | `sk*` |
 
 > Naming quirk: `tcLaunch()` (line 2550) opens the **Text Checker** standalone app. The Audio Transcriber also uses the `tc*` prefix for its own logic (`tcSetMode`, `tcSwitchTab`, etc.). They share a prefix only by coincidence — `tcLaunch` is the only `tc*` function that belongs to Text Checker.
 
@@ -252,16 +252,17 @@ Plain-language Q&A over ingested reference documents. Grounded only in the data:
 - **Needs:** `OPENAI_API_KEY` (browser-side, via the global key bar).
 
 ### 🐦 21. Starling Copy Deck — `tool-starling` *(NEW)*
-Turns a proofread Starling (ByteDance CAT) task into copy-paste-ready segment cards. Starling has **no XLIFF re-import**, so edits only get back in by pasting each cell by hand — this tool makes that fast and lets Benjy paste segments while Claude edits others in the browser at the same time (agree who takes which segments/files first).
+End-to-end tool for Starling (ByteDance CAT) tasks: drop a **raw exported XLIFF**, let **GPT-5.4 proofread or translate** it in-browser, then copy each segment into Starling. Starling has **no XLIFF re-import**, so edits only get back in by pasting each cell by hand — this tool makes that fast and lets Benjy paste segments while Claude edits others in the browser at the same time (agree who takes which segments/files first).
 
-- **Card UI:** `admin.html:2367-2470` (self-contained; scoped `.sk-*` styles in an inline `<style>`).
-- **JS:** `admin.html` — `sk*` family before the final `</script>` (`skBuild`, `skNormalize`, `skParseXliff`, `skCardHtml`, `skRenderCards`, `skCopy`, `skDownloadHtml`, `skResetTicks`).
-- **Backend:** none — pure client. No API key needed.
-- **Inputs:** paste/drop (a) a **deck JSON** `{taskId,segments:[{seg,cat,note,src,tgt}]}` that Claude produces; (b) a **corr map** `{"<seg>":{cat,note,target}}`; or (c) a raw proofread **`.xliff`** (renders every `<trans-unit>`).
-- **Features:** per-segment Copy button (copies target verbatim; Starling re-chips `{tokens}`/`<tags>` on paste), category chips + filters (critical/minor/plural/html), "pasted" checkbox + progress bar saved in `localStorage` (`sk-done-<taskId>`), and **⬇ Download as .html** for a standalone portable deck.
+- **Card UI:** `admin.html:2367-2470` (self-contained; scoped `.sk-*` styles in an inline `<style>`). GPT action bar (`#sk-ai`) sits at the top of the built deck.
+- **JS:** `admin.html` — `sk*` family before the final `</script>` (`skBuild`, `skNormalize`, `skParseXliff`, `skCardHtml`, `skRenderCards`, `skCopy`, `skDownloadHtml`, `skResetTicks`, **`skAI(mode)`** + **`skAiSys(mode)`**).
+- **Backend:** none — pure client. **Proofread/Translate call `api.openai.com` directly with Benjy's browser-side `oai_key`** (same key as the other GPT tools; `promptApiKey()` if missing).
+- **Inputs:** paste/drop (a) a **raw `.xliff`** exported from Starling (renders every `<trans-unit>`, then Proofread/Translate); (b) a ready **deck JSON** `{taskId,segments:[{seg,cat,note,src,tgt}]}` Claude produces; or (c) a **corr map** `{"<seg>":{cat,note,target}}`.
+- **GPT step (`skAI`):** `gpt-5.4`, `response_format:json_object`, batches of 10. **📑 Proofread** rewrites each Hebrew `tgt` (fix grammar/terminology + convert to **plural gender-neutral**); **🌐 Translate source → HE** fills `tgt` from the English `src`. System prompt (`skAiSys`) enforces byte-for-byte preservation of `{x}`/`{{x}}`/`%s`/HTML/`<g>`/`①` and keeps "TikTok"/brands in Latin script. Changed segments get a `✎ proofread` / `✨ translated` note; status shows `Proofread N · M changed`.
+- **Features:** per-segment Copy button (copies target verbatim; Starling re-chips `{tokens}`/`<tags>` on paste), category chips + filters (critical/minor/plural/html), **⚠ tag** warnings on segments holding real inline tag objects (`<g>/<x/>/<bpt>…`, `①②③`) — place those in the editor by hand, "pasted" checkbox + progress bar saved in `localStorage` (`sk-done-<taskId>`), and **⬇ Download as .html** for a standalone portable deck.
 - **Token highlighting:** `{placeholders}`, `{{vars}}`, `%s`, and `<html tags>` are visually tagged in both source and target.
 - **Helper (offline):** `copydeck-gen.mjs` — `node copydeck-gen.mjs <in.xliff> <corr.json> <out.html> <taskId>` builds the same deck as a standalone HTML file. Sample deck: `deck-354460046850.json`.
-- **Workflow:** Benjy exports the task XLIFF from Starling → sends Claude → Claude proofreads (gpt-5.4, placeholders/tags/HTML preserved) + hands back a deck → Benjy pastes it here → copies segment-by-segment into Starling.
+- **Workflow:** Benjy exports the task XLIFF from Starling → drops the **raw** file here → clicks **Proofread** or **Translate** (GPT-5.4, placeholders/tags/HTML preserved) → copies segment-by-segment into Starling. (Claude can still hand over a pre-built deck for the tagged segments it takes in the browser.)
 
 ---
 

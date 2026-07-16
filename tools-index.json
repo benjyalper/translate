@@ -256,9 +256,10 @@
       "card_lines": [2367, 2470],
       "js_prefix": "sk",
       "js_starts_around": 13595,
-      "needs": [],
-      "purpose": "Starling (ByteDance) CAT has no XLIFF re-import, so proofread edits get back in only by pasting each cell by hand. This tool turns a proofread deck into copy-paste-ready segment cards (Copy button per segment, placeholders/tags kept verbatim, pasted-checkbox + progress in localStorage). Built for pasting segments while Claude edits others in the browser simultaneously.",
-      "inputs": "Accepts (a) a deck JSON {taskId,segments:[{seg,cat,note,src,tgt}]} that Claude produces; (b) a corr map {\"<seg>\":{cat,note,target}}; or (c) a raw proofread .xliff (renders every trans-unit).",
+      "needs": ["OPENAI_API_KEY (browser-side, for Proofread/Translate)"],
+      "purpose": "Starling (ByteDance) CAT has no XLIFF re-import, so edits get back in only by pasting each cell by hand. Drop a RAW exported .xliff, then click Proofread (fix + convert to plural gender-neutral) or Translate source->HE — GPT-5.4 processes every segment in-browser with the user's OpenAI key (oai_key), keeping each placeholder/tag verbatim — and it renders copy-paste-ready segment cards (Copy button per segment, tagged-segment warnings, pasted-checkbox + progress in localStorage). Built for pasting segments while Claude edits others in the browser simultaneously.",
+      "inputs": "Accepts (a) a raw exported .xliff (renders every trans-unit, then Proofread/Translate with GPT-5.4); (b) a ready deck JSON {taskId,segments:[{seg,cat,note,src,tgt}]}; or (c) a corr map {\"<seg>\":{cat,note,target}}.",
+      "ai": "skAI(mode) calls api.openai.com chat/completions, model gpt-5.4, response_format json_object, batches of 10; mode 'proofread' rewrites tgt, mode 'translate' fills tgt from src. Needs oai_key in localStorage (promptApiKey()).",
       "helper_scripts": ["copydeck-gen.mjs (node: xliff+corr.json -> standalone copy-deck .html)"],
       "sample_data": "deck-354460046850.json"
     }
