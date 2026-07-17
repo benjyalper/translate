@@ -2400,6 +2400,14 @@
           .sk-copy{font:inherit;font-size:.78rem;font-weight:700;color:#fff;background:linear-gradient(135deg,#4f46e5,#7c3aed);border:none;border-radius:7px;padding:.4rem .9rem;cursor:pointer;white-space:nowrap}
           .sk-copy:hover{filter:brightness(1.1)} .sk-copy:active{transform:translateY(1px)}
           .sk-copy.sk-copied{background:#0f8f4f}
+          .sk-parts{display:flex;flex-direction:column;gap:.45rem;margin-top:.55rem;padding-top:.55rem;border-top:1px dashed #2a2a3a}
+          .sk-part{display:grid;grid-template-columns:22px 1fr auto;gap:.55rem;align-items:center}
+          .sk-pidx{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;background:#eab308;color:#1a1505;font-size:.7rem;font-weight:800;font-variant-numeric:tabular-nums}
+          .sk-pbody{min-width:0}
+          .sk-psrc{font-size:.66rem;color:#64748b;direction:ltr;text-align:left;overflow-wrap:anywhere;margin-bottom:.1rem}
+          .sk-ptxt{font-size:.9rem;line-height:1.5;direction:rtl;text-align:right;color:#e7e9f0;overflow-wrap:anywhere}
+          .sk-ptxt.sk-pick{background:rgba(79,70,229,.25);border-radius:6px;box-shadow:0 0 0 4px rgba(79,70,229,.25)}
+          .sk-copy-part{font-size:.68rem;font-weight:700;padding:.28rem .6rem}
           .sk-done-l{display:flex;align-items:center;gap:.3rem;font-size:.68rem;color:#94a3b8;cursor:pointer;justify-content:center}
           .sk-done-l input{accent-color:#4f46e5;cursor:pointer}
           .sk-prog{font-size:.72rem;color:#94a3b8;font-variant-numeric:tabular-nums}
@@ -13653,14 +13661,34 @@ function skRenderShell(){
 // — those re-chip fine when pasted into the Starling string editor.
 const SK_UNSAFE=/<\/?(?:g|x|bpt|ept|ph|it|mrk|sub)\b[^>]*>|[①-⑳❶-➓⓪]/;
 function skTagged(s){ return SK_UNSAFE.test(String(s.tgt||''))||SK_UNSAFE.test(String(s.src||'')); }
+// Split a bullet-delimited segment ("A • B • C") into its parts. Starling wraps
+// each part in a numbered tag pair (①…① ②…②); copying each part separately lets
+// you paste it BETWEEN the tags without disturbing them. Returns null if 1 part.
+function skSplitParts(t){
+  const s=String(t==null?'':t);
+  if(!/[•·]/.test(s)) return null;
+  const parts=s.split(/\s*[•·]\s*/).map(x=>x.trim()).filter(Boolean);
+  return parts.length>1 ? parts : null;
+}
 function skCardHtml(s){
   const cat=s.cat||''; const chip=cat?`<span class="sk-chip sk-c-${cat}">${cat}</span>`:'';
   const tagged=skTagged(s);
   const warn=tagged?`<span class="sk-warn" title="Real inline tag object — pasting text won't recreate it. Place the tag in the Starling editor.">⚠ tag</span>`:'';
-  return `<article class="sk-card${tagged?' sk-tagged':''}" data-cat="${cat||'other'}" data-tagged="${tagged?1:0}" data-seg="${skEsc(s.seg)}">`
+  const tparts=skSplitParts(s.tgt), sparts=skSplitParts(s.src);
+  let partsHtml='';
+  if(tparts){
+    partsHtml=`<div class="sk-parts" title="Paste each part between its matching ①…① tags in Starling — the tags stay untouched.">`
+      +tparts.map((p,i)=>{
+        const sref=(sparts&&sparts.length===tparts.length)?`<div class="sk-psrc" dir="ltr">${skHl(skEsc(sparts[i]))}</div>`:'';
+        return `<div class="sk-part"><span class="sk-pidx" title="tag ${i+1}">${i+1}</span>`
+          +`<div class="sk-pbody">${sref}<div class="sk-ptxt" dir="rtl">${skHl(skEsc(p))}</div></div>`
+          +`<button class="sk-copy sk-copy-part" type="button" data-copy="${skEsc(p)}">Copy</button></div>`;
+      }).join('')+`</div>`;
+  }
+  return `<article class="sk-card${tagged?' sk-tagged':''}${tparts?' sk-has-parts':''}" data-cat="${cat||'other'}" data-tagged="${tagged?1:0}" data-seg="${skEsc(s.seg)}">`
     +`<div class="sk-rail"><span class="sk-seg">#${skEsc(s.seg)}</span>${chip}${warn}</div>`
-    +`<div class="sk-body">${s.note?`<div class="sk-note">${skEsc(s.note)}</div>`:''}${s.src?`<div class="sk-src" dir="ltr">${skHl(skEsc(s.src))}</div>`:''}<div class="sk-tgt" dir="rtl">${skHl(skEsc(s.tgt))}</div></div>`
-    +`<div class="sk-act"><button class="sk-copy" type="button" data-copy="${skEsc(s.tgt)}">Copy</button><label class="sk-done-l"><input type="checkbox" class="sk-cb"> pasted</label></div>`
+    +`<div class="sk-body">${s.note?`<div class="sk-note">${skEsc(s.note)}</div>`:''}${s.src?`<div class="sk-src" dir="ltr">${skHl(skEsc(s.src))}</div>`:''}<div class="sk-tgt" dir="rtl">${skHl(skEsc(s.tgt))}</div>${partsHtml}</div>`
+    +`<div class="sk-act"><button class="sk-copy" type="button" data-copy="${skEsc(s.tgt)}">${tparts?'Copy all':'Copy'}</button><label class="sk-done-l"><input type="checkbox" class="sk-cb"> pasted</label></div>`
     +`</article>`;
 }
 function skRenderCards(){
@@ -13684,7 +13712,8 @@ async function skCopy(btn){
     try{ const ta=document.createElement('textarea'); ta.value=text; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.select(); ok=document.execCommand('copy'); ta.remove(); }catch(e2){}
   }
   const prev=btn.textContent; btn.classList.add('sk-copied'); btn.textContent= ok?'Copied ✓':'Ctrl+C ↓';
-  const card=btn.closest('.sk-card'); const tgt=card&&card.querySelector('.sk-tgt');
+  const card=btn.closest('.sk-card');
+  const tgt=btn.classList.contains('sk-copy-part') ? btn.parentElement.querySelector('.sk-ptxt') : (card&&card.querySelector('.sk-tgt'));
   if(!ok && tgt){ const sel=getSelection(); const r=document.createRange(); r.selectNodeContents(tgt); sel.removeAllRanges(); sel.addRange(r); tgt.classList.add('sk-pick'); }
   setTimeout(()=>{ btn.classList.remove('sk-copied'); btn.textContent=prev; if(tgt)tgt.classList.remove('sk-pick'); }, ok?1300:3000);
 }
@@ -13711,6 +13740,12 @@ function skDownloadHtml(){
   .sk-var{color:#d8b4fe;background:rgba(124,58,237,.2)}.sk-tag{color:#93c5fd;background:rgba(37,99,235,.2)}.sk-pct{color:#fcd34d;background:rgba(180,83,9,.22)}
   .sk-act{display:flex;flex-direction:column;gap:6px;justify-self:end}
   .sk-copy{font:inherit;font-size:13px;font-weight:700;color:#fff;background:linear-gradient(135deg,#4f46e5,#7c3aed);border:none;border-radius:8px;padding:7px 15px;cursor:pointer;white-space:nowrap}.sk-copy.sk-copied{background:#0f8f4f}
+  .sk-parts{display:flex;flex-direction:column;gap:7px;margin-top:9px;padding-top:9px;border-top:1px dashed #262833}
+  .sk-part{display:grid;grid-template-columns:22px 1fr auto;gap:9px;align-items:center}
+  .sk-pidx{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;background:#eab308;color:#1a1505;font-size:11px;font-weight:800}
+  .sk-pbody{min-width:0}.sk-psrc{font-size:11px;color:#64748b;direction:ltr;text-align:left;overflow-wrap:anywhere;margin-bottom:2px}
+  .sk-ptxt{font-size:14.5px;line-height:1.5;direction:rtl;text-align:right;overflow-wrap:anywhere}.sk-ptxt.sk-pick{background:rgba(79,70,229,.25);border-radius:6px;box-shadow:0 0 0 4px rgba(79,70,229,.25)}
+  .sk-copy-part{font-size:11px;padding:4px 10px}
   .sk-done-l{display:flex;align-items:center;gap:4px;font-size:12px;color:#94a3b8;cursor:pointer;justify-content:center}
   @media(max-width:560px){.sk-card{grid-template-columns:1fr}.sk-rail{flex-direction:row;align-items:center}.sk-act{flex-direction:row}}`;
   const cards=d.segments.map(skCardHtml).join('\n');
@@ -13718,7 +13753,7 @@ function skDownloadHtml(){
   var cards=[].slice.call(document.querySelectorAll('.sk-card')),pc=document.getElementById('pc'),pb=document.getElementById('pb');
   function ref(){var n=0;cards.forEach(function(c){var s=c.getAttribute('data-seg'),cb=c.querySelector('.sk-cb'),v=!!done[s];cb.checked=v;c.classList.toggle('sk-done',v);if(v)n++;});pc.textContent=n;pb.style.width=(cards.length?n/cards.length*100:0)+'%';}
   cards.forEach(function(c){var s=c.getAttribute('data-seg');c.querySelector('.sk-cb').addEventListener('change',function(e){if(e.target.checked)done[s]=1;else delete done[s];localStorage.setItem(KEY,JSON.stringify(done));ref();});
-  var b=c.querySelector('.sk-copy');b.addEventListener('click',function(){var t=b.getAttribute('data-copy'),ok=false;try{navigator.clipboard.writeText(t);ok=true;}catch(e){try{var ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();ok=document.execCommand('copy');ta.remove();}catch(e2){}}var p=b.textContent;b.textContent=ok?'Copied \\u2713':'Ctrl+C';b.classList.add('sk-copied');var tg=c.querySelector('.sk-tgt');if(!ok&&tg){var sel=getSelection(),r=document.createRange();r.selectNodeContents(tg);sel.removeAllRanges();sel.addRange(r);}setTimeout(function(){b.textContent=p;b.classList.remove('sk-copied');},1300);});});ref();})();`;
+  [].slice.call(c.querySelectorAll('.sk-copy')).forEach(function(b){b.addEventListener('click',function(){var t=b.getAttribute('data-copy'),ok=false;try{navigator.clipboard.writeText(t);ok=true;}catch(e){try{var ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();ok=document.execCommand('copy');ta.remove();}catch(e2){}}var p=b.textContent;b.textContent=ok?'Copied \\u2713':'Ctrl+C';b.classList.add('sk-copied');var tg=b.classList.contains('sk-copy-part')?b.parentElement.querySelector('.sk-ptxt'):c.querySelector('.sk-tgt');if(!ok&&tg){var sel=getSelection(),r=document.createRange();r.selectNodeContents(tg);sel.removeAllRanges();sel.addRange(r);}setTimeout(function(){b.textContent=p;b.classList.remove('sk-copied');},1300);});});});ref();})();`;
   const doc=`<!doctype html><html lang="he"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Copy deck ${tid}</title><style>${css}</style></head><body><div class="wrap"><header><h1>Copy deck <span>${tid}</span></h1><div class="prog"><span id="pc">0</span>/${total} pasted<div class="bar"><i id="pb"></i></div></div></header><div class="sk-cards">${cards}</div></div><scr`+`ipt>${script}</scr`+`ipt></body></html>`;
   const blob=new Blob([doc],{type:'text/html'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='copydeck-'+(d.taskId||'deck')+'.html'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),2000);
 }
