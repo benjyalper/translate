@@ -13616,7 +13616,13 @@ function skHl(e){ return e
   .replace(/(\{\{[^}]+\}\})/g,'<span class="sk-tok sk-var">$1</span>')
   .replace(/(?<!\{)(\{[^{}]+\})(?!\})/g,'<span class="sk-tok sk-var">$1</span>')
   .replace(/(&lt;\/?[a-zA-Z][^&]*?&gt;)/g,'<span class="sk-tok sk-tag">$1</span>')
+  .replace(/([OC]-\d+(?:-\d+)+)/g,'<span class="sk-tok sk-tag">$1</span>')
   .replace(/(%\d?\$?[sd])/g,'<span class="sk-tok sk-pct">$1</span>'); }
+// Starling encodes tags as text tokens O-<id> (open) / C-<id> (close), e.g.
+// "O-1-0<text>C-1-0". Strip them so a per-part copy is just the inner text you
+// paste BETWEEN the existing ①…① tags.
+function skStripTags(s){ return String(s==null?'':s).replace(/[OC]-\d+(?:-\d+)+/g,'').replace(/\s{2,}/g,' ').trim(); }
+function skTagId(s){ const m=String(s==null?'':s).match(/O-(\d+)/); return m?m[1]:null; }
 function skErr(m){ const e=document.getElementById('sk-error'); if(!m){e.style.display='none';return;} e.style.display='block'; e.textContent=m; }
 function skParseXliff(text){
   const un=s=>s.replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'");
@@ -13679,10 +13685,13 @@ function skCardHtml(s){
   if(tparts){
     partsHtml=`<div class="sk-parts" title="Paste each part between its matching ①…① tags in Starling — the tags stay untouched.">`
       +tparts.map((p,i)=>{
-        const sref=(sparts&&sparts.length===tparts.length)?`<div class="sk-psrc" dir="ltr">${skHl(skEsc(sparts[i]))}</div>`:'';
-        return `<div class="sk-part"><span class="sk-pidx" title="tag ${i+1}">${i+1}</span>`
-          +`<div class="sk-pbody">${sref}<div class="sk-ptxt" dir="rtl">${skHl(skEsc(p))}</div></div>`
-          +`<button class="sk-copy sk-copy-part" type="button" data-copy="${skEsc(p)}">Copy</button></div>`;
+        const clean=skStripTags(p);                       // inner text only — no O-/C- tokens
+        const id=skTagId(p)||String(i+1);                 // badge = the tag's own id when present
+        const sclean=(sparts&&sparts.length===tparts.length)?skStripTags(sparts[i]):'';
+        const sref=sclean?`<div class="sk-psrc" dir="ltr">${skHl(skEsc(sclean))}</div>`:'';
+        return `<div class="sk-part"><span class="sk-pidx" title="tag ${skEsc(id)}">${skEsc(id)}</span>`
+          +`<div class="sk-pbody">${sref}<div class="sk-ptxt" dir="rtl">${skHl(skEsc(clean))}</div></div>`
+          +`<button class="sk-copy sk-copy-part" type="button" data-copy="${skEsc(clean)}">Copy</button></div>`;
       }).join('')+`</div>`;
   }
   return `<article class="sk-card${tagged?' sk-tagged':''}${tparts?' sk-has-parts':''}" data-cat="${cat||'other'}" data-tagged="${tagged?1:0}" data-seg="${skEsc(s.seg)}">`
