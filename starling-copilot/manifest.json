@@ -7,6 +7,7 @@
   "host_permissions": [
     "https://starling.bytedance.com/*",
     "https://*.crowdin.com/*",
+    "https://memoq.terratranslations.com/*",
     "https://api.openai.com/*"
   ],
   "background": { "service_worker": "background.js" },
@@ -16,6 +17,12 @@
     {
       "matches": ["https://starling.bytedance.com/*"],
       "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    },
+    {
+      "matches": ["https://memoq.terratranslations.com/memoqweb/*"],
+      "js": ["memoq.js"],
       "run_at": "document_idle",
       "all_frames": false
     }

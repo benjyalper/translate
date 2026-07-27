@@ -26,6 +26,18 @@ async function send(msg) {
     throw new Error('Content script not loaded on this tab — reload the Starling page.');
   }
 }
+// ---- messaging to the memoQ tab --------------------------------------------
+async function sendMQ(msg) {
+  const t = await activeTab();
+  if (!t || !/^https:\/\/memoq\.terratranslations\.com\/memoqweb\//.test(t.url || '')) {
+    throw new Error('Open a memoQ web editor document tab, then click Detect.');
+  }
+  try {
+    return await chrome.tabs.sendMessage(t.id, msg);
+  } catch (e) {
+    throw new Error('memoQ content script not loaded — reload the memoQ editor page.');
+  }
+}
 
 // ---- logging ---------------------------------------------------------------
 function log(...a) {
@@ -1522,9 +1534,147 @@ function cwRender() {
   if ($('cw-count')) $('cw-count').textContent = `${ok}/${CW.cards.length} entered`;
 }
 
+// ============================================================================
+// memoQ mode — harvest → GPT → write-back through memoQ's own editor API.
+// The memoq.js content script does the API I/O (same-origin session); this side
+// runs the review UI and the GPT proposals (reusing gptBatch/sysPrompt).
+// ============================================================================
+const MQ = { ctx: null, cards: [] };
+function mqLog(...a) { const el = $('mq-log'); if (!el) return; el.textContent += (el.textContent ? '\n' : '') + a.join(' '); el.scrollTop = el.scrollHeight; }
+
+async function mqDetect() {
+  try {
+    const r = await sendMQ({ type: 'MQ_PING' });
+    if (!r || !r.ok) throw new Error(r && r.error || 'no response');
+    MQ.ctx = { project: r.project, doc: r.doc, rows: r.rows };
+    if (!r.csrf) mqLog('[detect] warning: no X-CSRF-TOKEN cookie seen — writes may be rejected.');
+    info('mq-ctx', `Connected · ${r.rows} segments · doc ${String(r.doc || '').slice(0, 8)}… (memoQ v${r.ver}).`, 'good');
+    $('mq-harvest-card').hidden = false;
+    mqLog(`[detect] project ${r.project} · doc ${r.doc} · ${r.rows} rows`);
+  } catch (e) {
+    MQ.ctx = null;
+    info('mq-ctx', e.message, 'err');
+    $('mq-harvest-card').hidden = true;
+  }
+}
+
+async function mqHarvest() {
+  const btn = $('mq-harvest'); btn.disabled = true;
+  info('mq-harvest-info', 'Harvesting segments via the memoQ API…');
+  try {
+    const r = await sendMQ({ type: 'MQ_HARVEST' });
+    if (!r || !r.ok) throw new Error(r && r.error || 'harvest failed');
+    const skipConfirmed = $('mq-skip-confirmed').checked;
+    const skipLocked = $('mq-skip-locked').checked;
+    const isConfirmed = (s) => /confirm/i.test(s || '');
+    let skippedC = 0, skippedL = 0;
+    MQ.cards = (r.segments || [])
+      .filter((s) => {
+        if (!String(s.src || '').trim()) return false;              // no source → nothing to do
+        if (skipLocked && (s.locked || s.readonly)) { skippedL++; return false; }
+        if (skipConfirmed && isConfirmed(s.status)) { skippedC++; return false; }
+        return true;
+      })
+      .map((s) => ({ ...s, proposal: '', status_ui: 'new', approved: false, note: '' }));
+    const total = (r.segments || []).length;
+    const tagged = MQ.cards.filter((c) => c.tagged).length;
+    info('mq-harvest-info', `Harvested ${MQ.cards.length} of ${total} segment(s)${tagged ? ` · ⚠ ${tagged} with tags` : ''}${skippedC ? ` · skipped ${skippedC} confirmed` : ''}${skippedL ? ` · skipped ${skippedL} locked` : ''}.`, 'good');
+    $('mq-propose-card').hidden = MQ.cards.length === 0;
+    $('mq-review-card').hidden = true;
+    mqRender();
+    if (!MQ.cards.length) info('mq-harvest-info', 'Nothing to harvest with these filters — untick the skip options to include confirmed/locked segments.', 'err');
+  } catch (e) {
+    info('mq-harvest-info', e.message, 'err');
+  } finally { btn.disabled = false; }
+}
+
+async function mqPropose() {
+  const key = await store.get('key', '');
+  if (!key) { info('mq-propose-info', 'Add your OpenAI key in ⚙️ Settings first.', 'err'); return; }
+  if (!MQ.cards.length) { info('mq-propose-info', 'Harvest first.', 'err'); return; }
+  const model = $('model').value, plural = $('plural').checked, mode = $('mq-mode').value;
+  const btn = $('mq-propose'); btn.disabled = true;
+  const B = 10; let done = 0, failed = 0;
+  try {
+    for (let i = 0; i < MQ.cards.length; i += B) {
+      const slice = MQ.cards.slice(i, i + B);
+      info('mq-propose-info', `✨ ${mode === 'translate' ? 'Translating' : 'Proofreading'} ${i + 1}–${Math.min(i + B, MQ.cards.length)} of ${MQ.cards.length}…`);
+      const items = slice.map((c, j) => ({ i: j + 1, src: String(c.src || ''), tgt: String(c.tgt || '') }));
+      try {
+        const out = await gptBatch(items, mode, key, model, plural);
+        out.forEach((o) => {
+          const idx = (o.i | 0) - 1;
+          if (idx >= 0 && idx < slice.length && o.text != null) {
+            const c = slice[idx];
+            c.proposal = polish(mode === 'translate' ? c.src : c.tgt || c.src, String(o.text));
+            // tag list for the write: proofread edits the existing target's tags; translate carries the source's.
+            c.writeTags = mode === 'translate' ? (c.srcTags || []) : ((c.tgtTags && c.tgtTags.length) ? c.tgtTags : (c.srcTags || []));
+            c.approved = true; c.status_ui = 'proposed'; done++;
+          }
+        });
+      } catch (e) { failed += slice.length; mqLog('[gpt] batch failed: ' + e.message); }
+    }
+    info('mq-propose-info', `Proposed ${done}${failed ? ` · ${failed} failed` : ''}. Review, then Write.`, failed ? 'err' : 'good');
+    $('mq-review-card').hidden = MQ.cards.every((c) => !c.proposal);
+    mqRender();
+  } finally { btn.disabled = false; }
+}
+
+async function mqWrite(i) {
+  const c = MQ.cards[i]; if (!c) return;
+  const text = (c.proposal || '').trim();
+  if (!text) { c.note = 'Nothing to write — no proposal.'; mqRender(); return; }
+  c.status_ui = 'writing'; mqRender();
+  try {
+    const r = await sendMQ({ type: 'MQ_WRITE', edits: [{ rowId: c.rowId, text: c.proposal, tags: c.writeTags || [] }] });
+    const res = r && r.results && r.results[0];
+    if (res && res.ok) { c.status_ui = 'written'; c.tgt = c.proposal; c.note = `✅ Written (unconfirmed) — confirm segment ${c.seg} in memoQ.`; mqLog(`wrote seg ${c.seg} (row ${c.rowId})`); }
+    else { c.status_ui = 'proposed'; c.note = '⚠ ' + ((res && res.error) || (r && r.error) || 'write failed'); mqLog(`write failed seg ${c.seg}: ${c.note}`); }
+  } catch (e) { c.status_ui = 'proposed'; c.note = '⚠ ' + e.message; mqLog(`write failed seg ${c.seg}: ${e.message}`); }
+  mqRender();
+}
+
+async function mqWriteAll() {
+  const pending = MQ.cards.map((c, i) => ({ c, i })).filter(({ c }) => c.approved && (c.proposal || '').trim() && c.status_ui !== 'written');
+  if (!pending.length) { info('mq-review-info', 'Nothing approved to write.', 'err'); return; }
+  info('mq-review-info', `Writing ${pending.length}…`);
+  let n = 0;
+  for (const { i } of pending) { await mqWrite(i); info('mq-review-info', `Writing ${++n}/${pending.length}…`); }
+  const ok = MQ.cards.filter((c) => c.status_ui === 'written').length;
+  info('mq-review-info', `Done · ${ok} written (unconfirmed). Confirm each segment in memoQ.`, 'good');
+}
+
+function mqRender() {
+  const box = $('mq-cards'); if (!box) return;
+  box.innerHTML = MQ.cards.map((c, i) => {
+    const written = c.status_ui === 'written';
+    const badge = written ? '<span class="lqc-badge b-valid">written</span>'
+      : c.status_ui === 'writing' ? '<span class="lqc-warn">writing…</span>'
+        : c.proposal ? '<span class="lqc-badge b-invalid">proposed</span>' : '';
+    const tag = c.tagged ? '<span class="lqc-warn" title="has inline tags ①②③">⚑ tags</span>' : '';
+    return `<div class="lqc wbc">
+      <div class="lqc-top"><span class="lqc-seg">#${c.seg}</span>${tag}${badge}</div>
+      <div class="lqc-lbl">Source (EN)</div><div class="lqc-src" dir="ltr">${hl(esc(c.src))}</div>
+      ${c.tgt ? `<div class="lqc-lbl">Current Hebrew</div><div class="lqc-tgt" dir="rtl">${hl(esc(c.tgt))}</div>` : ''}
+      ${c.proposal ? `<div class="lqc-lbl">GPT proposal</div><div class="lqc-new" dir="rtl">${hl(esc(c.proposal))}</div>` : ''}
+      ${c.note ? `<div class="lqc-rat">${esc(c.note)}</div>` : ''}
+      <div class="lqc-acts wb-acts">
+        <label class="ck" style="margin:0 8px 0 0"><input type="checkbox" data-mq-appr="${i}" ${c.approved ? 'checked' : ''} ${written ? 'disabled' : ''}/> approve</label>
+        <button class="lqc-copy${c.proposal && !written ? '' : ' ghost'}" data-mq-write="${i}" ${written ? 'disabled' : ''}>⤵ Write</button>
+        <button class="lqc-copy ghost" data-mq-copy="${i}">Copy</button>
+      </div>
+    </div>`;
+  }).join('') || '<div class="info">Harvest a document to begin.</div>';
+  box.querySelectorAll('[data-mq-write]').forEach((b) => b.addEventListener('click', () => mqWrite(+b.dataset.mqWrite)));
+  box.querySelectorAll('[data-mq-copy]').forEach((b) => b.addEventListener('click', () => panelCopy(MQ.cards[+b.dataset.mqCopy].proposal || '', b)));
+  box.querySelectorAll('[data-mq-appr]').forEach((b) => b.addEventListener('change', () => { MQ.cards[+b.dataset.mqAppr].approved = b.checked; }));
+  const ok = MQ.cards.filter((c) => c.status_ui === 'written').length;
+  if ($('mq-count')) $('mq-count').textContent = `${ok}/${MQ.cards.length} written`;
+}
+
 function setMode(m) {
-  const views = { starling: 'view-starling', lqa: 'view-lqa', wb: 'view-wb', crowdin: 'view-crowdin' };
-  const btns = { starling: 'mode-starling', lqa: 'mode-lqa', wb: 'mode-wb', crowdin: 'mode-crowdin' };
+  const views = { starling: 'view-starling', lqa: 'view-lqa', wb: 'view-wb', crowdin: 'view-crowdin', memoq: 'view-memoq' };
+  const btns = { starling: 'mode-starling', lqa: 'mode-lqa', wb: 'mode-wb', crowdin: 'mode-crowdin', memoq: 'mode-memoq' };
   if (!views[m]) m = 'starling';
   Object.keys(views).forEach((k) => { $(views[k]).hidden = k !== m; $(btns[k]).classList.toggle('active', k === m); });
   store.set({ mode_ui: m });
@@ -1539,7 +1689,7 @@ async function init() {
   $('run-model').textContent = $('model').value;
 
   $('key-save').addEventListener('click', async () => { await store.set({ key: $('key').value.trim() }); info('harvest-info', 'Key saved.', 'good'); });
-  $('model').addEventListener('change', async () => { await store.set({ model: $('model').value }); $('run-model').textContent = $('model').value; if ($('lq-model')) $('lq-model').textContent = $('model').value; if ($('cw-model')) $('cw-model').textContent = $('model').value; });
+  $('model').addEventListener('change', async () => { await store.set({ model: $('model').value }); $('run-model').textContent = $('model').value; if ($('lq-model')) $('lq-model').textContent = $('model').value; if ($('cw-model')) $('cw-model').textContent = $('model').value; if ($('mq-model')) $('mq-model').textContent = $('model').value; });
   $('plural').addEventListener('change', async () => { await store.set({ plural: $('plural').checked }); });
   if ($('wb-engine')) {
     WB.engine = await store.get('wbEngine', 'api');
@@ -1607,6 +1757,14 @@ async function init() {
   $('cw-harvest').addEventListener('click', cwHarvest);
   $('cw-propose').addEventListener('click', cwPropose);
   $('cw-enter-all').addEventListener('click', cwEnterAll);
+
+  // memoQ (editor API)
+  if ($('mq-model')) $('mq-model').textContent = $('model').value;
+  $('mode-memoq').addEventListener('click', () => { setMode('memoq'); mqDetect(); });
+  $('mq-detect').addEventListener('click', mqDetect);
+  $('mq-harvest').addEventListener('click', mqHarvest);
+  $('mq-propose').addEventListener('click', mqPropose);
+  $('mq-write-all').addEventListener('click', mqWriteAll);
 
   setMode(await store.get('mode_ui', 'starling'));
 

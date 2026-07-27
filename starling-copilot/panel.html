@@ -18,6 +18,7 @@
       <button id="mode-lqa" class="mode-btn">⚖️ Feishu LQA</button>
       <button id="mode-wb" class="mode-btn">↩ Sheet → Starling</button>
       <button id="mode-crowdin" class="mode-btn">🌐 Crowdin</button>
+      <button id="mode-memoq" class="mode-btn">🅜 memoQ</button>
     </div>
 
     <!-- SETTINGS -->
@@ -344,6 +345,63 @@
       </details>
 
     </div><!-- /view-crowdin -->
+
+    <div id="view-memoq" hidden>
+
+      <!-- STEP 1 · CONNECT -->
+      <section class="card">
+        <div class="step"><span class="num">1</span> Connect to the open memoQ document</div>
+        <div class="hint">Open the memoQ web editor on a document (<code>…/memoqweb/editor/projects/&lt;id&gt;/docs/&lt;id&gt;</code>), then Detect. Reads/writes use memoQ's own editor API in your logged-in session — no separate token.</div>
+        <button id="mq-detect" class="btn" style="margin-top:8px">🔌 Detect the open document</button>
+        <div id="mq-ctx" class="info"></div>
+      </section>
+
+      <!-- STEP 2 · HARVEST -->
+      <section class="card" id="mq-harvest-card" hidden>
+        <div class="step"><span class="num">2</span> Harvest segments</div>
+        <label class="lbl">Mode</label>
+        <select id="mq-mode">
+          <option value="proofread" selected>Proofread — fix the existing Hebrew</option>
+          <option value="translate">Translate — from the English source</option>
+        </select>
+        <label class="ck" style="margin-top:6px"><input type="checkbox" id="mq-skip-confirmed" checked /> Skip already-confirmed segments</label>
+        <label class="ck"><input type="checkbox" id="mq-skip-locked" checked /> Skip locked / read-only segments</label>
+        <button id="mq-harvest" class="btn" style="margin-top:8px">⬇ Harvest from this document</button>
+        <div id="mq-harvest-info" class="info"></div>
+      </section>
+
+      <!-- STEP 3 · PROPOSE -->
+      <section class="card" id="mq-propose-card" hidden>
+        <div class="step"><span class="num">3</span> GPT-5.4 proposals</div>
+        <div class="hint">Uses your house style from Settings (plural gender-neutral, brand/placeholder preservation). Inline tags show as ①②③ and are kept in place.</div>
+        <button id="mq-propose" class="btn" style="margin-top:8px">✨ Propose with <span id="mq-model">gpt-5.4</span></button>
+        <div id="mq-propose-info" class="info"></div>
+      </section>
+
+      <!-- STEP 4 · REVIEW + WRITE -->
+      <section class="card" id="mq-review-card" hidden>
+        <div class="step"><span class="num">4</span> Review &amp; write</div>
+        <div class="hint"><b>Write</b> puts the Hebrew into the segment as an <b>unconfirmed draft</b> — it appears in the editor and <b>you</b> confirm each segment (Ctrl+Enter). It never confirms, rejects, or delivers.</div>
+        <div class="rev-bar" style="margin-top:8px">
+          <button id="mq-write-all" class="btn sm">⤵ Write all approved</button>
+          <span class="spacer"></span>
+          <span id="mq-count" class="info"></span>
+        </div>
+        <div id="mq-cards" class="review"></div>
+        <div id="mq-review-info" class="info"></div>
+      </section>
+
+      <div id="mq-log" class="log"></div>
+
+      <details class="card help">
+        <summary>ℹ️ How memoQ works</summary>
+        <div class="help-body">
+          <p>Harvest reads every segment through memoQ's editor API (<code>POST …/docs/&lt;id&gt;/rows</code>) — source, current Hebrew, inline tags, and confirmed status — in your logged-in session. GPT-5.4 proposes a translation per segment. <b>Write</b> saves it to the segment's target (<code>PUT …/rows/&lt;id&gt;</code>) as an unconfirmed draft.</p>
+          <p class="help-dim">The tool <b>never confirms/delivers</b> — you confirm each segment in memoQ. Inline tags are round-tripped exactly; if GPT drops a tag, that segment is refused (write it by hand) rather than saved wrong. Only source/target text is sent to OpenAI.</p>
+        </div>
+      </details>
+
+    </div><!-- /view-memoq -->
   </div>
 
   <script src="vendor/xlsx.mini.min.js"></script>
