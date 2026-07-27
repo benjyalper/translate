@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Starling Copilot</title>
+  <link rel="stylesheet" href="panel.css" />
+</head>
+<body>
+  <header class="hd">
+    <div class="hd-title">🐦 Starling Copilot</div>
+    <div id="conn" class="conn conn-bad">not connected</div>
+  </header>
+
+  <div class="wrap">
+    <div class="mode-switch">
+      <button id="mode-starling" class="mode-btn active">🐦 Starling</button>
+      <button id="mode-lqa" class="mode-btn">⚖️ Feishu LQA</button>
+      <button id="mode-wb" class="mode-btn">↩ Sheet → Starling</button>
+      <button id="mode-crowdin" class="mode-btn">🌐 Crowdin</button>
+    </div>
+
+    <!-- SETTINGS -->
+    <details class="card" id="settings">
+      <summary>⚙️ Settings</summary>
+      <label class="lbl">OpenAI API key <span class="hint">stored only in this browser</span></label>
+      <div class="row">
+        <input id="key" type="password" placeholder="sk-proj-…" />
+        <button id="key-save" class="btn sm">Save</button>
+      </div>
+      <label class="lbl">Model</label>
+      <select id="model">
+        <option value="gpt-5.4" selected>gpt-5.4 (recommended)</option>
+        <option value="gpt-5.5">gpt-5.5 (tone-sensitive)</option>
+        <option value="gpt-5.4-mini">gpt-5.4-mini (cheap draft)</option>
+      </select>
+      <label class="lbl">House style</label>
+      <label class="ck"><input type="checkbox" id="plural" checked /> Convert to plural gender-neutral (לשון רבים)</label>
+      <label class="lbl">↩ Sheet → Starling engine</label>
+      <select id="wb-engine">
+        <option value="api" selected>API check + editor write — exact matching, types into the editor (recommended)</option>
+        <option value="dom">DOM — previous build (fallback)</option>
+      </select>
+      <p class="hint">Check reads the task as JSON, so quotes/emoji/fullwidth ｜/placeholders can't be misread, and it matches your key against <b>every</b> sheet tab to pick the right revision. Write then <b>types the fix into the editor</b> (by the exact segment Check pinned) so the editor's own state is correct and safe to resubmit. Switch to DOM if it ever misbehaves — the old engine is untouched.</p>
+      <label class="lbl">🌐 Crowdin API token <span class="hint">your own token · stored only in this browser</span></label>
+      <div class="row">
+        <input id="cw-token" type="password" placeholder="crowdin personal access token" />
+        <button id="cw-token-save" class="btn sm">Save</button>
+      </div>
+      <p class="hint">Create it in Crowdin → <b>Account Settings → API → Personal Access Tokens</b>. Scopes: <b>Source files and strings (read)</b> — needed to harvest — plus <b>Translations (read &amp; write)</b> and <b>Projects (read)</b>. Used only to talk to your org's <code>api.crowdin.com</code>; it never leaves this browser.</p>
+      <details class="sub">
+        <summary>Advanced · selector overrides (JSON)</summary>
+        <p class="hint">Patch these if Starling changes its DOM. Leave blank for defaults + auto-detect.</p>
+        <textarea id="selectors" rows="5" placeholder='{"targetCell":".render-text-target","segNo":".item-no"}'></textarea>
+        <div class="row">
+          <button id="sel-save" class="btn sm ghost">Apply selectors</button>
+          <button id="diag" class="btn sm ghost">Run diagnostics</button>
+        </div>
+        <pre id="diag-out" class="diag"></pre>
+      </details>
+    </details>
+
+    <div id="view-starling">
+    <!-- STEP 1 · HARVEST -->
+    <section class="card">
+      <div class="step"><span class="num">1</span> Load segments</div>
+      <button id="harvest" class="btn">⬇ Harvest from this tab</button>
+      <div class="or">or</div>
+      <label class="btn ghost file-btn">📄 Load exported XLIFF
+        <input type="file" id="xliff-file" accept=".xliff,.xml,.mqxliff,.sdlxliff,.txt" hidden />
+      </label>
+      <div class="hint" style="margin-top:6px">XLIFF gives a reliable read of every segment (no scroll-scraping). Write-back still uses the live tab.</div>
+      <div id="harvest-info" class="info"></div>
+    </section>
+
+    <!-- STEP 2 · GPT -->
+    <section class="card" id="gpt-card" hidden>
+      <div class="step"><span class="num">2</span> Process with GPT</div>
+      <div class="seg">
+        <label class="pill"><input type="radio" name="mode" value="proofread" checked /> 📑 Proofread targets</label>
+        <label class="pill"><input type="radio" name="mode" value="translate" /> 🌐 Translate src → HE</label>
+      </div>
+      <label class="ck"><input type="checkbox" id="incl-tagged" checked /> Proofread ⚠ tagged too (copy-by-hand — see below)</label>
+      <button id="run-gpt" class="btn">✨ Run <span id="run-model">gpt-5.4</span></button>
+      <div id="gpt-info" class="info"></div>
+    </section>
+
+    <!-- STEP 3 · REVIEW -->
+    <section class="card" id="review-card" hidden>
+      <div class="step"><span class="num">3</span> Review &amp; approve</div>
+      <div class="rev-bar">
+        <span id="rev-count" class="info"></span>
+        <span class="spacer"></span>
+        <button id="only-changed" class="btn xs ghost active">Changed only</button>
+        <button id="sel-all" class="btn xs ghost">All</button>
+        <button id="sel-none" class="btn xs ghost">None</button>
+      </div>
+      <div id="review" class="review"></div>
+    </section>
+
+    <!-- STEP 4 · WRITE -->
+    <section class="card" id="write-card" hidden>
+      <div class="step"><span class="num">4</span> Write back &amp; confirm</div>
+      <button id="write" class="btn">↩ Write approved to Starling</button>
+      <div id="write-info" class="info"></div>
+      <div class="prog"><i id="write-bar"></i></div>
+      <button id="confirm-all" class="btn ghost">✔ Confirm all (ignore normal QA)</button>
+      <div id="confirm-info" class="info"></div>
+      <div id="post-summary" class="summary" hidden></div>
+    </section>
+
+    <!-- STEP 5 · QA SUMMARY -->
+    <section class="card" id="qa-card">
+      <div class="step"><span class="num">5</span> QA summary</div>
+      <button id="qa-read" class="btn ghost">📋 Read QA warnings</button>
+      <span class="beta" title="Reads Starling's QA panel. Verify against Starling until calibrated on your account.">beta · verify</span>
+      <div id="qa-info" class="info"></div>
+      <div id="qa-groups"></div>
+    </section>
+
+    <div id="log" class="log"></div>
+
+    <!-- EXPLANATION -->
+    <details class="card help">
+      <summary>ℹ️ How assisted (tagged) segments work</summary>
+      <div class="help-body">
+        <p>Some segments contain <b>real inline tags</b> — the yellow <span class="tagdot">①</span><span class="tagdot">②</span> markers in Starling. Typing over the whole cell would destroy those tag objects, so the extension <b>never auto-writes them</b>. They're marked <b>✋ paste by hand</b> in the review.</p>
+        <p>It still <b>proofreads / translates</b> them for you, and when a segment is a bullet list (<code>A • B • C</code> — each item wrapped in its own <span class="tagdot">①</span>…<span class="tagdot">①</span> pair) it splits the corrected text into <b>numbered parts</b>.</p>
+        <p><b>To apply one:</b></p>
+        <ol>
+          <li>Click <b>Copy</b> on a part (its badge number matches the tag number in Starling).</li>
+          <li>In the Starling cell, select only the text <b>between</b> that part's <span class="tagdot">①</span>…<span class="tagdot">①</span> tags.</li>
+          <li>Paste. The tag objects stay exactly where they were — you only replaced the text.</li>
+        </ol>
+        <p class="help-dim">Everything <b>without</b> tags is still written automatically in step 4. This keeps the fragile tag surgery in your hands (reliable) while the extension does all the mechanical work around it.</p>
+      </div>
+    </details>
+    </div><!-- /view-starling -->
+
+    <!-- ══════════ FEISHU LQA ADJUDICATOR ══════════ -->
+    <div id="view-lqa" hidden>
+
+      <!-- STEP 1 · LOAD -->
+      <section class="card">
+        <div class="step"><span class="num">1</span> Load rows from the Feishu sheet</div>
+        <label class="lbl">Format</label>
+        <select id="lq-delim">
+          <option value="auto" selected>Auto-detect</option>
+          <option value="tsv">Tab-separated (Feishu Ctrl+C)</option>
+          <option value="csv">Comma-separated (CSV export)</option>
+        </select>
+        <label class="lbl">Paste rows <span class="hint">select in Feishu → Ctrl+C → paste — keep the header row</span></label>
+        <textarea id="lq-input" rows="5" placeholder="Language  Source  Target  Suggested Target by AI  [ErrorCategory]ErrorType  Error Level  ErrorComment  Key  Valid…"></textarea>
+        <label class="btn ghost file-btn" style="margin-top:8px">📄 …or load a CSV / TSV export
+          <input type="file" id="lq-file" accept=".csv,.tsv,.txt,.tab" hidden />
+        </label>
+        <button id="lq-load" class="btn" style="margin-top:8px">📥 Load rows</button>
+        <div id="lq-info" class="info"></div>
+      </section>
+
+      <!-- STEP 2 · MAPPING -->
+      <section class="card" id="lq-map-card" hidden>
+        <div class="step"><span class="num">2</span> Column mapping <span class="hint">auto-detected — fix any wrong</span></div>
+        <div id="lq-map" class="lq-map"></div>
+      </section>
+
+      <!-- STEP 3 · ADJUDICATE -->
+      <section class="card" id="lq-run-card" hidden>
+        <div class="step"><span class="num">3</span> Adjudicate</div>
+        <label class="lbl">Segments <span class="hint">any combo — 1, 3, 1-10, 5-8 · or all</span></label>
+        <input type="text" id="lq-range" placeholder="e.g.  1, 3, 1-10, 5-8   or   all" />
+        <label class="lbl">Valid = Y means</label>
+        <select id="lq-valid-mean">
+          <option value="real" selected>the AI error is real (fix it)</option>
+          <option value="fine">the current target is fine</option>
+        </select>
+        <button id="lq-run" class="btn" style="margin-top:8px">⚖️ Adjudicate with <span id="lq-model">gpt-5.4</span></button>
+        <div id="lq-run-info" class="info"></div>
+      </section>
+
+      <!-- STEP 4 · VERDICTS -->
+      <section class="card" id="lq-review-card" hidden>
+        <div class="step"><span class="num">4</span> Verdicts</div>
+        <div class="rev-bar"><span id="lq-legend" style="display:flex;gap:6px;flex-wrap:wrap"></span></div>
+        <div id="lq-cards" class="review"></div>
+      </section>
+
+      <!-- STEP 5 · PASTE BACK -->
+      <section class="card" id="lq-paste-card" hidden>
+        <div class="step"><span class="num">5</span> Paste back into the sheet</div>
+        <div class="hint">Fills the 5 <b>Linguists</b> columns. Aligned to your selected rows, in order — use a <b>contiguous</b> range for one clean paste. <b>Fill all 5</b> pastes the whole block at once (Valid ⇥ Category ⇥ Final ⇥ Updated-blank ⇥ Comments).</div>
+        <div class="lq-paste-btns">
+          <button class="btn sm" data-col="valid">⬇ Valid (Yes/No)</button>
+          <button class="btn sm" data-col="category">⬇ Category</button>
+          <button class="btn sm" data-col="final">⬇ Final translation</button>
+          <button class="btn sm" data-col="comments">⬇ Comments</button>
+          <button class="btn sm ghost" id="lq-copy-all">⬇ Fill all 5 (TSV)</button>
+          <button class="btn sm ghost" id="lq-copy-starling">🐦 Copy valid fixes (Key→JSON)</button>
+        </div>
+        <div id="lq-paste-info" class="info"></div>
+      </section>
+
+      <details class="card help">
+        <summary>ℹ️ How Feishu LQA works</summary>
+        <div class="help-body">
+          <p>The task owners ran a global AI translation check and listed suspected errors in a Feishu sheet. For each row you decide whether the AI-flagged error is <b>valid</b> (real → fix it in Starling) or <b>invalid</b> (false positive).</p>
+          <p>Feishu sheets are drawn on a <code>&lt;canvas&gt;</code> — the cells aren't real HTML, so this can't scrape them. Instead you <b>paste</b> the rows (Ctrl+C copies them as tab-separated text) and it runs <b>gpt-5.4</b> per row.</p>
+          <p>It fills the sheet's 5 <b>Linguists</b> columns:</p>
+          <ol>
+            <li><b>Valid (Yes/No)</b> — is the AI error real.</li>
+            <li><b>Category</b> — one of the sheet's 9 error types, <b>only when Valid = Yes</b>.</li>
+            <li><b>Final Translation</b> — the corrected Hebrew, <b>only for valid issues</b>.</li>
+            <li><b>Updated on Starling</b> — left blank; <b>you</b> tick this as you apply each fix.</li>
+            <li><b>Comments</b> — the invalid reason, <b>only</b> for invalid spelling/grammar errors, one per type (deduped, per the task email).</li>
+          </ol>
+          <p class="help-dim">Runs locally with your OpenAI key. Only the text columns go to GPT — the Feishu doc never leaves this browser. Keep shared-account credentials out.</p>
+        </div>
+      </details>
+
+    </div><!-- /view-lqa -->
+
+    <!-- ══════════ SHEET → STARLING WRITE-BACK (Mode 3) ══════════ -->
+    <div id="view-wb" hidden>
+
+      <!-- STEP 1 · LOAD -->
+      <section class="card">
+        <div class="step"><span class="num">1</span> Load the adjudicated sheet</div>
+        <div class="hint">The sheet you downloaded after filling the Linguists columns. Uses <b>Key</b> + <b>Valid</b> + <b>Final Translation</b> (+ Source to guard against stale rows).</div>
+        <label class="btn ghost file-btn" style="margin-top:8px">📄 Load .xlsx / .csv / .tsv
+          <input type="file" id="wb-file" accept=".xlsx,.xls,.csv,.tsv,.txt" hidden />
+        </label>
+        <div class="or">or paste rows (Feishu Ctrl+C)</div>
+        <textarea id="wb-input" rows="4" placeholder="Language  Source  Target  Suggested Target by AI  …  Key  Valid  Category  Final Translation …"></textarea>
+        <div class="row" id="wb-tab-row" hidden>
+          <label class="lbl" style="margin:0">Sheet tab</label>
+          <select id="wb-tab"></select>
+        </div>
+        <button id="wb-load" class="btn" style="margin-top:8px">📥 Load</button>
+        <div id="wb-info" class="info"></div>
+      </section>
+
+      <!-- STEP 2 · MAPPING -->
+      <section class="card" id="wb-map-card" hidden>
+        <div class="step"><span class="num">2</span> Column mapping <span class="hint">auto-detected — fix any wrong</span></div>
+        <div id="wb-map" class="lq-map"></div>
+      </section>
+
+      <!-- STEP 3 · BUILD QUEUE -->
+      <section class="card" id="wb-build-card" hidden>
+        <div class="step"><span class="num">3</span> Build the write queue</div>
+        <div class="hint">Keeps rows where <b>Valid = Yes</b>, a <b>Final Translation</b> is present, and a <b>Key</b> exists. Rows sharing a key are de-duped; conflicting finals are flagged and skipped.</div>
+        <button id="wb-build" class="btn" style="margin-top:8px">🧱 Build queue</button>
+        <div id="wb-build-info" class="info"></div>
+      </section>
+
+      <!-- STEP 4 · WORK THE QUEUE -->
+      <section class="card" id="wb-queue-card" hidden>
+        <div class="step"><span class="num">4</span> Apply — one key at a time</div>
+        <div class="hint">Per key: <b>Search</b> opens the en→he all-task filter (hard reload). Open the right task (👁), then <b>Check</b> reads the live segment, and <b>Write + confirm</b> applies the fix and proofread-confirms that row. <b>Never submits.</b></div>
+        <label class="ck" style="margin-top:6px"><input type="checkbox" id="wb-autoconfirm" checked /> Proofread-confirm the row after writing (you still resubmit)</label>
+        <div class="rev-bar" style="margin-top:8px">
+          <button id="wb-resolve-all" class="btn sm">⚡ Resolve all</button>
+          <span class="spacer"></span>
+          <span id="wb-qcount" class="info"></span>
+          <button id="wb-filter-todo" class="btn xs ghost active">To-do</button>
+          <button id="wb-filter-all" class="btn xs ghost">All</button>
+        </div>
+        <p class="hint"><b>Resolve all</b> (API engine) finds every en→he task for each key, reads them, and fills in every verdict — <b>read-only, nothing is written</b>. Then review and hit <b>Write + confirm</b> on the ones you approve. Or keep working one key at a time with Search → 👁 → Check.</p>
+        <div id="wb-queue" class="review"></div>
+        <div id="wb-queue-info" class="info"></div>
+      </section>
+
+      <div id="wb-log" class="log"></div>
+
+      <details class="card help">
+        <summary>ℹ️ How Sheet → Starling works</summary>
+        <div class="help-body">
+          <p>This drives the manual write-back: for each valid fix it filters Starling's <b>All tasks</b> by <b>Key</b> (en→he), you open the task, and it reads the live segment, writes the <b>Final Translation</b>, and proofread-confirms that one row.</p>
+          <p><b>It never blind-pastes.</b> A key can live in several tasks, a task's source can differ from the sheet's, and a task comment can overrule the sheet — so it always shows you <b>live source vs. sheet source</b> and <b>current target vs. final</b> before you approve each write. It <b>guards on source-match</b> and skips rows that already match.</p>
+          <ol>
+            <li><b>Search</b> — filters All tasks to the key (hard reload). Open the correct task with 👁.</li>
+            <li><b>Check</b> — reads the live segment; flags source mismatch / already-correct.</li>
+            <li><b>Write + confirm</b> — types the Final Translation and ticks proofread ✓✓.</li>
+          </ol>
+          <p class="help-dim">Stops at confirmed — <b>you</b> resubmit the task in Starling. Only TikTok source/target text is used; no Feishu doc or shared credential is sent anywhere.</p>
+        </div>
+      </details>
+
+    </div><!-- /view-wb -->
+
+    <!-- ══════════ CROWDIN (official API v2) ══════════ -->
+    <div id="view-crowdin" hidden>
+
+      <!-- STEP 1 · CONNECT -->
+      <section class="card">
+        <div class="step"><span class="num">1</span> Connect to the open Crowdin file</div>
+        <div class="hint">Open the Crowdin editor tab (<code>…/editor/&lt;project&gt;/&lt;file&gt;/…</code>), then Detect. All reads/writes go through Crowdin's <b>documented API v2</b> using your token from Settings.</div>
+        <button id="cw-detect" class="btn" style="margin-top:8px">🔌 Detect the open file</button>
+        <div id="cw-ctx" class="info"></div>
+      </section>
+
+      <!-- STEP 2 · HARVEST -->
+      <section class="card" id="cw-harvest-card" hidden>
+        <div class="step"><span class="num">2</span> Harvest strings</div>
+        <label class="lbl">Mode</label>
+        <select id="cw-mode">
+          <option value="translate" selected>Translate — from the English source</option>
+          <option value="proofread">Proofread — fix the existing Hebrew</option>
+        </select>
+        <label class="ck" style="margin-top:6px"><input type="checkbox" id="cw-only-untranslated" checked /> Only strings with no Hebrew yet</label>
+        <button id="cw-harvest" class="btn" style="margin-top:8px">⬇ Harvest from this file</button>
+        <div id="cw-harvest-info" class="info"></div>
+      </section>
+
+      <!-- STEP 3 · PROPOSE -->
+      <section class="card" id="cw-propose-card" hidden>
+        <div class="step"><span class="num">3</span> GPT-5.4 proposals</div>
+        <div class="hint">Uses your house style from Settings (plural gender-neutral, brand/placeholder preservation).</div>
+        <button id="cw-propose" class="btn" style="margin-top:8px">✨ Propose with <span id="cw-model">gpt-5.4</span></button>
+        <div id="cw-propose-info" class="info"></div>
+      </section>
+
+      <!-- STEP 4 · REVIEW + ENTER -->
+      <section class="card" id="cw-review-card" hidden>
+        <div class="step"><span class="num">4</span> Review &amp; enter</div>
+        <div class="hint"><b>Enter</b> writes the translation to Crowdin <b>unapproved</b> — it shows up in the editor and <b>you</b> do the final approve/submit. It never approves.</div>
+        <div class="rev-bar" style="margin-top:8px">
+          <button id="cw-enter-all" class="btn sm">⤵ Enter all reviewed</button>
+          <span class="spacer"></span>
+          <span id="cw-count" class="info"></span>
+        </div>
+        <div id="cw-cards" class="review"></div>
+        <div id="cw-review-info" class="info"></div>
+      </section>
+
+      <div id="cw-log" class="log"></div>
+
+      <details class="card help">
+        <summary>ℹ️ How Crowdin works</summary>
+        <div class="help-body">
+          <p>Harvest lists the file's source strings via the official API (<code>GET /projects/&lt;id&gt;/strings</code>) plus their current Hebrew. GPT-5.4 proposes a translation per string. <b>Enter</b> posts it (<code>POST /projects/&lt;id&gt;/translations</code>, unapproved) so it appears in the editor for you.</p>
+          <p class="help-dim">The tool <b>never approves/submits</b> — you do the final approve in the Crowdin editor. Only the source text is sent to OpenAI; your Crowdin token only talks to <code>api.crowdin.com</code>.</p>
+        </div>
+      </details>
+
+    </div><!-- /view-crowdin -->
+  </div>
+
+  <script src="vendor/xlsx.mini.min.js"></script>
+  <script src="panel.js"></script>
+</body>
+</html>

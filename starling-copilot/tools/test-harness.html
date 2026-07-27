@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="../panel.css" />
+  <title>Starling Copilot — test harness</title>
+</head>
+<body>
+<script>
+/* Shim chrome.* + fetch so panel.js runs outside an extension for testing. */
+const _mem = {};
+window.chrome = {
+  storage: { local: {
+    get: (k, cb) => { const o = {}; (Array.isArray(k) ? k : [k]).forEach(x => { if (x in _mem) o[x] = _mem[x]; }); cb(o); },
+    set: (o, cb) => { Object.assign(_mem, o); cb && cb(); }
+  }},
+  tabs: {
+    query: (q, cb) => { const t = [{ id: 1, url: 'https://starling.bytedance.com/#/editor?task_id=354460046850' }]; return cb ? cb(t) : Promise.resolve(t); },
+    sendMessage: (id, msg) => Promise.resolve(handleMsg(msg)),
+    onActivated: { addListener: () => {} }
+  },
+  runtime: { onMessage: { addListener: () => {} } }
+};
+// mock the content-script side
+const SEGS = [
+  { seg: '1', src: 'Join TikTok now', tgt: 'הצטרף לטיקטוק עכשיו', tagged: false },
+  { seg: '2', src: 'Pay {amount} to continue', tgt: 'שלם/י {amount} כדי להמשיך', tagged: false },
+  { seg: '3', src: 'How to redeem points • How to collect rewards • How to enter a code', tgt: 'כיצד לממש נקודות • כיצד לאסוף פרסים • כיצד להזין קוד', tagged: true },
+  { seg: '4', src: 'Welcome, {{name}}! Read %s.', tgt: 'ברוך הבא, {{name}}! קרא %s.', tagged: false }
+];
+function handleMsg(msg) {
+  if (msg.type === 'PING') return { ok: true, taskId: '354460046850', cells: SEGS.length };
+  if (msg.type === 'HARVEST') return { ok: true, segments: SEGS.map(s => ({ ...s })) };
+  if (msg.type === 'DIAG') return { ok: true, taskId: '354460046850', found: { targetCells: SEGS.length } };
+  if (msg.type === 'WRITE') return { ok: true, results: msg.edits.map(e => ({ seg: e.seg, ok: e.seg !== '4', reason: e.seg === '4' ? 'editor did not mount (simulated)' : '' })) };
+  if (msg.type === 'CONFIRM_ALL') return { ok: true };
+  if (msg.type === 'TASK_STATUS') return { ok: true, taskId: '354460046850', percent: 100 };
+  if (msg.type === 'READ_QA') return { ok: true, count: 5, rows: [
+    { seg: '12', level: 'Regular', type: 'Spaces', desc: 'Trailing space at end of target' },
+    { seg: '3', level: 'Critical', type: 'Placeholders', desc: 'Placeholder {amount} missing in target' },
+    { seg: '19', level: 'Regular', type: 'Punctuation', desc: 'Period missing at end of sentence' },
+    { seg: '7', level: 'Critical', type: 'Tags', desc: 'Tag O-1-0 count mismatch' },
+    { seg: '22', level: 'Regular', type: 'Terminology', desc: 'Term not in glossary' }
+  ] };
+  if (msg.type === 'QA_DIAG') return { ok: true, qaRowMatches: 0, candidates: [] };
+  if (msg.type === 'SET_SELECTORS') return { ok: true, cfg: msg.selectors };
+  return { ok: false, error: 'unknown' };
+}
+// mock GPT: plural-fix each Hebrew target, keep placeholders/tags
+const _fetch = window.fetch.bind(window);
+window.fetch = async (url, opts) => {
+  if (!/api\.openai\.com/.test(String(url))) return _fetch(url, opts); // pass through (panel.html)
+  const body = JSON.parse(opts.body);
+  const items = JSON.parse(body.messages[1].content.split('\n').pop()).items;
+  const fix = t => t.replace('הצטרף', 'הצטרפו').replace('שלם/י', 'שלמו').replace('הקש', 'הקישו').replace('ברוך הבא', 'ברוכים הבאים').replace('קרא', 'קראו');
+  const out = items.map(it => ({ i: it.i, text: fix(body.messages[0].content.includes('Translate') ? it.src : it.tgt) }));
+  return { ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify({ out }) } }] }) };
+};
+// inject panel.html body (minus its script tag), then load panel.js
+fetch('../panel.html').then(r => r.text()).then(html => {
+  const body = html.replace(/^[\s\S]*<body>/i, '').replace(/<script[\s\S]*$/i, '');
+  const div = document.createElement('div'); div.innerHTML = body;
+  document.body.appendChild(div);
+  const s = document.createElement('script'); s.src = '../panel.js'; document.body.appendChild(s);
+});
+</script>
+</body>
+</html>

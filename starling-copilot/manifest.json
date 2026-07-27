@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Starling Copilot (he-IL)",
+  "version": "0.1.0",
+  "description": "Harvest a Starling task, proofread/translate with GPT-5.4 (plural, tags preserved), review, and write back cell-by-cell.",
+  "permissions": ["storage", "sidePanel", "scripting", "activeTab", "tabs"],
+  "host_permissions": [
+    "https://starling.bytedance.com/*",
+    "https://*.crowdin.com/*",
+    "https://api.openai.com/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Starling Copilot" },
+  "side_panel": { "default_path": "panel.html" },
+  "content_scripts": [
+    {
+      "matches": ["https://starling.bytedance.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
