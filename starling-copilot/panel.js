@@ -1606,7 +1606,7 @@ async function mqPropose() {
           const idx = (o.i | 0) - 1;
           if (idx >= 0 && idx < slice.length && o.text != null) {
             const c = slice[idx];
-            c.proposal = polish(mode === 'translate' ? c.src : c.tgt || c.src, String(o.text));
+            c.proposal = polish(c.src, String(o.text));
             // tag list for the write: proofread edits the existing target's tags; translate carries the source's.
             c.writeTags = mode === 'translate' ? (c.srcTags || []) : ((c.tgtTags && c.tgtTags.length) ? c.tgtTags : (c.srcTags || []));
             c.approved = true; c.status_ui = 'proposed'; done++;
