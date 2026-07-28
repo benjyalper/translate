@@ -11,7 +11,7 @@ panel:
 | **↩ Sheet → Starling** | Take the adjudicated sheet and apply each valid fix **into Starling by Key** — one key at a time, or a read-only batch pass. |
 | **🌐 Crowdin** | Harvest a Crowdin Enterprise file via the official **API v2** → GPT-5.4 cards → enter translations (unapproved) for you to submit. |
 | **🅜 memoQ** | Harvest a memoQ web-editor doc via memoQ's own editor API → GPT-5.4 cards → write back as unconfirmed drafts. |
-| **🐱 YiCAT** | Harvest a YiCAT (self-hosted Tmxmall) task via its segment API → GPT-5.4 cards → **copy** each proposal to paste in (YiCAT saves over a WebSocket, so there's no REST write-back). |
+| **🐱 YiCAT** | Harvest a YiCAT (self-hosted Tmxmall) task via its segment API → GPT-5.4 cards → **copy** each proposal, or opt-in **auto-write** through YiCAT's own in-cell editor (verified). |
 
 Everything runs in **your** logged-in browser with **your** OpenAI key. No server. **The tool never
 submits/approves** on any platform — it stops at the point where a human decision is required.
@@ -227,29 +227,51 @@ text goes to OpenAI; the token only talks to `api.crowdin.com`.
 ## 🐱 YiCAT mode (self-hosted Tmxmall)
 
 Harvests a **YiCAT** task (self-hosted Tmxmall CAT, e.g. `http://129.226.170.49/yizhe/yicat/…`),
-proposes Hebrew with GPT-5.4, and lets you **copy** each proposal into the target cell. YiCAT reads
-cleanly over REST but **commits edits over a WebSocket** (`ws://<host>/yizhe/editMessageWs<group>`),
-so there is **no safe REST write-back** — the default is copy-by-hand and you confirm each segment.
+proposes Hebrew with GPT-5.4, and lets you **copy** each proposal — or **auto-write** it through
+YiCAT's own in-cell editor. YiCAT reads cleanly over REST but **commits edits over a WebSocket**
+(`ws://<host>/yizhe/editMessageWs<group>`), so there is no REST write endpoint; the write instead
+drives the page's own editor (below).
 
 ### Flow
 1. Open a YiCAT task in the editor (`…/yicat/group/<id>/editor?…&taskId=<id>`) → **🐱 YiCAT →
    🔌 Detect the open task** (parses group + task from the URL).
 2. **⬇ Harvest** — `GET /yizhe/cat/segment?group_id=<g>&task_id=<t>&seg_range=1-N` (chunked), in your
-   logged-in session. Decodes each segment's atoms: text runs verbatim, inline `<g1>…</g1>` tags as
-   `①②③` markers. Skip-confirmed / skip-locked filters like the other modes.
+   logged-in session. Skip-confirmed / skip-locked filters like the other modes.
 3. **✨ Propose** — GPT-5.4 per card (same house style: plural, brand/placeholder preservation).
-4. **Review & copy** — **⧉ Copy** (per card or **Copy all approved**) puts the proposal on the
-   clipboard with tag markers **stripped to plain text**; paste it into the segment's target cell.
+4. **Review, copy or write** — **⧉ Copy** puts the proposal on the clipboard (plain text) to paste
+   in; or enable **auto-write** to push it into the cell directly. You confirm each segment yourself.
 
-### Experimental auto-write (off by default)
-A checkbox reveals an **auto-write** path that simulates typing into the cell's `contenteditable`
-(anchored by the segment's `_id` via `p[segid="…"]`) so YiCAT's own code fires the WebSocket save.
-It is **uncalibrated** — locate-by-`_id` only works while the segment's row is rendered (YiCAT pages
-~60 rows), it **skips tagged segments**, and it never confirms/delivers. **Test on a throwaway
-segment first.** Only source/target text ever goes to OpenAI.
+### The atom / tag model
+Each segment is a list of atoms (`srcSegmentAtoms` / `tgtSegmentAtoms`): text runs verbatim, tags
+are one of two kinds —
 
-> The IP/host is pinned in `manifest.json` (`http://129.226.170.49/*` + the `yicat.js` content-script
-> match). If your YiCAT instance moves, broaden both there and the host check in `sendYC()`.
+- **Whole-segment `<g1>…</g1>` style wrapper** (`color/font-size`, wrapping the entire segment, ~60%
+  of segments): cosmetic, **not** a real tag. It's stripped on decode and the segment counts as
+  **untagged** (writable). *(Early builds wrongly flagged all of these as tags.)*
+- **Real placeholder** (`placeholder:true`, e.g. `<Xpt1/>`) or a mid-text tag: shown as `①②③`
+  markers, segment flagged **⚑ tags** and **excluded from auto-write** (copy/paste it by hand).
+
+### Auto-write (opt-in, verified)
+YiCAT's cells are **Tiptap/ProseMirror** editors, so a raw `execCommand`/DOM write is silently
+discarded, and its **track-changes** schema rejects a plain-text insert. The working write (found by
+inspecting the live editor) runs in the extension's **MAIN world** (`yicat-main.js`, a
+`"world":"MAIN"` content script) so it can reach the cell's real editor object, and for each segment:
+
+1. locate the **target** cell's editor via `.tgt-table-cell … p[segid="<_id>"]` (**never** the
+   source cell — those are editable too);
+2. `setTrackChangeDisableStatus(true)` so a plain-text replace is schema-valid, restore it after;
+3. `clearContent()` + `insertContent(text)` (a real transaction → YiCAT's own WebSocket save fires);
+4. **read the cell back and verify** it equals the intended text — it reports failure rather than
+   claiming a write it can't confirm. It writes as an **untracked draft**, skips tagged/locked
+   segments, and never confirms/delivers.
+
+> **Rendered-only:** the write needs the segment's row on screen (YiCAT virtualizes the grid).
+> **Write all approved** writes the on-screen ones and tells you how many to scroll to and re-run.
+> Only source/target text ever goes to OpenAI.
+
+> The IP/host is pinned in `manifest.json` (`http://129.226.170.49/*` + the `yicat.js` and
+> `yicat-main.js` content-script matches). If your YiCAT instance moves, broaden those and the host
+> check in `sendYC()`.
 
 ---
 
@@ -297,7 +319,8 @@ Default selectors are **unions** covering both editors; hidden measurement-clone
 | `background.js` | Opens the side panel; **Crowdin API v2 proxy** (`CROWDIN_API` → `<org>.api.crowdin.com`) |
 | `content.js` | Starling DOM/API engine — harvest, hybrid write (`wbWriteBySeg`), reveal/caret, confirm, diagnostics, JSON-API client (`window.__wb`) |
 | `memoq.js` | memoQ web-editor content script — harvest/write via memoQ's editor REST API (`window.__mq`) |
-| `yicat.js` | YiCAT content script — REST segment harvest + atom/tag decode; copy + experimental DOM write (`window.__yc`) |
+| `yicat.js` | YiCAT content script (isolated) — REST segment harvest + atom/tag decode; bridges writes to the MAIN world (`window.__yc`) |
+| `yicat-main.js` | YiCAT MAIN-world bridge (`"world":"MAIN"`) — drives each target cell's Tiptap editor to write + read-back verify |
 | `panel.html/.css/.js` | Side-panel cockpit — GPT-5.4 calls, review UI, all four modes' orchestration |
 | `vendor/xlsx.mini.min.js` | Bundled SheetJS (0.18.5) — reads `.xlsx` locally for Sheet → Starling |
 | `icons/` | Generated by `tools/gen-icons.js` |

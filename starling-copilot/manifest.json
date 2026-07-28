@@ -32,6 +32,13 @@
       "js": ["yicat.js"],
       "run_at": "document_idle",
       "all_frames": false
+    },
+    {
+      "matches": ["http://129.226.170.49/yizhe/yicat/*"],
+      "js": ["yicat-main.js"],
+      "run_at": "document_idle",
+      "world": "MAIN",
+      "all_frames": false
     }
   ],
   "icons": {

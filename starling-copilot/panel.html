@@ -439,15 +439,15 @@
       <!-- STEP 4 · REVIEW + COPY / (experimental) WRITE -->
       <section class="card" id="yc-review-card" hidden>
         <div class="step"><span class="num">4</span> Review &amp; copy</div>
-        <div class="hint"><b>Copy</b> puts a proposal on the clipboard (tags stripped to plain text) so you can paste it into the segment's target cell in YiCAT — you stay in control and confirm each segment yourself. YiCAT saves over a WebSocket, so there is no safe REST write-back.</div>
+        <div class="hint"><b>Copy</b> puts a proposal on the clipboard (plain text) so you can paste it into the segment's target cell — you stay in control and confirm each segment yourself. This is the safe default.</div>
         <div class="rev-bar" style="margin-top:8px">
           <button id="yc-copy-all" class="btn sm">⧉ Copy all approved</button>
           <span class="spacer"></span>
           <span id="yc-count" class="info"></span>
         </div>
-        <label class="ck danger" style="margin-top:8px"><input type="checkbox" id="yc-enable-write" /> ⚠ Enable experimental auto-write (types into the cell — <b>uncalibrated</b>, test on a throwaway segment first)</label>
+        <label class="ck danger" style="margin-top:8px"><input type="checkbox" id="yc-enable-write" /> ⚠ Enable auto-write — writes through YiCAT's own editor and <b>reads each cell back to verify</b>. Goes in as an <b>untracked draft</b> (not a tracked change); skips tagged/locked segments; you still confirm each. The segment must be scrolled into view to write.</label>
         <div class="rev-bar" id="yc-write-bar" hidden style="margin-top:6px">
-          <button id="yc-write-all" class="btn sm ghost">⤵ Auto-write all approved</button>
+          <button id="yc-write-all" class="btn sm ghost">⤵ Auto-write all approved (non-tagged)</button>
         </div>
         <div id="yc-cards" class="review"></div>
         <div id="yc-review-info" class="info"></div>
@@ -458,8 +458,8 @@
       <details class="card help">
         <summary>ℹ️ How YiCAT works</summary>
         <div class="help-body">
-          <p>Harvest reads every segment through YiCAT's segment API (<code>GET …/cat/segment?…&amp;seg_range=1-N</code>) — source, current Hebrew, inline tags, and confirmed status — in your logged-in session. GPT-5.4 proposes a translation per segment.</p>
-          <p class="help-dim">Unlike Starling/memoQ, YiCAT commits edits over a <b>WebSocket</b>, so there is no REST write endpoint. The default is <b>copy</b> — you paste each proposal into the target cell and confirm it yourself. The experimental auto-write simulates typing into the cell; it is off by default and never confirms/delivers. Only source/target text is sent to OpenAI.</p>
+          <p>Harvest reads every segment through YiCAT's segment API (<code>GET …/cat/segment?…&amp;seg_range=1-N</code>) — source, current Hebrew, real inline placeholder tags, and confirmed status — in your logged-in session. The cosmetic whole-segment <code>&lt;g1&gt;</code> style wrapper is stripped and not treated as a tag. GPT-5.4 proposes a translation per segment.</p>
+          <p class="help-dim">The default is <b>copy</b> — you paste each proposal into the target cell and confirm it yourself. The experimental auto-write drives YiCAT's own in-cell editor (Tiptap) and <b>reads the cell back to verify</b> — it reports failure rather than claiming a write it can't confirm. YiCAT is a track-changes editor, so it skips segments with real tags and never confirms/delivers. Only source/target text is sent to OpenAI.</p>
         </div>
       </details>
 

@@ -1797,7 +1797,7 @@ async function ycWrite(i) {
   try {
     const r = await sendYC({ type: 'YC_WRITE', edits: [{ segId: c.segId, text }] });
     const res = r && r.results && r.results[0];
-    if (res && res.ok) { c.status_ui = 'written'; c.note = `✅ Typed into segment ${c.seq} (draft) — check it in YiCAT, then confirm.`; ycLog(`wrote seg ${c.seq} (${c.segId})`); }
+    if (res && res.ok) { c.status_ui = 'written'; c.note = `✅ Written & verified in segment ${c.seq} (draft) — review it in YiCAT, then confirm.`; ycLog(`wrote seg ${c.seq} (${c.segId})`); }
     else { c.status_ui = 'proposed'; c.note = '⚠ ' + ((res && res.error) || (r && r.error) || 'write failed'); ycLog(`write failed seg ${c.seq}: ${c.note}`); }
   } catch (e) { c.status_ui = 'proposed'; c.note = '⚠ ' + e.message; ycLog(`write failed seg ${c.seq}: ${e.message}`); }
   ycRender();
@@ -1811,7 +1811,8 @@ async function ycWriteAll() {
   let n = 0;
   for (const { i } of pending) { await ycWrite(i); info('yc-review-info', `Auto-writing ${++n}/${pending.length}…`); }
   const ok = YC.cards.filter((c) => c.status_ui === 'written').length;
-  info('yc-review-info', `Done · ${ok} typed in (draft). Check each in YiCAT and confirm.`, 'good');
+  const offscreen = YC.cards.filter((c) => c.status_ui !== 'written' && /not rendered|scroll/i.test(c.note || '')).length;
+  info('yc-review-info', `Done · ${ok} written (draft). ${offscreen ? `${offscreen} weren't on screen — scroll to them in YiCAT and re-run. ` : ''}Review each and confirm.`, 'good');
 }
 
 function ycRender() {
