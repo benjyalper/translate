@@ -19,6 +19,7 @@
       <button id="mode-wb" class="mode-btn">↩ Sheet → Starling</button>
       <button id="mode-crowdin" class="mode-btn">🌐 Crowdin</button>
       <button id="mode-memoq" class="mode-btn">🅜 memoQ</button>
+      <button id="mode-yicat" class="mode-btn">🐱 YiCAT</button>
     </div>
 
     <!-- SETTINGS -->
@@ -402,6 +403,67 @@
       </details>
 
     </div><!-- /view-memoq -->
+
+    <div id="view-yicat" hidden>
+
+      <!-- STEP 1 · CONNECT -->
+      <section class="card">
+        <div class="step"><span class="num">1</span> Connect to the open YiCAT task</div>
+        <div class="hint">Open the YiCAT editor on a task (<code>…/yicat/group/&lt;id&gt;/editor?…&amp;taskId=&lt;id&gt;</code>), then Detect. Reads use YiCAT's own segment API in your logged-in session — no separate token.</div>
+        <button id="yc-detect" class="btn" style="margin-top:8px">🔌 Detect the open task</button>
+        <div id="yc-ctx" class="info"></div>
+      </section>
+
+      <!-- STEP 2 · HARVEST -->
+      <section class="card" id="yc-harvest-card" hidden>
+        <div class="step"><span class="num">2</span> Harvest segments</div>
+        <label class="lbl">Mode</label>
+        <select id="yc-mode">
+          <option value="proofread" selected>Proofread — fix the existing Hebrew</option>
+          <option value="translate">Translate — from the English source</option>
+        </select>
+        <label class="ck" style="margin-top:6px"><input type="checkbox" id="yc-skip-confirmed" checked /> Skip already-confirmed segments</label>
+        <label class="ck"><input type="checkbox" id="yc-skip-locked" checked /> Skip locked segments</label>
+        <button id="yc-harvest" class="btn" style="margin-top:8px">⬇ Harvest from this task</button>
+        <div id="yc-harvest-info" class="info"></div>
+      </section>
+
+      <!-- STEP 3 · PROPOSE -->
+      <section class="card" id="yc-propose-card" hidden>
+        <div class="step"><span class="num">3</span> GPT-5.4 proposals</div>
+        <div class="hint">Uses your house style from Settings (plural gender-neutral, brand/placeholder preservation). Inline tags show as ①②③ and are kept in place.</div>
+        <button id="yc-propose" class="btn" style="margin-top:8px">✨ Propose with <span id="yc-model">gpt-5.4</span></button>
+        <div id="yc-propose-info" class="info"></div>
+      </section>
+
+      <!-- STEP 4 · REVIEW + COPY / (experimental) WRITE -->
+      <section class="card" id="yc-review-card" hidden>
+        <div class="step"><span class="num">4</span> Review &amp; copy</div>
+        <div class="hint"><b>Copy</b> puts a proposal on the clipboard (tags stripped to plain text) so you can paste it into the segment's target cell in YiCAT — you stay in control and confirm each segment yourself. YiCAT saves over a WebSocket, so there is no safe REST write-back.</div>
+        <div class="rev-bar" style="margin-top:8px">
+          <button id="yc-copy-all" class="btn sm">⧉ Copy all approved</button>
+          <span class="spacer"></span>
+          <span id="yc-count" class="info"></span>
+        </div>
+        <label class="ck danger" style="margin-top:8px"><input type="checkbox" id="yc-enable-write" /> ⚠ Enable experimental auto-write (types into the cell — <b>uncalibrated</b>, test on a throwaway segment first)</label>
+        <div class="rev-bar" id="yc-write-bar" hidden style="margin-top:6px">
+          <button id="yc-write-all" class="btn sm ghost">⤵ Auto-write all approved</button>
+        </div>
+        <div id="yc-cards" class="review"></div>
+        <div id="yc-review-info" class="info"></div>
+      </section>
+
+      <div id="yc-log" class="log"></div>
+
+      <details class="card help">
+        <summary>ℹ️ How YiCAT works</summary>
+        <div class="help-body">
+          <p>Harvest reads every segment through YiCAT's segment API (<code>GET …/cat/segment?…&amp;seg_range=1-N</code>) — source, current Hebrew, inline tags, and confirmed status — in your logged-in session. GPT-5.4 proposes a translation per segment.</p>
+          <p class="help-dim">Unlike Starling/memoQ, YiCAT commits edits over a <b>WebSocket</b>, so there is no REST write endpoint. The default is <b>copy</b> — you paste each proposal into the target cell and confirm it yourself. The experimental auto-write simulates typing into the cell; it is off by default and never confirms/delivers. Only source/target text is sent to OpenAI.</p>
+        </div>
+      </details>
+
+    </div><!-- /view-yicat -->
   </div>
 
   <script src="vendor/xlsx.mini.min.js"></script>

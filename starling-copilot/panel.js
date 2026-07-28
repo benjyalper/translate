@@ -38,6 +38,18 @@ async function sendMQ(msg) {
     throw new Error('memoQ content script not loaded — reload the memoQ editor page.');
   }
 }
+// ---- messaging to the YiCAT tab --------------------------------------------
+async function sendYC(msg) {
+  const t = await activeTab();
+  if (!t || !/^http:\/\/129\.226\.170\.49\/yizhe\/yicat\//.test(t.url || '')) {
+    throw new Error('Open a YiCAT editor task tab, then click Detect.');
+  }
+  try {
+    return await chrome.tabs.sendMessage(t.id, msg);
+  } catch (e) {
+    throw new Error('YiCAT content script not loaded — reload the YiCAT editor page.');
+  }
+}
 
 // ---- logging ---------------------------------------------------------------
 function log(...a) {
@@ -1672,9 +1684,168 @@ function mqRender() {
   if ($('mq-count')) $('mq-count').textContent = `${ok}/${MQ.cards.length} written`;
 }
 
+// ============================================================================
+// YiCAT mode — REST harvest → GPT → copy (default) / experimental DOM write.
+// The yicat.js content script does the segment I/O (same-origin session); this
+// side runs the review UI and the GPT proposals (reusing gptBatch/sysPrompt).
+// YiCAT saves over a WebSocket, so there is no REST write — the human pastes.
+// ============================================================================
+const YC = { ctx: null, cards: [], write: false };
+function ycLog(...a) { const el = $('yc-log'); if (!el) return; el.textContent += (el.textContent ? '\n' : '') + a.join(' '); el.scrollTop = el.scrollHeight; }
+// strip circled tag markers ①②③㉑…/PUA → plain text (what you paste into a cell)
+function ycStripMarkers(text) {
+  let out = '';
+  for (const ch of Array.from(String(text || ''))) {
+    const cp = ch.codePointAt(0);
+    const isMarker = (cp >= 0x2460 && cp <= 0x2473) || (cp >= 0x3251 && cp <= 0x325f) || (cp >= 0xE000 && cp <= 0xF8FF);
+    if (!isMarker) out += ch;
+  }
+  return out;
+}
+
+async function ycDetect() {
+  try {
+    const r = await sendYC({ type: 'YC_PING' });
+    if (!r || !r.ok) throw new Error(r && r.error || 'not a YiCAT editor task URL');
+    YC.ctx = { group: r.group, task: r.task, doc: r.doc };
+    info('yc-ctx', `Connected · task ${String(r.task || '').slice(0, 8)}… · group ${r.group} (YiCAT v${r.ver}).`, 'good');
+    $('yc-harvest-card').hidden = false;
+    ycLog(`[detect] group ${r.group} · task ${r.task}`);
+  } catch (e) {
+    YC.ctx = null;
+    info('yc-ctx', e.message, 'err');
+    $('yc-harvest-card').hidden = true;
+  }
+}
+
+async function ycHarvest() {
+  const btn = $('yc-harvest'); btn.disabled = true;
+  info('yc-harvest-info', 'Harvesting segments via the YiCAT API…');
+  try {
+    const r = await sendYC({ type: 'YC_HARVEST' });
+    if (!r || !r.ok) throw new Error(r && r.error || 'harvest failed');
+    const skipConfirmed = $('yc-skip-confirmed').checked;
+    const skipLocked = $('yc-skip-locked').checked;
+    let skippedC = 0, skippedL = 0;
+    YC.cards = (r.segments || [])
+      .filter((s) => {
+        if (!String(s.src || '').trim()) return false;              // no source → nothing to do
+        if (skipLocked && s.locked) { skippedL++; return false; }
+        if (skipConfirmed && s.confirmed) { skippedC++; return false; }
+        return true;
+      })
+      .map((s) => ({ ...s, proposal: '', status_ui: 'new', approved: false, note: '' }));
+    const total = (r.segments || []).length;
+    const tagged = YC.cards.filter((c) => c.tagged).length;
+    info('yc-harvest-info', `Harvested ${YC.cards.length} of ${total} segment(s)${tagged ? ` · ⚠ ${tagged} with tags` : ''}${skippedC ? ` · skipped ${skippedC} confirmed` : ''}${skippedL ? ` · skipped ${skippedL} locked` : ''}.`, 'good');
+    $('yc-propose-card').hidden = YC.cards.length === 0;
+    $('yc-review-card').hidden = true;
+    ycRender();
+    if (!YC.cards.length) info('yc-harvest-info', 'Nothing to harvest with these filters — untick the skip options to include confirmed/locked segments.', 'err');
+  } catch (e) {
+    info('yc-harvest-info', e.message, 'err');
+  } finally { btn.disabled = false; }
+}
+
+async function ycPropose() {
+  const key = await store.get('key', '');
+  if (!key) { info('yc-propose-info', 'Add your OpenAI key in ⚙️ Settings first.', 'err'); return; }
+  if (!YC.cards.length) { info('yc-propose-info', 'Harvest first.', 'err'); return; }
+  const model = $('model').value, plural = $('plural').checked, mode = $('yc-mode').value;
+  const btn = $('yc-propose'); btn.disabled = true;
+  const B = 10; let done = 0, failed = 0;
+  try {
+    for (let i = 0; i < YC.cards.length; i += B) {
+      const slice = YC.cards.slice(i, i + B);
+      info('yc-propose-info', `✨ ${mode === 'translate' ? 'Translating' : 'Proofreading'} ${i + 1}–${Math.min(i + B, YC.cards.length)} of ${YC.cards.length}…`);
+      const items = slice.map((c, j) => ({ i: j + 1, src: String(c.src || ''), tgt: String(c.tgt || '') }));
+      try {
+        const out = await gptBatch(items, mode, key, model, plural);
+        out.forEach((o) => {
+          const idx = (o.i | 0) - 1;
+          if (idx >= 0 && idx < slice.length && o.text != null) {
+            const c = slice[idx];
+            c.proposal = polish(c.src, String(o.text));
+            c.approved = true; c.status_ui = 'proposed'; done++;
+          }
+        });
+      } catch (e) { failed += slice.length; ycLog('[gpt] batch failed: ' + e.message); }
+    }
+    info('yc-propose-info', `Proposed ${done}${failed ? ` · ${failed} failed` : ''}. Review, then Copy (or paste) into YiCAT.`, failed ? 'err' : 'good');
+    $('yc-review-card').hidden = YC.cards.every((c) => !c.proposal);
+    ycRender();
+  } finally { btn.disabled = false; }
+}
+
+function ycCopyText(c) { return ycStripMarkers(c.proposal || ''); }
+
+async function ycCopyAll() {
+  const pending = YC.cards.filter((c) => c.approved && (c.proposal || '').trim());
+  if (!pending.length) { info('yc-review-info', 'Nothing approved to copy.', 'err'); return; }
+  const text = pending.map((c) => ycCopyText(c)).join('\n');
+  await panelCopy(text, $('yc-copy-all'));
+  info('yc-review-info', `Copied ${pending.length} proposal(s) — paste into YiCAT (one per line, in order).`, 'good');
+}
+
+async function ycWrite(i) {
+  if (!YC.write) return;
+  const c = YC.cards[i]; if (!c) return;
+  const text = ycStripMarkers(c.proposal || '').trim();
+  if (!text) { c.note = 'Nothing to write — no proposal.'; ycRender(); return; }
+  if (c.tagged) { c.note = '⚠ has tags — auto-write skips tagged segments; paste it by hand.'; ycRender(); return; }
+  c.status_ui = 'writing'; ycRender();
+  try {
+    const r = await sendYC({ type: 'YC_WRITE', edits: [{ segId: c.segId, text }] });
+    const res = r && r.results && r.results[0];
+    if (res && res.ok) { c.status_ui = 'written'; c.note = `✅ Typed into segment ${c.seq} (draft) — check it in YiCAT, then confirm.`; ycLog(`wrote seg ${c.seq} (${c.segId})`); }
+    else { c.status_ui = 'proposed'; c.note = '⚠ ' + ((res && res.error) || (r && r.error) || 'write failed'); ycLog(`write failed seg ${c.seq}: ${c.note}`); }
+  } catch (e) { c.status_ui = 'proposed'; c.note = '⚠ ' + e.message; ycLog(`write failed seg ${c.seq}: ${e.message}`); }
+  ycRender();
+}
+
+async function ycWriteAll() {
+  if (!YC.write) { info('yc-review-info', 'Enable experimental auto-write first.', 'err'); return; }
+  const pending = YC.cards.map((c, i) => ({ c, i })).filter(({ c }) => c.approved && (c.proposal || '').trim() && !c.tagged && c.status_ui !== 'written');
+  if (!pending.length) { info('yc-review-info', 'Nothing approved & untagged to auto-write.', 'err'); return; }
+  info('yc-review-info', `Auto-writing ${pending.length}…`);
+  let n = 0;
+  for (const { i } of pending) { await ycWrite(i); info('yc-review-info', `Auto-writing ${++n}/${pending.length}…`); }
+  const ok = YC.cards.filter((c) => c.status_ui === 'written').length;
+  info('yc-review-info', `Done · ${ok} typed in (draft). Check each in YiCAT and confirm.`, 'good');
+}
+
+function ycRender() {
+  const box = $('yc-cards'); if (!box) return;
+  box.innerHTML = YC.cards.map((c, i) => {
+    const written = c.status_ui === 'written';
+    const badge = written ? '<span class="lqc-badge b-valid">written</span>'
+      : c.status_ui === 'writing' ? '<span class="lqc-warn">writing…</span>'
+        : c.proposal ? '<span class="lqc-badge b-invalid">proposed</span>' : '';
+    const tag = c.tagged ? '<span class="lqc-warn" title="has inline tags ①②③ — paste by hand">⚑ tags</span>' : '';
+    const canWrite = YC.write && c.proposal && !c.tagged && !written;
+    return `<div class="lqc wbc">
+      <div class="lqc-top"><span class="lqc-seg">#${c.seq}</span>${tag}${badge}</div>
+      <div class="lqc-lbl">Source (EN)</div><div class="lqc-src" dir="ltr">${hl(esc(c.src))}</div>
+      ${c.tgt ? `<div class="lqc-lbl">Current Hebrew</div><div class="lqc-tgt" dir="rtl">${hl(esc(c.tgt))}</div>` : ''}
+      ${c.proposal ? `<div class="lqc-lbl">GPT proposal</div><div class="lqc-new" dir="rtl">${hl(esc(c.proposal))}</div>` : ''}
+      ${c.note ? `<div class="lqc-rat">${esc(c.note)}</div>` : ''}
+      <div class="lqc-acts wb-acts">
+        <label class="ck" style="margin:0 8px 0 0"><input type="checkbox" data-yc-appr="${i}" ${c.approved ? 'checked' : ''}/> approve</label>
+        <button class="lqc-copy${c.proposal ? '' : ' ghost'}" data-yc-copy="${i}">⧉ Copy</button>
+        ${YC.write ? `<button class="lqc-copy${canWrite ? '' : ' ghost'}" data-yc-write="${i}" ${canWrite ? '' : 'disabled'}>⤵ Write</button>` : ''}
+      </div>
+    </div>`;
+  }).join('') || '<div class="info">Harvest a task to begin.</div>';
+  box.querySelectorAll('[data-yc-copy]').forEach((b) => b.addEventListener('click', () => panelCopy(ycCopyText(YC.cards[+b.dataset.ycCopy]), b)));
+  box.querySelectorAll('[data-yc-write]').forEach((b) => b.addEventListener('click', () => ycWrite(+b.dataset.ycWrite)));
+  box.querySelectorAll('[data-yc-appr]').forEach((b) => b.addEventListener('change', () => { YC.cards[+b.dataset.ycAppr].approved = b.checked; }));
+  const ok = YC.cards.filter((c) => c.status_ui === 'written').length;
+  if ($('yc-count')) $('yc-count').textContent = YC.write ? `${ok}/${YC.cards.length} written` : `${YC.cards.length} ready to copy`;
+}
+
 function setMode(m) {
-  const views = { starling: 'view-starling', lqa: 'view-lqa', wb: 'view-wb', crowdin: 'view-crowdin', memoq: 'view-memoq' };
-  const btns = { starling: 'mode-starling', lqa: 'mode-lqa', wb: 'mode-wb', crowdin: 'mode-crowdin', memoq: 'mode-memoq' };
+  const views = { starling: 'view-starling', lqa: 'view-lqa', wb: 'view-wb', crowdin: 'view-crowdin', memoq: 'view-memoq', yicat: 'view-yicat' };
+  const btns = { starling: 'mode-starling', lqa: 'mode-lqa', wb: 'mode-wb', crowdin: 'mode-crowdin', memoq: 'mode-memoq', yicat: 'mode-yicat' };
   if (!views[m]) m = 'starling';
   Object.keys(views).forEach((k) => { $(views[k]).hidden = k !== m; $(btns[k]).classList.toggle('active', k === m); });
   store.set({ mode_ui: m });
@@ -1689,7 +1860,7 @@ async function init() {
   $('run-model').textContent = $('model').value;
 
   $('key-save').addEventListener('click', async () => { await store.set({ key: $('key').value.trim() }); info('harvest-info', 'Key saved.', 'good'); });
-  $('model').addEventListener('change', async () => { await store.set({ model: $('model').value }); $('run-model').textContent = $('model').value; if ($('lq-model')) $('lq-model').textContent = $('model').value; if ($('cw-model')) $('cw-model').textContent = $('model').value; if ($('mq-model')) $('mq-model').textContent = $('model').value; });
+  $('model').addEventListener('change', async () => { await store.set({ model: $('model').value }); $('run-model').textContent = $('model').value; if ($('lq-model')) $('lq-model').textContent = $('model').value; if ($('cw-model')) $('cw-model').textContent = $('model').value; if ($('mq-model')) $('mq-model').textContent = $('model').value; if ($('yc-model')) $('yc-model').textContent = $('model').value; });
   $('plural').addEventListener('change', async () => { await store.set({ plural: $('plural').checked }); });
   if ($('wb-engine')) {
     WB.engine = await store.get('wbEngine', 'api');
@@ -1765,6 +1936,20 @@ async function init() {
   $('mq-harvest').addEventListener('click', mqHarvest);
   $('mq-propose').addEventListener('click', mqPropose);
   $('mq-write-all').addEventListener('click', mqWriteAll);
+
+  // YiCAT (segment API + copy / experimental DOM write)
+  if ($('yc-model')) $('yc-model').textContent = $('model').value;
+  $('mode-yicat').addEventListener('click', () => { setMode('yicat'); ycDetect(); });
+  $('yc-detect').addEventListener('click', ycDetect);
+  $('yc-harvest').addEventListener('click', ycHarvest);
+  $('yc-propose').addEventListener('click', ycPropose);
+  $('yc-copy-all').addEventListener('click', ycCopyAll);
+  $('yc-write-all').addEventListener('click', ycWriteAll);
+  $('yc-enable-write').addEventListener('change', (e) => {
+    YC.write = e.target.checked;
+    $('yc-write-bar').hidden = !YC.write;
+    ycRender();
+  });
 
   setMode(await store.get('mode_ui', 'starling'));
 
