@@ -445,9 +445,12 @@
           <span class="spacer"></span>
           <span id="yc-count" class="info"></span>
         </div>
-        <label class="ck danger" style="margin-top:8px"><input type="checkbox" id="yc-enable-write" /> ⚠ Enable auto-write — writes through YiCAT's own editor and <b>reads each cell back to verify</b>. Goes in as an <b>untracked draft</b> (not a tracked change); skips tagged/locked segments; you still confirm each. The segment must be scrolled into view to write.</label>
-        <div class="rev-bar" id="yc-write-bar" hidden style="margin-top:6px">
-          <button id="yc-write-all" class="btn sm ghost">⤵ Auto-write all approved (non-tagged)</button>
+        <label class="ck danger" style="margin-top:8px"><input type="checkbox" id="yc-enable-write" /> ⚠ Enable auto-write — writes through YiCAT's own editor and <b>reads each cell back to verify</b>. Skips tagged/locked segments; you still confirm each. The segment must be scrolled into view to write.</label>
+        <div id="yc-write-bar" hidden>
+          <label class="ck" style="margin-top:6px"><input type="checkbox" id="yc-untracked" /> Write as plain draft (uncheck = <b>tracked change</b>: old struck out, new marked as inserted, like manual editing)</label>
+          <div class="rev-bar" style="margin-top:6px">
+            <button id="yc-write-all" class="btn sm ghost">⤵ Auto-write all approved (non-tagged)</button>
+          </div>
         </div>
         <div id="yc-cards" class="review"></div>
         <div id="yc-review-info" class="info"></div>
@@ -459,7 +462,7 @@
         <summary>ℹ️ How YiCAT works</summary>
         <div class="help-body">
           <p>Harvest reads every segment through YiCAT's segment API (<code>GET …/cat/segment?…&amp;seg_range=1-N</code>) — source, current Hebrew, real inline placeholder tags, and confirmed status — in your logged-in session. The cosmetic whole-segment <code>&lt;g1&gt;</code> style wrapper is stripped and not treated as a tag. GPT-5.4 proposes a translation per segment.</p>
-          <p class="help-dim">The default is <b>copy</b> — you paste each proposal into the target cell and confirm it yourself. The experimental auto-write drives YiCAT's own in-cell editor (Tiptap) and <b>reads the cell back to verify</b> — it reports failure rather than claiming a write it can't confirm. YiCAT is a track-changes editor, so it skips segments with real tags and never confirms/delivers. Only source/target text is sent to OpenAI.</p>
+          <p class="help-dim">The default is <b>copy</b> — you paste each proposal into the target cell and confirm it yourself. The auto-write drives YiCAT's own in-cell editor (Tiptap) and <b>reads the cell back to verify</b> — it reports failure rather than claiming a write it can't confirm. By default it writes a <b>tracked change</b> (old struck out, new marked inserted, exactly like manual editing); if that can't be verified it safely falls back to a plain untracked write. It skips segments with real tags and never confirms/delivers. Only source/target text is sent to OpenAI.</p>
         </div>
       </details>
 

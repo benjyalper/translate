@@ -139,7 +139,7 @@
   }
 
   // ---- write: bridge to the MAIN world (yicat-main.js drives Tiptap) --------
-  function mainWrite(segId, text) {
+  function mainWrite(segId, text, tracked) {
     return new Promise((resolve) => {
       const reqId = 'yc' + Date.now() + '_' + Math.random().toString(36).slice(2);
       const timer = setTimeout(() => { cleanup(); resolve({ ok: false, segId, error: 'no response from the page bridge — reload the YiCAT page' }); }, 6000);
@@ -154,13 +154,13 @@
       }
       function cleanup() { clearTimeout(timer); window.removeEventListener('message', onMsg); }
       window.addEventListener('message', onMsg);
-      window.postMessage({ __ycmain: 'req', op: 'write', reqId, segId, text: String(text || '') }, '*');
+      window.postMessage({ __ycmain: 'req', op: 'write', reqId, segId, text: String(text || ''), tracked }, '*');
     });
   }
-  async function writeAll(edits) {
+  async function writeAll(edits, tracked) {
     const results = [];
     for (const e of edits || []) {
-      results.push(await mainWrite(e.segId, stripMarkers(e.text)));
+      results.push(await mainWrite(e.segId, stripMarkers(e.text), tracked));
       await new Promise((r) => setTimeout(r, 180));   // gentle; let the WS save settle
     }
     return results;
@@ -178,7 +178,7 @@
             break;
           }
           case 'YC_HARVEST': sendResponse({ ok: true, segments: await harvest() }); break;
-          case 'YC_WRITE': sendResponse({ ok: true, results: await writeAll(msg.edits || []) }); break;
+          case 'YC_WRITE': sendResponse({ ok: true, results: await writeAll(msg.edits || [], msg.tracked) }); break;
           default: sendResponse({ ok: false, error: 'unknown message' });
         }
       } catch (e) {

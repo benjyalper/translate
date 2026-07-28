@@ -1795,9 +1795,10 @@ async function ycWrite(i) {
   if (c.tagged) { c.note = '⚠ has tags — auto-write skips tagged segments; paste it by hand.'; ycRender(); return; }
   c.status_ui = 'writing'; ycRender();
   try {
-    const r = await sendYC({ type: 'YC_WRITE', edits: [{ segId: c.segId, text }] });
+    const tracked = !$('yc-untracked') || !$('yc-untracked').checked;
+    const r = await sendYC({ type: 'YC_WRITE', tracked, edits: [{ segId: c.segId, text }] });
     const res = r && r.results && r.results[0];
-    if (res && res.ok) { c.status_ui = 'written'; c.note = `✅ Written & verified in segment ${c.seq} (draft) — review it in YiCAT, then confirm.`; ycLog(`wrote seg ${c.seq} (${c.segId})`); }
+    if (res && res.ok) { c.status_ui = 'written'; const how = res.tracked ? 'tracked change' : 'untracked draft'; c.note = `✅ Written & verified in segment ${c.seq} (${how}) — review it in YiCAT, then confirm.`; ycLog(`wrote seg ${c.seq} (${c.segId}) [${how}]`); }
     else { c.status_ui = 'proposed'; c.note = '⚠ ' + ((res && res.error) || (r && r.error) || 'write failed'); ycLog(`write failed seg ${c.seq}: ${c.note}`); }
   } catch (e) { c.status_ui = 'proposed'; c.note = '⚠ ' + e.message; ycLog(`write failed seg ${c.seq}: ${e.message}`); }
   ycRender();

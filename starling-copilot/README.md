@@ -259,11 +259,17 @@ inspecting the live editor) runs in the extension's **MAIN world** (`yicat-main.
 
 1. locate the **target** cell's editor via `.tgt-table-cell … p[segid="<_id>"]` (**never** the
    source cell — those are editable too);
-2. `setTrackChangeDisableStatus(true)` so a plain-text replace is schema-valid, restore it after;
-3. `clearContent()` + `insertContent(text)` (a real transaction → YiCAT's own WebSocket save fires);
-4. **read the cell back and verify** it equals the intended text — it reports failure rather than
-   claiming a write it can't confirm. It writes as an **untracked draft**, skips tagged/locked
-   segments, and never confirms/delivers.
+2. write in one of two modes and **read the cell back to verify** (it reports failure rather than
+   claiming a write it can't confirm), skipping tagged/locked segments and never confirming:
+   - **Tracked (default)** — keep tracking on and replace the selection, so the editor marks the
+     old text deleted and the new text inserted (`track-change` is a *mark* with
+     `{op-uid, type:"insert"|"delete", …}`), exactly like manual editing. Verified by the
+     "effective" text (all non-deleted runs) equalling the proposal.
+   - **Untracked** — `setTrackChangeDisableStatus(true)`, then `clearContent()` +
+     `insertContent(text)` (a plain replace, valid with tracking off), restore tracking. Verified
+     by `getText()`.
+   If a tracked write can't be verified it **falls back to the untracked clean write**, so a cell is
+   never left half-applied. Each transaction fires YiCAT's own WebSocket save.
 
 > **Rendered-only:** the write needs the segment's row on screen (YiCAT virtualizes the grid).
 > **Write all approved** writes the on-screen ones and tells you how many to scroll to and re-run.

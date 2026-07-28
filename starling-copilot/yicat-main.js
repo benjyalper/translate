@@ -4,13 +4,23 @@
  * each target cell's Tiptap/ProseMirror editor instance (`p[segid].__vue__.editor`), which
  * the isolated content script (yicat.js) cannot touch. It writes a proposal by driving the
  * editor's OWN Tiptap commands — the same path a human keystroke takes — so YiCAT's normal
- * onUpdate → WebSocket save fires. Every write is READ-BACK VERIFIED: it only reports
- * success if the cell's text ends up exactly the intended text (YiCAT is a track-changes
- * editor, where a naive insert can append rather than replace). It never confirms/delivers.
+ * onUpdate → WebSocket save fires. It never confirms/delivers.
+ *
+ * Two write modes (YiCAT is a track-changes editor; `track-change` is a MARK with
+ * attrs {op-uid, op-date, type:"insert"|"delete", …} — a tracked replacement is the old text
+ * marked delete + the new text marked insert):
+ *   • TRACKED (default): keep tracking on, replace the whole selection → the editor's plugin
+ *     marks old as delete and new as insert, exactly like manual editing. Verified by the
+ *     "effective" text (all non-deleted runs) equalling the proposal.
+ *   • UNTRACKED: disable tracking, clearContent + insertContent (a plain replace, valid
+ *     because tracking-off cells accept bare text). Verified by getText().
+ * If a tracked write doesn't verify, it FALLS BACK to the untracked clean write so a cell is
+ * never left with half-applied/garbled content. Both are read-back VERIFIED — success is
+ * only reported when the cell's effective text is exactly the proposal.
  *
  * Protocol (same-window postMessage):
- *   in : { __ycmain:'req', op:'write', reqId, segId, text }
- *   out: { __ycmain:'res', reqId, res:{ ok, error?, got? } }
+ *   in : { __ycmain:'req', op:'write', reqId, segId, text, tracked }
+ *   out: { __ycmain:'res', reqId, res:{ ok, error?, tracked?, got? } }
  */
 (() => {
   'use strict';
@@ -41,27 +51,59 @@
     } catch (e) { return null; }
   }
 
-  function writeSeg(segId, text) {
+  // The "effective" text = every text run EXCEPT ones marked as a tracked deletion, i.e. the
+  // content as it would read once all changes are accepted. For a correct tracked replace this
+  // equals the proposal (old text is delete-marked → excluded; new text is insert-marked → kept).
+  function effectiveText(ed) {
+    try {
+      let s = '';
+      const walk = (node) => {
+        if (node.type === 'text') {
+          const deleted = (node.marks || []).some((m) => m.type === 'track-change' && m.attrs && m.attrs['type'] === 'delete');
+          if (!deleted) s += (node.text || '');
+        }
+        (node.content || []).forEach(walk);
+      };
+      walk(ed.getJSON());
+      return s;
+    } catch (e) {
+      try { return ed.getText(); } catch (_) { return null; }
+    }
+  }
+
+  function writeSeg(segId, text, tracked) {
     const ed = editorFor(segId);
     if (!ed) return { ok: false, error: 'segment not rendered on screen — scroll to it in YiCAT, then retry' };
     if (ed.isDestroyed) return { ok: false, error: 'cell editor not live — scroll the segment into view and retry' };
     if (ed.isEditable === false) return { ok: false, error: 'cell is not editable (locked / read-only)' };
     const want = norm(text);
 
-    // YiCAT target cells run in track-changes mode, whose schema rejects a plain-text
-    // insert (it requires text wrapped in <track-change> nodes). So we DISABLE tracking
-    // for the write (making a clean plain-text replace valid, exactly like a source cell),
-    // then restore the prior tracking state. The write goes in as an untracked draft.
+    const canToggle = typeof ed.commands.setTrackChangeDisableStatus === 'function';
     const tc = trackChangeExt(ed);
     const priorDisabled = (tc && tc.options) ? tc.options.disabled : null;
-    const canToggle = typeof ed.commands.setTrackChangeDisableStatus === 'function';
-    const restoreTracking = () => { if (canToggle) { try { ed.commands.setTrackChangeDisableStatus(priorDisabled == null ? false : priorDisabled); } catch (e) {} } };
+    const setTracking = (on) => { if (canToggle) { try { ed.commands.setTrackChangeDisableStatus(!on); } catch (e) {} } };
+    const restoreTracking = () => setTracking(priorDisabled == null ? true : !priorDisabled);
 
+    // ---- attempt 1: TRACKED replace (keep tracking on; select all, insert) ----
+    if (tracked !== false) {
+      try {
+        setTracking(true);
+        const end = ed.state.doc.content.size;
+        ed.chain().focus().setTextSelection({ from: 0, to: end }).insertContent(String(text || '')).run();
+        const eff = norm(effectiveText(ed));
+        restoreTracking();
+        if (eff === want) { try { ed.commands.blur && ed.commands.blur(); } catch (e) {} return { ok: true, tracked: true }; }
+        // didn't verify as a clean tracked replace → fall through to the untracked clean write,
+        // whose clearContent wipes any half-applied tracked state first.
+      } catch (e) {
+        restoreTracking();
+        // fall through to untracked
+      }
+    }
+
+    // ---- attempt 2 / untracked mode: disable tracking, clean replace ----
     try {
-      if (canToggle) ed.commands.setTrackChangeDisableStatus(true);
-      // clearContent empties the doc first (so insertContent can't "append"), then
-      // insertContent adds the proposal — a real ProseMirror transaction that triggers
-      // the editor's own save. focus() so the caret/commands apply to this cell.
+      setTracking(false);   // tracking OFF → plain text is schema-valid
       ed.chain().focus().clearContent().insertContent(String(text || '')).run();
     } catch (e) {
       restoreTracking();
@@ -76,7 +118,7 @@
       return { ok: false, error: 'verify failed — cell now shows "' + got.slice(0, 50) + '…"; please fix by hand', got: got.slice(0, 120) };
     }
     try { ed.commands.blur && ed.commands.blur(); } catch (e) {}
-    return { ok: true };
+    return { ok: true, tracked: false };
   }
 
   window.addEventListener('message', (ev) => {
@@ -85,7 +127,7 @@
     if (!d || d.__ycmain !== 'req') return;
     let res;
     try {
-      res = (d.op === 'write') ? writeSeg(d.segId, d.text) : { ok: false, error: 'unknown op' };
+      res = (d.op === 'write') ? writeSeg(d.segId, d.text, d.tracked) : { ok: false, error: 'unknown op' };
     } catch (e) {
       res = { ok: false, error: String(e && e.message || e) };
     }
