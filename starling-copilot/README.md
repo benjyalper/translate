@@ -34,7 +34,7 @@ submits/approves** on any platform — it stops at the point where a human decis
 
 ### Version lockstep
 `content.js` carries a `CS_VERSION`; `panel.js` a matching `CS_EXPECT`. They are **bumped together
-on every content.js change** (currently **20**). The panel checks the page's live `window.__wb.ver`
+on every content.js change** (currently **21**). The panel checks the page's live `window.__wb.ver`
 and re-injects `content.js` if a tab is stale, so tabs self-heal without a manual reload.
 
 ---
@@ -52,13 +52,22 @@ and re-injects `content.js` if a tab is stale, so tabs self-heal without a manua
 6. Optionally **Confirm all (ignore normal QA)** → post-confirm summary.
 7. **📋 Read QA warnings** groups issues Critical → Punctuation → Spacing → other *(beta)*.
 
-### Edge-whitespace preservation (v20)
+### Edge-whitespace preservation (v20 · v21)
 A source string that ends in a trailing **space** (Starling's blue `·`) or **newline** (blue `↵`)
 must carry the same edge whitespace in the target, or Starling flags a Punctuation/Space QA error.
 GPT drops these. At **write time** `mirrorRowEdges` reads the source row's **raw** text (no
 normalization, so newlines survive) and mirrors its exact leading/trailing whitespace onto what's
 typed — applied in **both** the Starling write and the Sheet→Starling hybrid write. Safe by
 construction: no source edge → text unchanged.
+
+**v21 — the proposal itself now carries the edges (fixes copy/tagged/display paths).** The DOM-write
+mirror above only fixed segments the tool *types*; **copied** proposals (tagged segments are
+copy-by-hand) and the on-screen text still lost the edge space/newline because harvest's `readCell`
+→ `norm()` trims edges. Two fixes: (1) harvest **re-attaches the source's real edge whitespace** onto
+the segment's `src` (via the same raw `.render-text` read the write mirror uses); (2) the panel's
+`mirrorEdges` now mirrors **both** trailing space *and* newline (`\s`, matching `mirrorRowEdges`,
+not `[^\S\n]`). So `polish()` carries the blue `·`/`↵` onto every proposal — copy, display, and all
+modes — not only DOM writes.
 
 ### Assisted mode — tagged / bullet-list segments
 Segments with real inline tag objects (yellow `①②` markers) can't be safely typed over — a
@@ -343,8 +352,10 @@ Default selectors are **unions** covering both editors; hidden measurement-clone
 | — | **Hybrid write**: API check + **editor typing** (replaces server-only confirm; fixes stale-editor & `1024`) |
 | 18 | Binary-search scroll seek (fast, fallback-backed) |
 | 19 | Confirm targets the written row; tooltip-spam fix |
-| 20 | Edge-whitespace mirroring (trailing space/newline) |
+| 20 | Edge-whitespace mirroring (trailing space/newline) at write time |
 | — | **🌐 Crowdin mode** on API v2 (background proxy, detect/harvest/propose/enter) |
+| — | **🅜 memoQ** + **🐱 YiCAT** modes (editor-API / Tiptap write-back) |
+| 21 | Edge-whitespace now carried onto the **proposal** too — harvest re-attaches the source's edge space/newline and the panel mirror includes newlines, so copy/tagged/display paths keep the blue `·`/`↵` |
 
 ## Test the panel offline
 ```bash

@@ -145,10 +145,13 @@ function fixSpacing(s) {
 function hasSpacingIssue(s) { s = String(s == null ? '' : s); return /[^\S\n]{2,}/.test(s) || /[^\S\n]+[.,:;!?]/.test(s); }  // internal only — edges are mirrored from the source
 // Leading/trailing whitespace must MATCH the source: a trailing space in the source (the
 // "blue dot" in Starling) must appear in the target too, and a target-only edge space is dropped.
-function leadWs(s) { return (String(s == null ? '' : s).match(/^[^\S\n]*/) || [''])[0]; }
-function trailWs(s) { return (String(s == null ? '' : s).match(/[^\S\n]*$/) || [''])[0]; }
+// Mirror the source's FULL edge whitespace — trailing space (Starling's blue "·") AND
+// trailing newline (the blue "↵") — matching the write-time mirrorRowEdges (\s, not
+// [^\S\n]); otherwise a source-final newline is never carried onto the proposal.
+function leadWs(s) { return (String(s == null ? '' : s).match(/^\s*/) || [''])[0]; }
+function trailWs(s) { return (String(s == null ? '' : s).match(/\s*$/) || [''])[0]; }
 function mirrorEdges(src, out) {
-  const core = String(out == null ? '' : out).replace(/^[^\S\n]+/, '').replace(/[^\S\n]+$/, '');
+  const core = String(out == null ? '' : out).replace(/^\s+/, '').replace(/\s+$/, '');
   return leadWs(src) + core + trailWs(src);
 }
 function edgeMismatch(src, out) { return leadWs(src) !== leadWs(out) || trailWs(src) !== trailWs(out); }
@@ -824,7 +827,7 @@ function wbBuildIndex() {
 }
 const WB_FIELDS = [['key', 'Key'], ['valid', 'Valid (Y/N)'], ['final', 'Final Translation'], ['src', 'Source (EN)'], ['tgt', 'Current target'], ['lang', 'Language']];
 const STAR_KEY_URL = 'https://starling.bytedance.com/#/all-task?pageNum=1&pageSize=10&progress=all&translateTypeList=%5B%5D&sortType=1&order=0&sourceLocales=en&targetLocales=he-IL&textKeys=';
-const CS_EXPECT = 20;   // must match content.js CS_VERSION
+const CS_EXPECT = 21;   // must match content.js CS_VERSION
 
 // Direct call surface — invokes the page's window.__wb.* via chrome.scripting.executeScript.
 // This bypasses chrome.runtime messaging entirely, so a stale/duplicate content-script

@@ -13,7 +13,7 @@
   // tab is running an older version, re-injects this file via chrome.scripting so stale tabs
   // self-heal (no page reload needed). Re-injection tears down the previous version's message
   // listener first (below) so there's never a double-listener race.
-  const CS_VERSION = 20;
+  const CS_VERSION = 21;
   if (window.__scVer === CS_VERSION) return;                         // this exact version already live here
   if (typeof window.__scCleanup === 'function') { try { window.__scCleanup(); } catch (e) {} }  // remove an older/stale one
   window.__scVer = CS_VERSION;
@@ -129,7 +129,18 @@
       if (seg == null) return;
       const tgt = readCell(cell);
       const srcCell = row && row.querySelector(CFG.sourceCell);
-      const src = srcCell ? readCell(srcCell) : '';
+      let src = srcCell ? readCell(srcCell) : '';
+      // readCell trims edge whitespace, but Starling's blue "·" (trailing space) and
+      // "↵" (trailing newline) live in the source and MUST be mirrored onto the target,
+      // or Starling flags a Punctuation/Space QA error. Re-attach the source's real edge
+      // whitespace so the panel carries it onto the proposal for COPY/display too — not
+      // only the DOM-write path (which re-reads the raw source at write time).
+      if (src && row) {
+        const raw = rawSrcOfRow(row);
+        const lead  = (raw.match(/^\s*/) || [''])[0];
+        const trail = (raw.match(/\s*$/) || [''])[0];
+        if (lead || trail) src = lead + src + trail;
+      }
       const tagEl = cellHasTagEl(cell) || cellHasTagEl(srcCell);
       const prev = map.get(seg);
       if (!prev || (tgt && tgt.length > (prev.tgt || '').length) || (src && !prev.src)) {
