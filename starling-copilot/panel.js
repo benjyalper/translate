@@ -314,39 +314,59 @@ async function doGpt() {
   const plural = $('plural').checked;
   const mode = document.querySelector('input[name=mode]:checked').value;
   const inclTagged = $('incl-tagged').checked;
+  const fillEmpty = $('fill-empty') ? $('fill-empty').checked : true;
   state.mode = mode;
 
-  const pool = state.segments.filter((s) => (inclTagged ? true : !s.tagged) && (mode === 'translate' ? (s.src || '').trim() : (s.tgt || '').trim()));
-  if (!pool.length) { info('gpt-info', 'Nothing to process (all segments empty, or tagged excluded).', 'err'); return; }
+  // Group each candidate by its EFFECTIVE mode. In proofread mode an empty
+  // target (but non-empty source) is translated from scratch and written in
+  // alongside the proofread ones — so blank cells don't get left behind.
+  const tagOk = (s) => inclTagged ? true : !s.tagged;
+  const groups = { proofread: [], translate: [] };
+  for (const s of state.segments) {
+    if (!tagOk(s)) continue;
+    const hasT = String(s.tgt || '').trim();
+    const hasS = String(s.src || '').trim();
+    if (mode === 'translate') { if (hasS) groups.translate.push(s); }
+    else if (hasT) groups.proofread.push(s);
+    else if (hasS && fillEmpty) groups.translate.push(s);   // blank target → translate
+  }
+  const total = groups.proofread.length + groups.translate.length;
+  if (!total) { info('gpt-info', 'Nothing to process (all segments empty, or tagged excluded).', 'err'); return; }
 
   $('run-gpt').disabled = true;
   const proposals = [];
-  let done = 0, failed = 0;
+  let done = 0, failed = 0, filled = 0;
   const B = 10;
   try {
-    for (let i = 0; i < pool.length; i += B) {
-      const slice = pool.slice(i, i + B);
-      info('gpt-info', `✨ ${mode === 'translate' ? 'Translating' : 'Proofreading'} ${i + 1}–${Math.min(i + B, pool.length)} of ${pool.length}…`);
-      const items = slice.map((s, j) => ({ i: j + 1, src: String(s.src || ''), tgt: String(s.tgt || '') }));
-      try {
-        const out = await gptBatch(items, mode, key, model, plural);
-        out.forEach((o) => {
-          const idx = (o.i | 0) - 1;
-          if (idx >= 0 && idx < slice.length && o.text != null) {
-            const s = slice[idx];
-            const next = polish(s.src, o.text);   // fix spacing + mirror the source's full stop
-            // Tagged segments = "manual": proofread for you, but never auto-written
-            // (typing would clobber the tag objects). You paste them by hand.
-            proposals.push({ seg: s.seg, src: s.src, old: s.tgt, next: next, tagged: s.tagged, manual: !!s.tagged, approved: !s.tagged && next !== String(s.tgt) });
-            done++;
-          }
-        });
-      } catch (e) { failed += slice.length; log('gpt batch @' + i + ' failed: ' + e.message); }
-      if (i + B < pool.length) await new Promise((r) => setTimeout(r, 250));
+    for (const gm of ['proofread', 'translate']) {
+      const list = groups[gm];
+      for (let i = 0; i < list.length; i += B) {
+        const slice = list.slice(i, i + B);
+        info('gpt-info', `✨ ${gm === 'translate' ? 'Translating' : 'Proofreading'} ${done + failed + 1}–${Math.min(done + failed + slice.length, total)} of ${total}…`);
+        const items = slice.map((s, j) => ({ i: j + 1, src: String(s.src || ''), tgt: String(s.tgt || '') }));
+        try {
+          const out = await gptBatch(items, gm, key, model, plural);
+          out.forEach((o) => {
+            const idx = (o.i | 0) - 1;
+            if (idx >= 0 && idx < slice.length && o.text != null) {
+              const s = slice[idx];
+              const next = polish(s.src, o.text);   // fix spacing + mirror the source's full stop
+              const wasEmpty = !String(s.tgt || '').trim();
+              // Tagged segments = "manual": proofread for you, but never auto-written
+              // (typing would clobber the tag objects). You paste them by hand.
+              proposals.push({ seg: s.seg, src: s.src, old: s.tgt, next: next, tagged: s.tagged, manual: !!s.tagged, filled: gm === 'translate' && wasEmpty, approved: !s.tagged && next !== String(s.tgt) });
+              done++;
+              if (gm === 'translate' && wasEmpty) filled++;
+            }
+          });
+        } catch (e) { failed += slice.length; log(`gpt ${gm} batch @${i} failed: ${e.message}`); }
+        await new Promise((r) => setTimeout(r, 250));
+      }
     }
     state.proposals = proposals;
     const changed = proposals.filter((p) => p.next !== p.old).length;
-    info('gpt-info', `✅ ${mode === 'translate' ? 'Translated' : 'Proofread'} ${done} · ${changed} changed${failed ? ` · ${failed} failed` : ''}`, failed ? 'err' : 'good');
+    const pf = done - filled;
+    info('gpt-info', `✅ ${done} done${filled ? ` (${pf} proofread · ${filled} translated)` : ''} · ${changed} changed${failed ? ` · ${failed} failed` : ''}`, failed ? 'err' : 'good');
     renderReview();
     $('review-card').hidden = false;
     $('write-card').hidden = false;
@@ -389,6 +409,7 @@ function renderReview() {
     return `<div class="rc${p.tagged ? ' tagged' : ''}${p.manual ? ' manual' : ''}${changed ? '' : ' unchanged'}" data-i="${idx}">
       <div class="rc-top">
         <span class="rc-seg">#${esc(p.seg)}</span>
+        ${p.filled ? '<span class="rc-warn" title="Target was empty — translated from the source and will be written in with the rest." style="background:#0a7a3f">＋ new</span>' : ''}
         ${p.tagged ? '<span class="rc-warn">⚠ tag</span>' : ''}
         ${amountMismatch(p.src, p.next) ? '<span class="rc-warn" title="Number/currency differs from the source — the amount &amp; currency symbol must stay verbatim (may be a stale TM value).">⚠ number</span>' : ''}
         ${hasSpacingIssue(p.old) || edgeMismatch(p.src, p.old) ? '<span class="rc-warn" title="Spacing adjusted — space before punctuation, double spaces, or leading/trailing space to match the source.">⚠ spacing</span>' : ''}
@@ -396,7 +417,7 @@ function renderReview() {
         ${control}
       </div>
       ${p.src ? `<div class="rc-src" dir="ltr">${hl(esc(p.src))}</div>` : ''}
-      ${changed ? `<div class="rc-old" dir="rtl">${hl(esc(p.old))}</div>` : ''}
+      ${changed && String(p.old).trim() ? `<div class="rc-old" dir="rtl">${hl(esc(p.old))}</div>` : ''}
       ${newRow}
       ${copyBlock}
     </div>`;
