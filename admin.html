@@ -1672,7 +1672,7 @@
           <div class="tool-icon">📋</div>
           <div>
             <div class="tool-title" data-tool-anchor="tool-xbench">XBench QA Report Revisor</div>
-            <div class="tool-sub">Upload QA report (.xlsx) + SDLRPX → auto-apply corrections → download revised package</div>
+            <div class="tool-sub">Upload an XBench QA report → auto-apply term corrections. Output either into an SDLRPX/SDLXLIFF package, or back into the Excel with the fixes in <span style="color:#60a5fa">blue text</span>.</div>
           </div>
         </div>
         <div class="tool-divider"></div>
@@ -1687,8 +1687,8 @@
             </div>
             <div class="tdrop-sel" id="qa-xlsx-label" style="display:none"></div>
           </div>
-          <div>
-            <label style="font-size:.75rem;color:#94a3b8;display:block;margin-bottom:.4rem">② SDLRPX Package or .sdlxliff file(s)</label>
+          <div id="qa-rpx-col">
+            <label style="font-size:.75rem;color:#94a3b8;display:block;margin-bottom:.4rem">② SDLRPX Package or .sdlxliff file(s) <span style="color:#64748b">— SDLRPX mode only</span></label>
             <div class="tdrop" id="qa-rpx-drop">
               <input type="file" id="qa-rpx-file" accept=".sdlrpx,.sdlppx,.sdlxliff,.zip" multiple onchange="qaOnRpx(this)"/>
               <div class="tdrop-icon">📦</div>
@@ -1696,6 +1696,18 @@
             </div>
             <div class="tdrop-sel" id="qa-rpx-label" style="display:none"></div>
           </div>
+        </div>
+
+        <!-- Output mode -->
+        <div style="display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin-bottom:.7rem">
+          <span style="font-size:.75rem;color:#94a3b8">Output:</span>
+          <label style="font-size:.76rem;color:#cbd5e1;display:flex;align-items:center;gap:.3rem;cursor:pointer"><input type="radio" name="qa-mode" value="sdlrpx" checked onchange="qaSetMode('sdlrpx')" style="accent-color:#4f46e5"/> 📦 Apply into SDLRPX / SDLXLIFF</label>
+          <label style="font-size:.76rem;color:#cbd5e1;display:flex;align-items:center;gap:.3rem;cursor:pointer"><input type="radio" name="qa-mode" value="excel" onchange="qaSetMode('excel')" style="accent-color:#4f46e5"/> 📊 Correct in Excel (blue text)</label>
+        </div>
+        <div id="qa-excel-opts" style="display:none;margin-bottom:.7rem;padding:.55rem .7rem;background:#0a0a14;border:1px solid var(--border);border-radius:6px">
+          <div style="font-size:.72rem;color:#94a3b8;margin-bottom:.4rem">Corrections are written into the report's <strong>Target</strong> column (D) — no Trados package needed. Only <strong>Key Term Mismatch</strong> rows are corrected; each stays review-gated below. Mark in blue:</div>
+          <label style="font-size:.74rem;color:#cbd5e1;margin-right:1.2rem;cursor:pointer"><input type="radio" name="qa-blue" value="diff" checked style="accent-color:#4f46e5"/> only the changed words</label>
+          <label style="font-size:.74rem;color:#cbd5e1;cursor:pointer"><input type="radio" name="qa-blue" value="whole" style="accent-color:#4f46e5"/> the whole corrected target</label>
         </div>
 
         <button class="tbtn" id="qa-parse-btn" onclick="qaParseAndPreview()" disabled>🔍 Parse &amp; Preview Fixes</button>
@@ -6043,6 +6055,9 @@ async function trTranslate() {
 // ── QA REVISOR v2 ───────────────────────────────────────
 let qaXlsxBuf = null, qaRpxFile = null, qaRpxName = '', qaRpxBuf = null;
 let qaParsedFixes = []; // final list shown in table
+let qaMode = 'sdlrpx';  // 'sdlrpx' (package) | 'excel' (blue-text .xlsx)
+let qaXlsxName = '';    // original report filename (for the corrected .xlsx name)
+let qaExcelFixes = [];  // final list for the Excel blue-text mode
 // Set when input was bare .sdlxliff file(s) (auto-wrapped into a synthetic zip).
 // Drives output naming + extraction on download. Stores the bundled .sdlxliff
 // relative paths so the final step can fish them back out of the result zip.
@@ -6052,6 +6067,7 @@ function qaOnXlsx(input) {
   const f = input.files[0]; if (!f) return;
   const lbl = document.getElementById('qa-xlsx-label');
   lbl.textContent = f.name; lbl.style.display = 'block';
+  qaXlsxName = f.name;
   const r = new FileReader();
   r.onload = e => { qaXlsxBuf = e.target.result; qaCheckReady(); };
   r.readAsArrayBuffer(f);
@@ -6103,7 +6119,23 @@ async function qaOnRpx(input) {
   qaCheckReady();
 }
 function qaCheckReady() {
-  document.getElementById('qa-parse-btn').disabled = !(qaXlsxBuf && qaRpxFile);
+  const ready = qaMode === 'excel' ? !!qaXlsxBuf : !!(qaXlsxBuf && qaRpxFile);
+  document.getElementById('qa-parse-btn').disabled = !ready;
+}
+
+// Toggle between the SDLRPX package output and the Excel blue-text output.
+function qaSetMode(m) {
+  qaMode = (m === 'excel') ? 'excel' : 'sdlrpx';
+  const rpxCol = document.getElementById('qa-rpx-col');
+  const xopts  = document.getElementById('qa-excel-opts');
+  if (rpxCol) rpxCol.style.display = qaMode === 'excel' ? 'none' : '';
+  if (xopts)  xopts.style.display  = qaMode === 'excel' ? 'block' : 'none';
+  const applyBtn = document.getElementById('qa-apply-btn');
+  if (applyBtn) applyBtn.textContent = qaMode === 'excel'
+    ? '⚡ Apply & Download Excel (blue text)'
+    : '⚡ Apply All Fixes & Download';
+  document.getElementById('qa-preview').style.display = 'none'; // stale preview from the other mode
+  qaCheckReady();
 }
 
 // ── Hebrew normalization (remove definite article ה for comparison)
@@ -6530,6 +6562,7 @@ function qaScanChinesePassthrough(xliffByName) {
 
 // ── Parse + Preview ──────────────────────────────────────
 async function qaParseAndPreview() {
+  if (qaMode === 'excel') return qaExcelParseAndPreview();
   const btn  = document.getElementById('qa-parse-btn');
   const err  = document.getElementById('qa-error');
   const prev = document.getElementById('qa-preview');
@@ -6725,6 +6758,7 @@ async function qaParseAndPreview() {
 
 // ── Apply Fixes ──────────────────────────────────────────
 async function qaApplyFixes() {
+  if (qaMode === 'excel') return qaExcelApply();
   // Collect only checked rows
   const toApply = qaParsedFixes.filter((_, idx) => {
     const cb = document.getElementById(`qacb_${idx}`);
@@ -6893,6 +6927,264 @@ Output only the corrected/translated text for each item, numbered to match, one 
     }
     setTimeout(() => prog.classList.remove('show'), 5000);
   } catch(e) {
+    prog.classList.remove('show');
+    err.style.display = 'block'; err.textContent = '❌ ' + e.message;
+  } finally { btn.disabled = false; }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  XBench QA — Excel (blue text) output mode
+//  Corrects "Key Term Mismatch" targets straight in the report's
+//  Target column (D) — no Trados package. Direct fixes use the
+//  glossary term; sentence fixes use GPT (fix-term-in-context). The
+//  corrected target is written back as an inline rich string with the
+//  changed words coloured blue, editing the .xlsx OOXML directly so
+//  every other bit of formatting is preserved.
+// ═══════════════════════════════════════════════════════════════
+const QA_BLUE = 'FF0000FF'; // ARGB blue
+
+function qaXmlEsc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// Word-level diff → array of {text, blue} runs describing the NEW text,
+// with the words that changed from OLD marked blue. A space between two
+// changed words is coloured too, so a replaced term reads as one blue span.
+function qaWordDiffRuns(oldT, newT) {
+  const splitKeep = s => String(s == null ? '' : s).split(/(\s+)/).filter(x => x !== '');
+  const isSpace = t => /^\s+$/.test(t);
+  const newParts = splitKeep(newT);
+  const oldWords = splitKeep(oldT).filter(t => !isSpace(t));
+  const newWords = newParts.filter(t => !isSpace(t));
+  const n = oldWords.length, m = newWords.length;
+  // LCS of word tokens → which NEW words are unchanged
+  const dp = Array.from({ length: n + 1 }, () => new Int32Array(m + 1));
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      dp[i][j] = oldWords[i] === newWords[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const matched = new Array(m).fill(false);
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (oldWords[i] === newWords[j]) { matched[j] = true; i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) i++; else j++;
+  }
+  let wi = 0;
+  const parts = newParts.map(p => isSpace(p)
+    ? { text: p, space: true, blue: false }
+    : { text: p, space: false, blue: !matched[wi++] });
+  for (let k = 0; k < parts.length; k++) {
+    if (parts[k].space && parts[k - 1] && parts[k - 1].blue && parts[k + 1] && parts[k + 1].blue)
+      parts[k].blue = true;
+  }
+  const runs = [];
+  for (const p of parts) {
+    const last = runs[runs.length - 1];
+    if (last && last.blue === p.blue) last.text += p.text;
+    else runs.push({ text: p.text, blue: p.blue });
+  }
+  return runs;
+}
+
+// runs → <is> inline-string body (blue runs carry an <rPr><color/>).
+function qaInlineIs(runs) {
+  const body = runs.map(run => {
+    const t = `<t xml:space="preserve">${qaXmlEsc(run.text)}</t>`;
+    return run.blue ? `<r><rPr><color rgb="${QA_BLUE}"/></rPr>${t}</r>` : `<r>${t}</r>`;
+  }).join('');
+  return `<is>${body}</is>`;
+}
+
+// Resolve the first worksheet's XML path inside the xlsx zip.
+async function qaResolveSheetPath(zip) {
+  try {
+    const wbXml = await zip.file('xl/workbook.xml').async('string');
+    const sm = wbXml.match(/<sheet\b[^>]*\br:id="([^"]+)"[^>]*\/?>/i);
+    if (sm) {
+      const relXml = await zip.file('xl/_rels/workbook.xml.rels').async('string');
+      const rm = relXml.match(new RegExp('<Relationship\\b[^>]*\\bId="' + sm[1] + '"[^>]*\\bTarget="([^"]+)"', 'i'));
+      if (rm) { let t = rm[1].replace(/^\//, '').replace(/^\.\//, ''); return /^xl\//.test(t) ? t : 'xl/' + t; }
+    }
+  } catch (e) {}
+  return 'xl/worksheets/sheet1.xml';
+}
+
+// Replace cell `ref` (e.g. "D13") in sheetXml with an inline rich string,
+// preserving the cell's existing style index (s="…"). Returns {xml, ok}.
+function qaSetCellInline(sheetXml, ref, runs) {
+  const is = qaInlineIs(runs);
+  const cellRe = new RegExp('<c r="' + ref + '"([^>]*?)(\\/>|>[\\s\\S]*?<\\/c>)');
+  const mm = sheetXml.match(cellRe);
+  if (mm) {
+    const sMatch = (mm[1] || '').match(/\bs="(\d+)"/);
+    const sAttr = sMatch ? ` s="${sMatch[1]}"` : '';
+    return { xml: sheetXml.replace(cellRe, `<c r="${ref}"${sAttr} t="inlineStr">${is}</c>`), ok: true };
+  }
+  // Fallback: cell absent — insert it into its row before </row>.
+  const rowNum = ref.match(/\d+$/)[0];
+  const rowRe = new RegExp('(<row r="' + rowNum + '"[^>]*>)([\\s\\S]*?)(<\\/row>)');
+  const rm = sheetXml.match(rowRe);
+  if (rm) return { xml: sheetXml.replace(rowRe, rm[1] + rm[2] + `<c r="${ref}" t="inlineStr">${is}</c>` + rm[3]), ok: true };
+  return { xml: sheetXml, ok: false };
+}
+
+// Parse "Key Term Mismatch" issues, capturing each data row's exact
+// Target cell address (col D) for the blue write-back.
+function qaExcelParseIssues() {
+  const wb = XLSX.read(qaXlsxBuf, { type: 'array' });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  const cell = (r, c) => { const x = ws[XLSX.utils.encode_cell({ r, c })]; return x && x.v != null ? String(x.v) : ''; };
+  const TARGET_COL = 3; // D
+  const issues = [];
+  for (let r = range.s.r; r <= range.e.r; r++) {
+    const ktm = cell(r, 0).trim().match(/^Key Term Mismatch\s*\((.+?)\s*\/\s*([\s\S]+?)\)\s*$/);
+    if (!ktm) continue;
+    const correctTerm = ktm[2].trim();
+    for (let d = r + 1; d <= range.e.r; d++) {
+      const sm = cell(d, 0).trim().match(/\((\d+)\)\s*$/);
+      if (!sm) break; // reached the next header / blank
+      issues.push({
+        type: 'keyterm', segId: parseInt(sm[1]),
+        source: cell(d, 2).trim(), currentTarget: cell(d, TARGET_COL), correctTerm,
+        cellRef: XLSX.utils.encode_cell({ r: d, c: TARGET_COL })
+      });
+    }
+  }
+  return issues;
+}
+
+async function qaExcelParseAndPreview() {
+  const btn = document.getElementById('qa-parse-btn');
+  const err = document.getElementById('qa-error');
+  const prev = document.getElementById('qa-preview');
+  btn.disabled = true; err.style.display = 'none'; prev.style.display = 'none';
+  try {
+    const issues = qaExcelParseIssues();
+    if (!issues.length) throw new Error('No "Key Term Mismatch" rows found in this report.');
+    qaExcelFixes = [];
+    let skipped = 0;
+    for (const iss of issues) {
+      const target = iss.currentTarget || '';
+      const cls = qaClassifyFix(
+        { type: 'keyterm', source: iss.source, xliffTarget: target, correctTerm: iss.correctTerm, segId: iss.segId },
+        target
+      );
+      if (cls.skip) { skipped++; continue; }
+      // XBench often flags a term whose exact form is ALREADY in the target (the
+      // Target cell is rich text with the term highlighted). A direct fix there
+      // would just rewrite the same text — treat those as already-correct so the
+      // preview only shows genuine changes. GPT fixes stay (can't pre-judge them).
+      const nz = s => String(s || '').replace(/\s+/g, ' ').trim();
+      if (!cls.needsAI && cls.correction && nz(cls.correction) === nz(target)) { skipped++; continue; }
+      qaExcelFixes.push({ ...iss, strippedActual: cls.stripped, needsAI: cls.needsAI, mode: cls.mode, correction: cls.correction || null, aiCorrection: null });
+    }
+    if (!qaExcelFixes.length) throw new Error(`No corrections needed — all ${skipped} flagged term(s) already match the termbase.`);
+    const directN = qaExcelFixes.filter(f => !f.needsAI).length;
+    const aiN = qaExcelFixes.filter(f => f.needsAI).length;
+    document.getElementById('qa-summary').innerHTML =
+      `<strong>${qaExcelFixes.length}</strong> term correction(s) &nbsp;·&nbsp; ${directN} direct &nbsp;·&nbsp; ${aiN} GPT-5.4 &nbsp;·&nbsp; <span style="color:#94a3b8">${skipped} already correct</span> &nbsp;·&nbsp; <span style="color:#60a5fa">→ Excel, blue text</span>`;
+    const esc = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    document.getElementById('qa-tbody').innerHTML = qaExcelFixes.map((f, idx) => {
+      const mode = f.needsAI
+        ? '<span style="color:#fbbf24;font-size:.7rem">GPT fix</span>'
+        : '<span style="color:#34d399;font-size:.7rem">direct</span>';
+      const fix = f.needsAI
+        ? `→ <em style="color:#94a3b8">weave &ldquo;${esc(f.correctTerm)}&rdquo;</em>`
+        : `→ <strong style="color:#86efac">${esc(f.correction)}</strong>`;
+      const srcEsc = esc((f.source || '').replace(/\s+/g, ' ').trim());
+      return `<tr style="border-bottom:1px solid #1e293b">
+        <td style="padding:.35rem .5rem;text-align:center"><input type="checkbox" id="qacb_${idx}" checked style="accent-color:#4f46e5;cursor:pointer"/></td>
+        <td style="padding:.35rem .5rem;color:#94a3b8;font-family:monospace;font-size:.78rem">${f.segId}<span style="color:#64748b;display:block;font-size:.66rem">${f.cellRef}</span></td>
+        <td style="padding:.35rem .5rem"><span style="background:#7c3aed33;color:#c084fc;padding:1px 5px;border-radius:4px">Key Term</span> ${mode}</td>
+        <td style="padding:.35rem .5rem;color:#cbd5e1;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:ltr;font-size:.72rem" title="${srcEsc}">${srcEsc || '—'}</td>
+        <td style="padding:.35rem .5rem;color:#cbd5e1;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl" title="${esc(f.strippedActual)}">${esc(f.strippedActual) || '(empty)'}</td>
+        <td style="padding:.35rem .5rem;color:#e2e8f0;direction:rtl">${fix}</td>
+      </tr>`;
+    }).join('');
+    prev.style.display = 'block';
+  } catch (e) {
+    err.style.display = 'block'; err.textContent = '❌ ' + e.message;
+  } finally { btn.disabled = false; }
+}
+
+async function qaExcelApply() {
+  const toApply = qaExcelFixes.filter((_, idx) => { const cb = document.getElementById(`qacb_${idx}`); return cb && cb.checked; });
+  if (!toApply.length) return;
+  const apiKey = getApiKey();
+  const needGPT = toApply.some(f => f.needsAI);
+  if (needGPT && !apiKey) { promptApiKey(); return; }
+  const btn = document.getElementById('qa-apply-btn');
+  const prog = document.getElementById('qa-prog'), bar = document.getElementById('qa-prog-bar');
+  const txt = document.getElementById('qa-prog-text'), err = document.getElementById('qa-error');
+  btn.disabled = true; prog.classList.add('show'); err.style.display = 'none'; bar.style.width = '5%';
+  try {
+    // Phase 1: GPT weaves the correct term into the sentence (same house prompt).
+    const aiFixes = toApply.filter(f => f.needsAI);
+    if (aiFixes.length && apiKey) {
+      const BATCH = 6;
+      for (let i = 0; i < aiFixes.length; i += BATCH) {
+        const batch = aiFixes.slice(i, i + BATCH);
+        bar.style.width = (5 + (i / aiFixes.length) * 55) + '%';
+        txt.textContent = `GPT-5.4: ${i + 1}–${Math.min(i + BATCH, aiFixes.length)} of ${aiFixes.length}…`;
+        const items = batch.map((f, j) => {
+          const srcPlain = (f.source || '').replace(/<[^>]+>/g, '');
+          return `${j + 1}. [FIX TERM] Source: "${srcPlain}" | Correct term: "${f.correctTerm}" | Current target: ${f.currentTarget}`;
+        }).join('\n');
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + apiKey },
+          body: JSON.stringify({
+            model: 'gpt-5.4', temperature: 0.1, messages: [
+              { role: 'system', content:
+`You are a Hebrew translator for a robot vacuum cleaner user manual.
+For [FIX TERM]: the existing Hebrew uses a term that does not match the client's terminology database. Replace ONLY that term with the stated correct term, changing only what Hebrew grammar strictly requires (definite article, construct state, plural agreement). Keep the rest of the sentence identical. Return the COMPLETE corrected Hebrew sentence — never just the term. If the correct term genuinely does NOT fit and no change is warranted, return the current target unchanged.
+Output only the corrected text for each item, numbered to match, one per line.` },
+              { role: 'user', content: items }
+            ]
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error?.message || 'GPT error ' + res.status);
+        const lines = data.choices[0].message.content.trim().split('\n').filter(l => l.trim());
+        for (let j = 0; j < batch.length; j++) {
+          const m = (lines[j] || '').match(/^\d+\.\s*([\s\S]+)$/);
+          batch[j].aiCorrection = m ? m[1].trim() : null;
+        }
+        if (i + BATCH < aiFixes.length) await new Promise(r => setTimeout(r, 700));
+      }
+    }
+
+    // Phase 2: write blue corrections straight into the .xlsx OOXML.
+    bar.style.width = '68%'; txt.textContent = 'Writing blue corrections into Excel…';
+    const zip = await JSZip.loadAsync(qaXlsxBuf);
+    const sheetPath = await qaResolveSheetPath(zip);
+    let sheetXml = await zip.file(sheetPath).async('string');
+    const blueMode = (document.querySelector('input[name="qa-blue"]:checked') || {}).value || 'diff';
+    const norm = s => String(s || '').replace(/\s+/g, ' ').trim();
+    let applied = 0, unchanged = 0, missed = 0;
+    for (const f of toApply) {
+      const corrected = f.needsAI ? f.aiCorrection : f.correction;
+      if (!corrected) { missed++; continue; }
+      if (norm(corrected) === norm(f.currentTarget)) { unchanged++; continue; }
+      const runs = blueMode === 'whole' ? [{ text: corrected, blue: true }] : qaWordDiffRuns(f.currentTarget || '', corrected);
+      const out = qaSetCellInline(sheetXml, f.cellRef, runs);
+      if (out.ok) { sheetXml = out.xml; applied++; } else missed++;
+    }
+    zip.file(sheetPath, sheetXml);
+
+    bar.style.width = '92%'; txt.textContent = 'Building workbook…';
+    const outBlob = await zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+    const outName = (qaXlsxName || 'Xbench_QA_Report').replace(/\.xlsx?$/i, '') + '_CORRECTED.xlsx';
+    const url = URL.createObjectURL(outBlob);
+    const a = document.createElement('a');
+    a.href = url; a.download = outName;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+
+    bar.style.width = '100%';
+    txt.textContent = `✅ ${applied} correction(s) written in blue${unchanged ? ` · ${unchanged} left unchanged (GPT kept them)` : ''}${missed ? ` · ${missed} skipped` : ''} — downloading ${outName}`;
+    setTimeout(() => prog.classList.remove('show'), 6000);
+  } catch (e) {
     prog.classList.remove('show');
     err.style.display = 'block'; err.textContent = '❌ ' + e.message;
   } finally { btn.disabled = false; }

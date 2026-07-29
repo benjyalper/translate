@@ -162,10 +162,14 @@ Save and reuse per-client term bases. Auto-loaded into Trados translator.
 - **Storage:** `localStorage` key (browser-only).
 
 ### 🔧 10. XBench QA Report Revisor — `tool-xbench`
-Upload an XBench QA xlsx + matching SDLRPX → auto-applies the corrections.
+Upload an XBench QA xlsx → auto-applies the corrections. **Two output modes** (radio toggle at the top of the card):
+- **📦 SDLRPX / SDLXLIFF** (original): also upload the matching package → fixes applied into the XLIFF `<mrk>`s → revised package.
+- **📊 Excel (blue text)** *(NEW)*: no package needed. Corrects **Key Term Mismatch** rows straight in the report's **Target column (D)**, writing the corrected target back as an inline rich string with the changed words (or the whole target) coloured **blue** — editing the `.xlsx` OOXML directly so all other formatting is kept. Download is `<report>_CORRECTED.xlsx`.
 
-- **Card UI:** `admin.html:1659-1717`
-- **JS:** `admin.html` — `qa*` family (`qaOnXlsx` at 5765, `qaParseAllIssues`, `qaClassifyFix`, `qaFixMrkInXliff`, `qaScanChinesePassthrough`, etc.)
+- **Card UI:** `admin.html:1659-1717` — mode toggle + `#qa-excel-opts` (blue-marking choice); `#qa-rpx-col` hidden in Excel mode.
+- **JS:** `admin.html` — `qa*` family (`qaOnXlsx`, `qaParseAllIssues`, `qaClassifyFix`, `qaFixMrkInXliff`, `qaScanChinesePassthrough`, etc.).
+  - Excel mode (`qaMode==='excel'`): `qaSetMode`, `qaExcelParseIssues` (captures each data row's Target cell ref), `qaExcelParseAndPreview` (reuses `qaClassifyFix`; drops direct no-ops where the term is already present), `qaExcelApply` (GPT fix-term-in-context, then blue OOXML write), `qaWordDiffRuns` (word-LCS diff → blue runs), `qaInlineIs` / `qaSetCellInline` (inline rich string, preserves the cell's `s="…"` style), `qaResolveSheetPath`.
+  - Notes: XBench Target cells are **rich text** (it highlights the flagged term in light-blue `FF00B0F0`); SheetJS concatenates the runs to the real target (openpyxl only returns the first run). The correction blue is pure `FF0000FF`. Only source/target text goes to OpenAI (`gpt-5.4`).
 - **Backend:** none.
 
 ### 📑 11. Translation Proofreader (SDL) — `tool-translation-proofreader`
