@@ -52,6 +52,23 @@ and re-injects `content.js` if a tab is stale, so tabs self-heal without a manua
 6. Optionally **Confirm all (ignore normal QA)** → post-confirm summary.
 7. **📋 Read QA warnings** groups issues Critical → Punctuation → Spacing → other *(beta)*.
 
+### Chips vs. string placeholders + empty-target fill (v22)
+"Tagged" used to lump together two different things and force **both** to copy-by-hand: real
+inline-tag **objects** (chips) and **string placeholders** like `{0}`, `%s`, `<g id="1">…</g>` that
+are just literal text. Typing over a chip clobbers the object, but a string placeholder is plain
+text that GPT preserves byte-for-byte — safe to auto-write. Harvest now emits a separate **`chip`**
+flag (`!!tagEl`, a real DOM tag element) and copy-by-hand keys off `chip`, not `tagged`:
+- **Chips** → unchanged: Copy buttons, "✋ paste by hand", ⚠ chip badge.
+- **String placeholders** → normal auto-writable rows (editable + apply checkbox), with a ⚠
+  placeholder badge so you can eyeball the token survived.
+- **Per-row "✍ Write"** button on every auto-writable row writes that one segment into Starling
+  in a single click (respects any inline edit; no confirm).
+
+Also: in **proofread** mode, segments with an **empty target** (non-empty source) are now
+**translated** from the source and written in with the proofread ones (toggle "Translate empty
+targets", default on). Filled rows get a "＋ new" badge and auto-approve. Empty sources that carry a
+real chip still route to copy-by-hand.
+
 ### Edge-whitespace preservation (v20 · v21)
 A source string that ends in a trailing **space** (Starling's blue `·`) or **newline** (blue `↵`)
 must carry the same edge whitespace in the target, or Starling flags a Punctuation/Space QA error.

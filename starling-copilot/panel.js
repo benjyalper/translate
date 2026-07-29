@@ -296,8 +296,9 @@ async function doHarvest() {
     if (!r || !r.ok) throw new Error(r && r.error || 'harvest failed');
     state.segments = r.segments || [];
     const tagged = state.segments.filter((s) => s.tagged).length;
-    info('harvest-info', `Harvested ${state.segments.length} segments${tagged ? ` · ⚠ ${tagged} with tags` : ''}.`, 'good');
-    log(`harvest: ${state.segments.length} segments, ${tagged} tagged`);
+    const chips = state.segments.filter((s) => s.chip).length;
+    info('harvest-info', `Harvested ${state.segments.length} segments${tagged ? ` · ⚠ ${tagged} tagged${chips ? ` (${chips} chip → copy-by-hand)` : ''}` : ''}.`, 'good');
+    log(`harvest: ${state.segments.length} segments, ${tagged} tagged, ${chips} chips`);
     $('gpt-card').hidden = state.segments.length === 0;
     if (!state.segments.length) info('harvest-info', 'No segments found — run Diagnostics in Settings to recalibrate selectors.', 'err');
   } catch (e) {
@@ -352,9 +353,11 @@ async function doGpt() {
               const s = slice[idx];
               const next = polish(s.src, o.text);   // fix spacing + mirror the source's full stop
               const wasEmpty = !String(s.tgt || '').trim();
-              // Tagged segments = "manual": proofread for you, but never auto-written
-              // (typing would clobber the tag objects). You paste them by hand.
-              proposals.push({ seg: s.seg, src: s.src, old: s.tgt, next: next, tagged: s.tagged, manual: !!s.tagged, filled: gm === 'translate' && wasEmpty, approved: !s.tagged && next !== String(s.tgt) });
+              // Copy-by-hand ("manual") is only for REAL chip objects — typing
+              // over those clobbers them. String placeholders ({0}, %s, <g id>…)
+              // are plain text, so they auto-write like any other segment (they
+              // still show a ⚠ placeholder badge so you can eyeball the token).
+              proposals.push({ seg: s.seg, src: s.src, old: s.tgt, next: next, tagged: s.tagged, chip: !!s.chip, manual: !!s.chip, filled: gm === 'translate' && wasEmpty, approved: !s.chip && next !== String(s.tgt) });
               done++;
               if (gm === 'translate' && wasEmpty) filled++;
             }
@@ -401,8 +404,9 @@ function renderReview() {
       copyBlock = `<div class="rc-parts"><div class="rc-part"><span class="rc-pidx">✎</span><div class="rc-pbody"><div class="rc-ptxt" dir="rtl">${hl(esc(clean))}</div></div><button class="rc-copy" type="button" data-copy="${esc(clean)}">Copy</button></div></div>`;
     }
     const control = p.manual
-      ? `<span class="rc-manual" title="Has real tags — paste it by hand between them; the extension won't auto-write this one.">✋ paste by hand</span>`
-      : `<label><input type="checkbox" class="rc-cb" ${p.approved ? 'checked' : ''}/> apply</label>`;
+      ? `<span class="rc-manual" title="Has a real inline-tag object (chip) — paste it by hand; the extension won't auto-write this one.">✋ paste by hand</span>`
+      : `<label><input type="checkbox" class="rc-cb" ${p.approved ? 'checked' : ''}/> apply</label>` +
+        `<button class="rc-write" type="button" data-i="${idx}" title="Write just this one segment into Starling now">✍ Write</button>`;
     const newRow = p.manual
       ? `<div class="rc-new ro" dir="rtl">${esc(p.next)}</div>`
       : `<div class="rc-new" dir="rtl" contenteditable="true" spellcheck="false">${esc(p.next)}</div>`;
@@ -410,7 +414,7 @@ function renderReview() {
       <div class="rc-top">
         <span class="rc-seg">#${esc(p.seg)}</span>
         ${p.filled ? '<span class="rc-warn" title="Target was empty — translated from the source and will be written in with the rest." style="background:#0a7a3f">＋ new</span>' : ''}
-        ${p.tagged ? '<span class="rc-warn">⚠ tag</span>' : ''}
+        ${p.chip ? '<span class="rc-warn" title="Real inline-tag object (chip) in the cell — copy-by-hand.">⚠ chip</span>' : (p.tagged ? '<span class="rc-warn" title="Text placeholder ({0}, %s, &lt;g id&gt;…) — kept byte-for-byte; safe to write. Eyeball that the token survived.">⚠ placeholder</span>' : '')}
         ${amountMismatch(p.src, p.next) ? '<span class="rc-warn" title="Number/currency differs from the source — the amount &amp; currency symbol must stay verbatim (may be a stale TM value).">⚠ number</span>' : ''}
         ${hasSpacingIssue(p.old) || edgeMismatch(p.src, p.old) ? '<span class="rc-warn" title="Spacing adjusted — space before punctuation, double spaces, or leading/trailing space to match the source.">⚠ spacing</span>' : ''}
         ${brandIssue(p.src, p.next) ? `<span class="rc-warn" title="A product name from the source (${esc(brandIssue(p.src, p.next))}) isn't kept verbatim — check the brand spelling/spacing.">⚠ brand</span>` : ''}
@@ -430,7 +434,27 @@ function renderReview() {
     const i = +e.target.closest('.rc').dataset.i; state.proposals[i].next = e.target.innerText;
   }));
   box.querySelectorAll('.rc-copy').forEach((b) => b.addEventListener('click', () => panelCopy(b.getAttribute('data-copy'), b)));
+  box.querySelectorAll('.rc-write').forEach((b) => b.addEventListener('click', () => doWriteOne(+b.dataset.i, b)));
   updateRevCount();
+}
+
+// Write a single segment into Starling (the per-row "✍ Write" button). Uses the
+// row's current text (respects any inline edit). No confirm — it's one explicit click.
+async function doWriteOne(idx, btn) {
+  const p = state.proposals[idx];
+  if (!p || p.manual) return;
+  const prev = btn.textContent;
+  btn.disabled = true; btn.textContent = '…';
+  try {
+    const r = await send({ type: 'WRITE', edits: [{ seg: p.seg, text: p.next }] });
+    const res = (r && r.results && r.results[0]) || null;
+    if (res && res.ok) { btn.textContent = '✓ written'; p.written = true; }
+    else { btn.textContent = '✕ failed'; log(`write #${p.seg} failed: ${(res && res.reason) || (r && r.error) || 'unknown'}`); }
+  } catch (e) {
+    btn.textContent = '✕ failed'; log(`write #${p.seg} failed: ${e.message}`);
+  } finally {
+    setTimeout(() => { btn.disabled = false; btn.textContent = prev; }, 1600);
+  }
 }
 function updateRevCount() {
   const auto = state.proposals.filter((p) => p.approved && !p.manual).length;
@@ -848,7 +872,7 @@ function wbBuildIndex() {
 }
 const WB_FIELDS = [['key', 'Key'], ['valid', 'Valid (Y/N)'], ['final', 'Final Translation'], ['src', 'Source (EN)'], ['tgt', 'Current target'], ['lang', 'Language']];
 const STAR_KEY_URL = 'https://starling.bytedance.com/#/all-task?pageNum=1&pageSize=10&progress=all&translateTypeList=%5B%5D&sortType=1&order=0&sourceLocales=en&targetLocales=he-IL&textKeys=';
-const CS_EXPECT = 21;   // must match content.js CS_VERSION
+const CS_EXPECT = 22;   // must match content.js CS_VERSION
 
 // Direct call surface — invokes the page's window.__wb.* via chrome.scripting.executeScript.
 // This bypasses chrome.runtime messaging entirely, so a stale/duplicate content-script

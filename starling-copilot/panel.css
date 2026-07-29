@@ -148,6 +148,9 @@ textarea { font-family: ui-monospace, Menlo, Consolas, monospace; resize: vertic
 .rc-copy { border: none; border-radius: 6px; padding: 4px 9px; cursor: pointer; font: inherit; font-size: 11px; font-weight: 700; color: #fff; background: linear-gradient(135deg, var(--acc), var(--acc2)); }
 .rc-copy:hover { filter: brightness(1.08); }
 .rc-copy.copied { background: var(--good); }
+.rc-write { margin-left: 6px; border: 1px solid var(--acc); border-radius: 6px; padding: 3px 9px; cursor: pointer; font: inherit; font-size: 11px; font-weight: 700; color: var(--acc); background: transparent; white-space: nowrap; }
+.rc-write:hover { background: rgba(99,102,241,.14); }
+.rc-write:disabled { opacity: .7; cursor: default; }
 
 /* explanation */
 .card.help > summary { color: var(--dim); font-weight: 600; }

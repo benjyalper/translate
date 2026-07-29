@@ -13,7 +13,7 @@
   // tab is running an older version, re-injects this file via chrome.scripting so stale tabs
   // self-heal (no page reload needed). Re-injection tears down the previous version's message
   // listener first (below) so there's never a double-listener race.
-  const CS_VERSION = 21;
+  const CS_VERSION = 22;
   if (window.__scVer === CS_VERSION) return;                         // this exact version already live here
   if (typeof window.__scCleanup === 'function') { try { window.__scCleanup(); } catch (e) {} }  // remove an older/stale one
   window.__scVer = CS_VERSION;
@@ -173,6 +173,11 @@
   function finalize(map) {
     const segs = [...map.values()].map((s) => ({
       seg: s.seg, src: s.src, tgt: s.tgt,
+      // `chip` = a REAL inline-tag object rendered in the cell — typing over it
+      // clobbers the object, so these stay copy-by-hand. `tagged` also covers
+      // string placeholders ({0}, %s, <g id>…) which are plain text and SAFE to
+      // auto-write (GPT preserves them byte-for-byte) — those get the ⚠ badge only.
+      chip: !!s.tagEl,
       tagged: !!s.tagEl || UNSAFE.test(s.src || '') || UNSAFE.test(s.tgt || '')
     }));
     segs.sort((a, b) => (parseInt(a.seg, 10) || 0) - (parseInt(b.seg, 10) || 0));
