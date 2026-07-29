@@ -1152,6 +1152,9 @@
             <a class="tbtn" id="tr-dl-sdlxliff" href="#" style="display:inline-flex;align-items:center;justify-content:center;gap:.4rem;text-decoration:none;padding:.55rem 1rem;width:auto;font-size:.78rem;background:#1e1b4b;color:#a5b4fc" title="Same content as the return package, just without the .sdlrpx envelope. Useful if the client can't import Trados return packages.">
               ⬇ Also raw .sdlxliff
             </a>
+            <a class="tbtn" id="tr-dl-xlsx" href="#" style="display:inline-flex;align-items:center;justify-content:center;gap:.4rem;text-decoration:none;padding:.55rem 1rem;width:auto;font-size:.78rem;background:#0a1a0a;color:#86efac;border:1px solid #14532d" title="A bilingual Excel sheet of every segment (file · segment · source · Hebrew target). Handy for review or delivering to clients who just want the text.">
+              ⬇ Also bilingual .xlsx
+            </a>
           </div>
           <div style="margin-top:.7rem;font-size:.75rem;color:#64748b">
             In Trados Studio: <strong style="color:#a5b4fc">Project → Return Package</strong> to import translations.
@@ -5813,6 +5816,29 @@ async function trProcessXliff(content, apiKey, onProgress, model) {
   };
 }
 
+// Strip inline XML tags + {{TAG_n}} placeholders and decode entities → clean
+// readable text for the bilingual Excel export.
+function trPlainText(xml) {
+  return String(xml == null ? '' : xml)
+    .replace(/\{\{TAG_\d+\}\}/g, '')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ').trim();
+}
+
+// Build a bilingual .xlsx (File · Segment · Source · Target) from collected
+// rows. Uses the already-loaded SheetJS (values only — no styling needed).
+function trBuildExcelBlob(rows) {
+  const header = ['#', 'File', 'Segment', 'Source', 'Target (HE)'];
+  const aoa = [header, ...rows.map((r, i) => [i + 1, r.file, r.id, r.src, r.tgt])];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{ wch: 5 }, { wch: 26 }, { wch: 12 }, { wch: 64 }, { wch: 64 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Translation');
+  const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+  return new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+}
+
 async function trTranslate() {
   const apiKey = getApiKey();
   if (!apiKey) { promptApiKey(); return; }
@@ -5899,6 +5925,7 @@ async function trTranslate() {
     // .sdlxliff download for clients who can't import a Trados return
     // package. Same content as what lands in the .sdlrpx — different envelope.
     const translatedFiles = [];
+    const bilingualRows = []; // clean source/target per segment → bilingual .xlsx
     for (let fi = 0; fi < xliffEntries.length; fi++) {
       const { path: relPath, entry } = xliffEntries[fi];
       const rawContent = await entry.async('string');
@@ -5928,6 +5955,22 @@ async function trTranslate() {
       const finalContent = trRewriteTargetLangAttr(newContent, trLang);
       outZip.file(relPath, finalContent);
       translatedFiles.push({ relPath, content: finalContent });
+      // Collect every segment (pre-translated, GPT-translated, Chinese-copied)
+      // as a clean bilingual row for the Excel export. trExtractSegments matches
+      // the seg-mrk in <source>, <seg-source> AND <target>, so dedupe by
+      // unitId#mid keeping the FIRST (source-side) occurrence — the later
+      // target-side match would read the Hebrew as the "source".
+      const fileName = relPath.split('/').pop();
+      const seen = new Set();
+      for (const s of trExtractSegments(finalContent)) {
+        const key = `${s.unitId}#${s.mid}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const src = trPlainText(s.rawSrc);
+        const tgt = trPlainText(s.targetText);
+        if (!src && !tgt) continue;
+        bilingualRows.push({ file: fileName, id: key, src, tgt });
+      }
     }
     // Stash for post-actions (TM save, term suggestions)
     window.__trLastPairs = allPairs;
@@ -5954,6 +5997,12 @@ async function trTranslate() {
       rawUrl = URL.createObjectURL(rawBlob);
       rawName = trFile.name.replace(/\.sdlppx$/i, '') + '_sdlxliff.zip';
     }
+
+    // Third envelope: a bilingual .xlsx of every segment (for review, or clients
+    // who just want the text — not a Trados package).
+    const xlsxBlob = trBuildExcelBlob(bilingualRows);
+    const xlsxUrl  = URL.createObjectURL(xlsxBlob);
+    const xlsxName = trFile.name.replace(/\.sdlppx$/i, '') + '_bilingual.xlsx';
 
     bar.style.width = '100%'; txt.textContent = '✅ Done!';
     setTimeout(() => prog.classList.remove('show'), 1500);
@@ -6008,6 +6057,12 @@ async function trTranslate() {
       dlRaw.textContent = translatedFiles.length === 1
         ? '⬇ Also raw .sdlxliff'
         : `⬇ Also raw sdlxliff × ${translatedFiles.length} (.zip)`;
+    }
+    const dlXlsx = document.getElementById('tr-dl-xlsx');
+    if (dlXlsx) {
+      dlXlsx.href = xlsxUrl;
+      dlXlsx.download = xlsxName;
+      dlXlsx.textContent = `⬇ Also bilingual .xlsx (${bilingualRows.length.toLocaleString()} seg)`;
     }
     document.getElementById('tr-results').style.display = 'block';
 

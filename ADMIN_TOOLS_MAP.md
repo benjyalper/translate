@@ -118,10 +118,11 @@ Card is a **launcher only**. Real app is the standalone `hebrew-voice-tts/` proj
 - **Won't work on Railway** (mixed-content + nothing listens on 3018 there).
 
 ### 📦 4. Trados SDLPPX Auto-Translator — `tool-trados-translator`
-Drop a Trados return package → GPT translates every XLIFF segment → download .sdlrpx.
+Drop a Trados return package → GPT translates every XLIFF segment → download. **Three output envelopes** (same translated content): **.sdlrpx** return package (`#tr-dl`), raw **.sdlxliff** (`#tr-dl-sdlxliff`), and a **bilingual .xlsx** (`#tr-dl-xlsx`) — File · Segment · Source · Target(HE), one row per segment.
 
 - **Card UI:** `admin.html:1022-1183`
 - **JS:** `admin.html` — `tr*` family (`trLangName`, `trSetLang`, `trExtractSegments`, `trInsertTranslation`, `trValidateXml`, etc., lines 4341-4992). Also `tm*` for translation-memory matches (`tmTokenize`, `tmSimilarity`, `tmFindMatches`).
+  - Excel export: `trPlainText` (strips inline tags/`{{TAG_n}}` placeholders, decodes entities) + `trBuildExcelBlob` (SheetJS `aoa_to_sheet` → values-only .xlsx). Rows collected in `trTranslate` from each file's final content; **deduped by `unitId#mid`** because `trExtractSegments` matches the seg-mrk in `<source>`, `<seg-source>` AND `<target>` (keep first = source-side; the target-side match would read Hebrew as the source).
 - **Backend:** `POST /api/trados` (`transcriber/server.js:397`) — wraps repackaging; actual translation calls go to OpenAI from the browser.
 
 ### 🟣 5. memoQ Auto-Translator — `tool-memoq-translator`
