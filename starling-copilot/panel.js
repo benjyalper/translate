@@ -219,6 +219,32 @@ function splitParts(t) {
   const p = s.split(/\s*[•·]\s*/).map((x) => x.trim()).filter(Boolean);
   return p.length > 1 ? p : null;
 }
+// Starling's numbered wrapping tags survive in the harvested text as tokens
+// O-<id>/C-<id> (and may render as ①②③). Typing them back writes the literal
+// "O-1-0" text and DESTROYS the real tag chips — so any segment carrying them is
+// copy-by-hand, exactly like a DOM chip. (Not caught by the {x}/%s/<g> detector.)
+const TAG_TOK = /[OC]-\d+(?:-\d+)+|[①-⑳❶-➓⓪]/;              // NO /g — used with .test()
+function hasTags(s) { return TAG_TOK.test(String(s == null ? '' : s)); }
+// Split a target into the text runs that sit BETWEEN its tag tokens, so each run
+// can be copied and pasted between the matching ①…① without touching the tags.
+// Returns [{id, text}] (id = the innermost open-tag number seen before the run),
+// or null when there are no O-/C- tokens.
+function splitTagRuns(t) {
+  const s = String(t == null ? '' : t);
+  if (!/[OC]-\d+(?:-\d+)+/.test(s)) return null;
+  const re = /([OC])-(\d+)(?:-\d+)+/g;
+  const runs = [];
+  let last = 0, m, openId = null;
+  while ((m = re.exec(s))) {
+    const txt = stripTags(s.slice(last, m.index)).trim();
+    if (txt) runs.push({ id: openId, text: txt });
+    if (m[1] === 'O') openId = m[2];   // track the innermost open tag id
+    last = re.lastIndex;
+  }
+  const tail = stripTags(s.slice(last)).trim();
+  if (tail) runs.push({ id: openId, text: tail });
+  return runs.length ? runs : null;
+}
 async function panelCopy(text, btn) {
   let ok = false;
   try { await navigator.clipboard.writeText(text); ok = true; } catch (e) {
@@ -353,11 +379,13 @@ async function doGpt() {
               const s = slice[idx];
               const next = polish(s.src, o.text);   // fix spacing + mirror the source's full stop
               const wasEmpty = !String(s.tgt || '').trim();
-              // Copy-by-hand ("manual") is only for REAL chip objects — typing
-              // over those clobbers them. String placeholders ({0}, %s, <g id>…)
-              // are plain text, so they auto-write like any other segment (they
-              // still show a ⚠ placeholder badge so you can eyeball the token).
-              proposals.push({ seg: s.seg, src: s.src, old: s.tgt, next: next, tagged: s.tagged, chip: !!s.chip, manual: !!s.chip, filled: gm === 'translate' && wasEmpty, approved: !s.chip && next !== String(s.tgt) });
+              // Copy-by-hand ("manual") = a REAL chip object OR Starling's numbered
+              // wrapping tags (O-/C- tokens / ①②③) — typing either back destroys the
+              // tags. String placeholders ({0}, %s, <g id>…) are plain text GPT keeps
+              // byte-for-byte, so those auto-write (⚠ placeholder badge to eyeball them).
+              const tagWrapped = hasTags(next) || hasTags(s.src) || hasTags(s.tgt);
+              const manual = !!s.chip || tagWrapped;
+              proposals.push({ seg: s.seg, src: s.src, old: s.tgt, next: next, tagged: !!s.tagged || tagWrapped, chip: !!s.chip, tagWrapped: tagWrapped, manual: manual, filled: gm === 'translate' && wasEmpty, approved: !manual && next !== String(s.tgt) });
               done++;
               if (gm === 'translate' && wasEmpty) filled++;
             }
@@ -385,36 +413,46 @@ function renderReview() {
   box.innerHTML = list.map((p) => {
     const idx = state.proposals.indexOf(p);
     const changed = p.next !== p.old;
-    const parts = splitParts(p.next);
-    const sparts = splitParts(p.src);
-    // Copy block: per-part buttons for bullet lists; a single button for a
-    // one-piece manual (tagged) segment. Non-manual single segments auto-write.
+    const cleanFull = stripTags(p.next);                        // whole target, inner text only (no tokens)
+    const bulletParts = splitParts(p.next);
+    const runParts = bulletParts ? null : splitTagRuns(p.next); // text runs between O-/C- tags
+    // Per-part copy block: bullet items first, else each text run between two tags.
+    // Copy a part → in Starling paste it BETWEEN its matching ①…① (tags untouched).
     let copyBlock = '';
-    if (parts) {
+    if (bulletParts) {
+      const sparts = splitParts(p.src);
       copyBlock = `<div class="rc-parts" title="Paste each part between its matching ①…① tags in Starling — the tags stay untouched.">` +
-        parts.map((pt, i) => {
-          const clean = stripTags(pt);                         // inner text only — no O-/C- tokens
-          const id = tagId(pt) || String(i + 1);               // badge = the tag's own id when present
-          const sclean = (sparts && sparts.length === parts.length) ? stripTags(sparts[i]) : '';
+        bulletParts.map((pt, i) => {
+          const clean = stripTags(pt);                          // inner text only — no O-/C- tokens
+          const id = tagId(pt) || String(i + 1);                // badge = the tag's own id when present
+          const sclean = (sparts && sparts.length === bulletParts.length) ? stripTags(sparts[i]) : '';
           const sref = sclean ? `<div class="rc-psrc" dir="ltr">${hl(esc(sclean))}</div>` : '';
           return `<div class="rc-part"><span class="rc-pidx" title="tag ${esc(id)}">${esc(id)}</span><div class="rc-pbody">${sref}<div class="rc-ptxt" dir="rtl">${hl(esc(clean))}</div></div><button class="rc-copy" type="button" data-copy="${esc(clean)}">Copy</button></div>`;
         }).join('') + `</div>`;
-    } else if (p.manual) {
-      const clean = stripTags(p.next);
-      copyBlock = `<div class="rc-parts"><div class="rc-part"><span class="rc-pidx">✎</span><div class="rc-pbody"><div class="rc-ptxt" dir="rtl">${hl(esc(clean))}</div></div><button class="rc-copy" type="button" data-copy="${esc(clean)}">Copy</button></div></div>`;
+    } else if (runParts) {
+      copyBlock = `<div class="rc-parts" title="Each run of text between two tags — copy it and paste it BETWEEN the matching ①…① tags in Starling; the tags stay untouched.">` +
+        runParts.map((r, i) => {
+          const id = r.id || String(i + 1);
+          return `<div class="rc-part"><span class="rc-pidx" title="tag ${esc(id)}">${esc(id)}</span><div class="rc-pbody"><div class="rc-ptxt" dir="rtl">${hl(esc(r.text))}</div></div><button class="rc-copy" type="button" data-copy="${esc(r.text)}">Copy</button></div>`;
+        }).join('') + `</div>`;
     }
-    const control = p.manual
-      ? `<span class="rc-manual" title="Has a real inline-tag object (chip) — paste it by hand; the extension won't auto-write this one.">✋ paste by hand</span>`
-      : `<label><input type="checkbox" class="rc-cb" ${p.approved ? 'checked' : ''}/> apply</label>` +
-        `<button class="rc-write" type="button" data-i="${idx}" title="Write just this one segment into Starling now">✍ Write</button>`;
+    // Every card gets a whole-segment Copy + a ✍ Write button. Manual (tagged) rows
+    // also show the paste-by-hand hint; their Write confirms first (it would replace
+    // the tag chips — the per-part Copy buttons are the safe path for those).
+    const buttons =
+      `<button class="rc-copy" type="button" data-copy="${esc(cleanFull)}" title="Copy the whole target (inner text only, no tag tokens)">Copy</button>` +
+      `<button class="rc-write" type="button" data-i="${idx}" title="${p.manual ? 'Types the text in — WARNING: replaces the tag chips. For tagged segments use the per-part Copy buttons instead.' : 'Write just this one segment into Starling now'}">✍ Write</button>`;
+    const control = (p.manual
+      ? `<span class="rc-manual" title="Has tags/chips — paste it by hand between them; auto-write would break the tags.">✋ paste by hand</span>`
+      : `<label><input type="checkbox" class="rc-cb" ${p.approved ? 'checked' : ''}/> apply</label>`) + buttons;
     const newRow = p.manual
-      ? `<div class="rc-new ro" dir="rtl">${esc(p.next)}</div>`
+      ? `<div class="rc-new ro" dir="rtl">${hl(esc(p.next))}</div>`
       : `<div class="rc-new" dir="rtl" contenteditable="true" spellcheck="false">${esc(p.next)}</div>`;
     return `<div class="rc${p.tagged ? ' tagged' : ''}${p.manual ? ' manual' : ''}${changed ? '' : ' unchanged'}" data-i="${idx}">
       <div class="rc-top">
         <span class="rc-seg">#${esc(p.seg)}</span>
         ${p.filled ? '<span class="rc-warn" title="Target was empty — translated from the source and will be written in with the rest." style="background:#0a7a3f">＋ new</span>' : ''}
-        ${p.chip ? '<span class="rc-warn" title="Real inline-tag object (chip) in the cell — copy-by-hand.">⚠ chip</span>' : (p.tagged ? '<span class="rc-warn" title="Text placeholder ({0}, %s, &lt;g id&gt;…) — kept byte-for-byte; safe to write. Eyeball that the token survived.">⚠ placeholder</span>' : '')}
+        ${p.chip ? '<span class="rc-warn" title="Real inline-tag object (chip) in the cell — copy-by-hand.">⚠ chip</span>' : (p.tagWrapped ? '<span class="rc-warn" title="Numbered wrapping tags (①②③ / O-/C- tokens) — copy-by-hand; writing would type the literal tokens and break the tags. Use the per-part Copy buttons.">⚠ tag</span>' : (p.tagged ? '<span class="rc-warn" title="Text placeholder ({0}, %s, &lt;g id&gt;…) — kept byte-for-byte; safe to write. Eyeball that the token survived.">⚠ placeholder</span>' : ''))}
         ${amountMismatch(p.src, p.next) ? '<span class="rc-warn" title="Number/currency differs from the source — the amount &amp; currency symbol must stay verbatim (may be a stale TM value).">⚠ number</span>' : ''}
         ${hasSpacingIssue(p.old) || edgeMismatch(p.src, p.old) ? '<span class="rc-warn" title="Spacing adjusted — space before punctuation, double spaces, or leading/trailing space to match the source.">⚠ spacing</span>' : ''}
         ${brandIssue(p.src, p.next) ? `<span class="rc-warn" title="A product name from the source (${esc(brandIssue(p.src, p.next))}) isn't kept verbatim — check the brand spelling/spacing.">⚠ brand</span>` : ''}
@@ -442,7 +480,8 @@ function renderReview() {
 // row's current text (respects any inline edit). No confirm — it's one explicit click.
 async function doWriteOne(idx, btn) {
   const p = state.proposals[idx];
-  if (!p || p.manual) return;
+  if (!p) return;
+  if (p.manual && !confirm(`Segment #${p.seg} has tags/chips. Writing types the text in and will REPLACE the tag chips — they won't survive, so Starling may flag a missing-tag error.\n\nThe safe way is the per-part Copy buttons (paste each run between its ①…① tags). Write anyway?`)) return;
   const prev = btn.textContent;
   btn.disabled = true; btn.textContent = '…';
   try {

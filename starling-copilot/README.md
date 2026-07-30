@@ -69,6 +69,19 @@ Also: in **proofread** mode, segments with an **empty target** (non-empty source
 targets", default on). Filled rows get a "＋ new" badge and auto-approve. Empty sources that carry a
 real chip still route to copy-by-hand.
 
+**v22.1 — numbered wrapping tags (O-/C- tokens) + Copy & Write on every card.** The first cut only
+knew about DOM chips and the `{x}/%s/<g>` placeholder text; it wrongly classified segments carrying
+Starling's **numbered wrapping tags** — `O-<id>`/`C-<id>` tokens (rendered ①②③) like
+`O-1-0…C-1-0O-2-0…` — as safe "placeholder" and auto-wrote them, which types the literal tokens and
+**destroys the real tag chips**. Fix (panel-side, no content-script change):
+- `hasTags()` detects `O-/C-` tokens (and ①②③); such segments are now **copy-by-hand** (`tagWrapped`),
+  badged **⚠ tag**, excluded from auto-write/auto-approve.
+- `splitTagRuns()` splits the target into the **text runs between the tags** and renders a **Copy
+  button per run** (badge = the enclosing tag's id), so you paste each run between its ①…①.
+- **Every card now has a whole-segment Copy button AND a ✍ Write button** (previously copy-only or
+  write-only). The Write button works on tagged cards too but **confirms first** (it would replace
+  the chips — the per-part copies are the safe path).
+
 ### Edge-whitespace preservation (v20 · v21)
 A source string that ends in a trailing **space** (Starling's blue `·`) or **newline** (blue `↵`)
 must carry the same edge whitespace in the target, or Starling flags a Punctuation/Space QA error.
