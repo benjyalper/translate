@@ -13,7 +13,7 @@
   // tab is running an older version, re-injects this file via chrome.scripting so stale tabs
   // self-heal (no page reload needed). Re-injection tears down the previous version's message
   // listener first (below) so there's never a double-listener race.
-  const CS_VERSION = 24;
+  const CS_VERSION = 25;
   if (window.__scVer === CS_VERSION) return;                         // this exact version already live here
   if (typeof window.__scCleanup === 'function') { try { window.__scCleanup(); } catch (e) {} }  // remove an older/stale one
   window.__scVer = CS_VERSION;
@@ -127,6 +127,11 @@
       const row = rowFor(cell);
       const seg = segOf(row);
       if (seg == null) return;
+      // Plural (one/two/many/other) segment: its cell renders ALL sub-forms, so
+      // readCell would return a garbled blob ("oneHEone otherHEother…") and the
+      // regular proofread/write would dump that back into the single mounted box.
+      // Skip it here — plural segments are handled ONLY by the Plural card.
+      if (cell.querySelector('.plural-wrapper, .plural-no')) return;
       const tgt = readCell(cell);
       const srcCell = row && row.querySelector(CFG.sourceCell);
       let src = srcCell ? readCell(srcCell) : '';
