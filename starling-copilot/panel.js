@@ -223,12 +223,16 @@ function onXliffFile(input) {
   const r = new FileReader();
   r.onload = () => {
     try {
-      const segs = parseXliff(r.result).filter((s) => s.seg !== '' && (s.src || s.tgt));
-      if (!segs.length) { info('harvest-info', 'No <trans-unit> segments found in that file.', 'err'); return; }
+      const all = parseXliff(r.result).filter((s) => s.seg !== '' && (s.src || s.tgt));
+      if (!all.length) { info('harvest-info', 'No <trans-unit> segments found in that file.', 'err'); return; }
+      const sel = parseSegSel($('seg-filter').value);
+      const segs = sel ? all.filter((s) => sel(s.seg)) : all;
+      if (sel && !segs.length) { info('harvest-info', `No segments matched "${$('seg-filter').value.trim()}" (file has ${all.length}). Clear the box for all.`, 'err'); return; }
       state.segments = segs;
+      const filtered = sel && segs.length !== all.length;
       const tagged = segs.filter((s) => s.tagged).length;
-      info('harvest-info', `Loaded ${segs.length} segments from ${f.name}${tagged ? ` · ⚠ ${tagged} with tags` : ''}.`, 'good');
-      log(`xliff: ${segs.length} segments from ${f.name}`);
+      info('harvest-info', `Loaded ${segs.length}${filtered ? ` of ${all.length}` : ''} segments from ${f.name}${filtered ? ' (filtered)' : ''}${tagged ? ` · ⚠ ${tagged} with tags` : ''}.`, 'good');
+      log(`xliff: ${segs.length}/${all.length} segments from ${f.name}${sel ? ' (filtered)' : ''}`);
       $('gpt-card').hidden = false;
     } catch (e) { info('harvest-info', 'Could not parse XLIFF: ' + e.message, 'err'); }
   };
@@ -342,19 +346,41 @@ async function gptBatch(items, mode, key, model, plural, extraSys) {
 }
 
 // ---- actions ---------------------------------------------------------------
+// Parse the "Only segments" box → a matcher fn, or null for ALL. Accepts "8",
+// "10-20", "5,8,12", "3-6,10". Junk tokens are ignored; empty/unparseable → all.
+function parseSegSel(str) {
+  const s = String(str == null ? '' : str).trim();
+  if (!s || /^all$/i.test(s)) return null;
+  const nums = new Set(), ranges = [];
+  s.split(/[,\s]+/).filter(Boolean).forEach((tok) => {
+    let m;
+    if ((m = tok.match(/^(\d+)\s*[-–]\s*(\d+)$/))) ranges.push([Math.min(+m[1], +m[2]), Math.max(+m[1], +m[2])]);
+    else if (/^\d+$/.test(tok)) nums.add(+tok);
+  });
+  if (!nums.size && !ranges.length) return null;
+  return (seg) => { const n = parseInt(seg, 10); return !isNaN(n) && (nums.has(n) || ranges.some(([a, b]) => n >= a && n <= b)); };
+}
+
 async function doHarvest() {
   info('harvest-info', 'Harvesting… (scrolling the segment list)');
   $('harvest').disabled = true;
   try {
     const r = await send({ type: 'HARVEST' });
     if (!r || !r.ok) throw new Error(r && r.error || 'harvest failed');
-    state.segments = r.segments || [];
+    const all = r.segments || [];
+    const sel = parseSegSel($('seg-filter').value);
+    state.segments = sel ? all.filter((s) => sel(s.seg)) : all;
+    const filtered = sel && state.segments.length !== all.length;
+    if (sel && !state.segments.length && all.length) {
+      info('harvest-info', `No segments matched "${$('seg-filter').value.trim()}" (task has ${all.length}). Clear the box for all.`, 'err');
+      $('gpt-card').hidden = true; return;
+    }
     const tagged = state.segments.filter((s) => s.tagged).length;
     const chips = state.segments.filter((s) => s.chip).length;
-    info('harvest-info', `Harvested ${state.segments.length} segments${tagged ? ` · ⚠ ${tagged} tagged${chips ? ` (${chips} chip → copy-by-hand)` : ''}` : ''}.`, 'good');
-    log(`harvest: ${state.segments.length} segments, ${tagged} tagged, ${chips} chips`);
+    info('harvest-info', `Harvested ${state.segments.length}${filtered ? ` of ${all.length}` : ''} segments${filtered ? ' (filtered)' : ''}${tagged ? ` · ⚠ ${tagged} tagged${chips ? ` (${chips} chip → copy-by-hand)` : ''}` : ''}.`, 'good');
+    log(`harvest: ${state.segments.length}/${all.length} segments${sel ? ' (filtered)' : ''}, ${tagged} tagged, ${chips} chips`);
     $('gpt-card').hidden = state.segments.length === 0;
-    if (!state.segments.length) info('harvest-info', 'No segments found — run Diagnostics in Settings to recalibrate selectors.', 'err');
+    if (!all.length) info('harvest-info', 'No segments found — run Diagnostics in Settings to recalibrate selectors.', 'err');
   } catch (e) {
     info('harvest-info', e.message, 'err');
   } finally {
