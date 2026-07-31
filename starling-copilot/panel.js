@@ -2006,8 +2006,15 @@ async function plScan() {
   try {
     const r = await send({ type: 'HARVEST_PLURALS' });
     if (!r || !r.ok) throw new Error((r && r.error) || 'scan failed');
-    PL.segs = (r.plurals || []).map((s) => ({ rank: s.rank, key: s.key, srcForms: s.srcForms || {}, tgtForms: s.tgtForms || {}, forms: null, approved: false }));
-    info('pl-info', PL.segs.length ? `Found ${PL.segs.length} plural segment(s). Propose each, review, then write.` : 'No plural segments in this task.', PL.segs.length ? 'good' : '');
+    let all = (r.plurals || []).map((s) => ({ rank: s.rank, key: s.key, srcForms: s.srcForms || {}, tgtForms: s.tgtForms || {}, forms: null, approved: false }));
+    // Honor the "Only segments" box (rank = the displayed segment number).
+    const sel = parseSegSel($('seg-filter').value);
+    PL.segs = sel ? all.filter((s) => sel(s.rank)) : all;
+    if (sel && !PL.segs.length) {
+      info('pl-info', `No plural segments matched "${$('seg-filter').value.trim()}" (task has ${all.length} plural segment(s)). Clear the box for all.`, 'err');
+      plRender(); return;
+    }
+    info('pl-info', PL.segs.length ? `Found ${PL.segs.length} plural segment(s)${sel ? ' (filtered)' : ''}. Propose each, review, then write.` : 'No plural segments in this task.', PL.segs.length ? 'good' : '');
     plRender();
   } catch (e) { info('pl-info', e.message, 'err'); }
 }
