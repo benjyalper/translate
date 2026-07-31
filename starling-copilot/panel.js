@@ -172,9 +172,34 @@ function brandIssue(src, out) {
   for (const b of BRANDS) if (s.includes(b) && !o.includes(b)) return b;   // brand in source but not verbatim in output
   return '';
 }
-// Full output polish: fix internal spacing, restore brand spacing, mirror the source's full
-// stop, then mirror the source's leading/trailing whitespace.
-function polish(src, out) { return mirrorEdges(src, matchTrailingPeriod(src, fixAmounts(src, fixBrands(fixSpacing(out))))); }
+// Markdown emphasis (**bold**, and *italic*) in the source is formatting that must wrap
+// the SAME term in the target — the model/TM frequently drops the asterisks. Restore any
+// **X** whose inner text appears unwrapped in the target (X is usually a Latin brand kept
+// verbatim, so it's found literally). Never touches already-wrapped spans; a term that was
+// translated (not found verbatim) is left for the ⚠ bold badge to flag.
+function fixBold(src, out) {
+  const spans = String(src == null ? '' : src).match(/\*\*[^*]+?\*\*/g);
+  if (!spans) return String(out == null ? '' : out);
+  let s = String(out == null ? '' : out);
+  for (const span of spans) {
+    const inner = span.slice(2, -2).trim();
+    if (!inner || s.includes('**' + inner + '**')) continue;                  // already wrapped
+    const i = s.indexOf(inner);
+    if (i < 0) continue;                                                       // not present verbatim → leave for the badge
+    if (s[i - 1] === '*' || s[i + inner.length] === '*') continue;            // avoid double-wrapping
+    s = s.slice(0, i) + '**' + inner + '**' + s.slice(i + inner.length);
+  }
+  return s;
+}
+function boldIssue(src, out) {
+  const spans = String(src == null ? '' : src).match(/\*\*[^*]+?\*\*/g) || [];
+  const o = String(out == null ? '' : out);
+  for (const span of spans) { const inner = span.slice(2, -2).trim(); if (inner && !o.includes('**' + inner + '**')) return inner; }
+  return '';
+}
+// Full output polish: fix internal spacing, restore brand spacing, restore **bold** markers,
+// mirror the source's full stop, then mirror the source's leading/trailing whitespace.
+function polish(src, out) { return mirrorEdges(src, matchTrailingPeriod(src, fixBold(src, fixAmounts(src, fixBrands(fixSpacing(out)))))); }
 
 // ---- optional XLIFF source (alternative to DOM harvest) --------------------
 const XLIFF_TAGGED = /<\/?(?:g|x|bpt|ept|ph|it|mrk|sub)\b|[OC]-\d+(?:-\d+)+|[①-⑳❶-➓⓪]/;
@@ -280,6 +305,7 @@ function sysPrompt(mode, plural) {
     'STRICT PRESERVATION (applies to every item):\n' +
     '- Keep EVERY placeholder and tag byte-for-byte and in the same order and count: {x}, {{x}}, %s, %1$s, HTML like <b>…</b> / <p> / <ul> / <li> / <br>, XLIFF inline tags like <g id="1">…</g> / <x/>, and circled markers ①②③. Never translate, rename, reorder, add, or drop any of them.\n' +
     '- Keep "TikTok" and other brand / product / feature names in Latin script — do not translate or transliterate them, and keep them EXACTLY as in the source including internal spaces and capitalization: "TikTok Lite" stays "TikTok Lite" (never "TikTok-Lite" or "TikTokLite"). When adding a Hebrew prefix to a Latin name use a maqaf between the prefix and the name (ב-TikTok Lite / וב-TikTok Lite), never inside the name.\n' +
+    '- MARKDOWN EMPHASIS: keep every **bold** and *italic* marker from the source — same count, wrapping the SAME term (its Hebrew equivalent, or the Latin brand kept verbatim). If the source wraps a term in **…** the target MUST wrap the corresponding term in **…** too. Never drop the asterisks (a common failure) and never add new ones.\n' +
     '- PUNCTUATION: MIRROR the source\'s sentence-final full stop (.). If the English source ends with "." the Hebrew MUST end with "."; if the source does NOT end with "." the Hebrew must NOT end with ".". Never add or drop it independently. Keep "?", "!", "…" and all mid-sentence punctuation as the meaning requires.\n' +
     '- NUMBERS & CURRENCY (do-not-translate): copy every number, amount, date and currency symbol from the SOURCE verbatim — the currency symbol and figure stay EXACTLY as written ("MX$67,000" stays "MX$67,000", "₩4,500,000" stays "₩4,500,000"). Never translate, convert, localize or reformat them, and never keep a different (stale TM) figure from the old target.\n' +
     '- NO ADDITIONS: render ONLY what the source says. Never add names, facts, titles or clauses not present or implied in the source (e.g. do not insert a person\'s name like "דיוגו דאלוט" / "ראמי רביע" when the source has none). If the existing target contains such an addition, REMOVE it.\n' +
@@ -456,6 +482,7 @@ function renderReview() {
         ${amountMismatch(p.src, p.next) ? '<span class="rc-warn" title="Number/currency differs from the source — the amount &amp; currency symbol must stay verbatim (may be a stale TM value).">⚠ number</span>' : ''}
         ${hasSpacingIssue(p.old) || edgeMismatch(p.src, p.old) ? '<span class="rc-warn" title="Spacing adjusted — space before punctuation, double spaces, or leading/trailing space to match the source.">⚠ spacing</span>' : ''}
         ${brandIssue(p.src, p.next) ? `<span class="rc-warn" title="A product name from the source (${esc(brandIssue(p.src, p.next))}) isn't kept verbatim — check the brand spelling/spacing.">⚠ brand</span>` : ''}
+        ${boldIssue(p.src, p.next) ? `<span class="rc-warn" title="Markdown **bold** from the source (**${esc(boldIssue(p.src, p.next))}**) isn't wrapped in the target — the asterisks were dropped. Add ** around the matching term.">⚠ bold</span>` : ''}
         ${control}
       </div>
       ${p.src ? `<div class="rc-src" dir="ltr">${hl(esc(p.src))}</div>` : ''}

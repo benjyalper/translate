@@ -82,6 +82,15 @@ Starling's **numbered wrapping tags** — `O-<id>`/`C-<id>` tokens (rendered ①
   write-only). The Write button works on tagged cards too but **confirms first** (it would replace
   the chips — the per-part copies are the safe path).
 
+### Markdown **bold** preservation (v22.2)
+Source strings sometimes carry markdown emphasis — `Powered by **PIPO MY SDN BHD** and supervised
+by **Bank Negara Malaysia**` — and the model/TM drops the `**` in the target. `fixBold(src,out)` (in
+the `polish()` chain) restores any `**X**` whose inner text appears unwrapped in the target (X is
+usually a Latin brand kept verbatim, so it's matched literally); already-wrapped spans and
+translated-away terms are left alone. A **⚠ bold** review badge flags any source `**…**` still
+missing in the target. The GPT prompt also now has an explicit "keep every **bold**/*italic* marker,
+same count, same term" rule.
+
 ### Edge-whitespace preservation (v20 · v21)
 A source string that ends in a trailing **space** (Starling's blue `·`) or **newline** (blue `↵`)
 must carry the same edge whitespace in the target, or Starling flags a Punctuation/Space QA error.
