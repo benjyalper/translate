@@ -308,7 +308,7 @@ function sysPrompt(mode, plural) {
     '- MARKDOWN EMPHASIS: keep every **bold** and *italic* marker from the source — same count, wrapping the SAME term (its Hebrew equivalent, or the Latin brand kept verbatim). If the source wraps a term in **…** the target MUST wrap the corresponding term in **…** too. Never drop the asterisks (a common failure) and never add new ones.\n' +
     '- PUNCTUATION: MIRROR the source\'s sentence-final full stop (.). If the English source ends with "." the Hebrew MUST end with "."; if the source does NOT end with "." the Hebrew must NOT end with ".". Never add or drop it independently. Keep "?", "!", "…" and all mid-sentence punctuation as the meaning requires.\n' +
     '- NUMBERS & CURRENCY (do-not-translate): copy every number, amount, date and currency symbol from the SOURCE verbatim — the currency symbol and figure stay EXACTLY as written ("MX$67,000" stays "MX$67,000", "₩4,500,000" stays "₩4,500,000"). Never translate, convert, localize or reformat them, and never keep a different (stale TM) figure from the old target.\n' +
-    '- HEBREW NUMBER POSITION for count + time/duration nouns: Hebrew places the number differently for 1 vs many, so word order depends on whether the ENGLISH noun is singular or plural. Source "{n} <SINGULAR noun>" (hour/day/minute/week/month/year) → put the NOUN BEFORE the placeholder: "{s_num} hour" → "שעה {s_num}", "{s_num} day" → "יום {s_num}", "{s_num} min" → "דקה {s_num}" (mirrors שעה אחת / יום אחד). Source "{n} <PLURAL noun>" (hours/days/mins) → put the PLACEHOLDER FIRST: "{s_num} hours" → "{s_num} שעות", "{s_num} days" → "{s_num} ימים", "{s_num} mins" → "{s_num} דקות". Keep the {placeholder} byte-for-byte — only its POSITION changes. Compounds follow the same rule per noun, e.g. "{s_num} hour {s_num} min" → "שעה {s_num} ו-{s_num} דקות".\n' +
+    '- HEBREW NUMBER POSITION for counted nouns (time units, people, items — any "{n} <noun>"): Hebrew places the number differently for 1 vs many. SINGULAR / CLDR-"one" form (count is exactly 1) → put the NOUN BEFORE the placeholder: "{s_num} hour" → "שעה {s_num}", "{s_num} day" → "יום {s_num}", "{s_num} min" → "דקה {s_num}", "1 person" → "אדם {s_number}" (mirrors שעה אחת / יום אחד / אדם אחד). PLURAL form → put the PLACEHOLDER FIRST with the plural noun: "{s_num} hours" → "{s_num} שעות", "{s_num} days" → "{s_num} ימים", "{s_num} people" → "{s_number} אנשים". Keep the {placeholder} byte-for-byte — only its POSITION changes. Compounds follow the same rule per noun, e.g. "{s_num} hour {s_num} min" → "שעה {s_num} ו-{s_num} דקות".\n' +
     '- STATUS-LABEL VERBS: translate English past-participle status labels as Hebrew VERB phrases, not noun phrases — "Last updated" → "עודכן לאחרונה" (NOT the noun "עדכון אחרון" / "עידכון אחרון", which also wrongly implies a final update), "Last modified" → "נערך לאחרונה", "Last edited" → "נערך לאחרונה", "Last synced" → "סונכרן לאחרונה", "Last seen" → "נצפה לאחרונה", "Last saved" → "נשמר לאחרונה". Keep any {placeholder}, its colon and position (e.g. "Last updated: {s_updateDate}" → "עודכן לאחרונה: {s_updateDate}").\n' +
     '- NO ADDITIONS: render ONLY what the source says. Never add names, facts, titles or clauses not present or implied in the source (e.g. do not insert a person\'s name like "דיוגו דאלוט" / "ראמי רביע" when the source has none). If the existing target contains such an addition, REMOVE it.\n' +
     '- NO SPACE BEFORE PUNCTUATION: no space before "." "," ":" ";" "!" "?"; no double spaces; no leading/trailing spaces.\n' +
@@ -322,7 +322,7 @@ function sysPrompt(mode, plural) {
     '. Preserve the original meaning. If an item is already correct, return it unchanged.';
 }
 
-async function gptBatch(items, mode, key, model, plural) {
+async function gptBatch(items, mode, key, model, plural, extraSys) {
   const user = (mode === 'translate' ? 'Translate the "src" of each item. ' : 'Proofread the "tgt" of each item. ') +
     'Return JSON exactly as {"out":[{"i":<number>,"text":"<hebrew>"}]}, one entry per input item, same "i" numbers.\n' +
     JSON.stringify({ items });
@@ -332,7 +332,7 @@ async function gptBatch(items, mode, key, model, plural) {
     body: JSON.stringify({
       model, temperature: mode === 'translate' ? 0.2 : 0.1,
       response_format: { type: 'json_object' },
-      messages: [{ role: 'system', content: sysPrompt(mode, plural) }, { role: 'user', content: user }]
+      messages: [{ role: 'system', content: sysPrompt(mode, plural) + (extraSys ? '\n' + extraSys : '') }, { role: 'user', content: user }]
     })
   });
   const data = await r.json();
@@ -1994,7 +1994,10 @@ async function plPropose(idx) {
   const srcOther = s.srcForms.other || s.srcForms.one || '';
   info('pl-info', `Proposing #${s.rank}…`);
   try {
-    const out = await gptBatch([{ i: 1, src: srcOne, tgt: s.tgtForms.one || '' }, { i: 2, src: srcOther, tgt: s.tgtForms.other || '' }], 'translate', key, model, plural);
+    // Tell GPT which item is which CLDR form — the English is often IDENTICAL for one
+    // and other (e.g. "{s_number} people" for both), so it can't infer the number position.
+    const plSys = 'These are two Hebrew plural forms of the SAME string. Item i=1 is the CLDR "one" form (count exactly 1): use the SINGULAR noun and put the {placeholder} AFTER the noun ("שעה {s_num}", "אדם {s_number}"). Item i=2 is the plural form: use the plural noun with the {placeholder} BEFORE it ("{s_num} שעות", "{s_number} אנשים").';
+    const out = await gptBatch([{ i: 1, src: srcOne, tgt: s.tgtForms.one || '' }, { i: 2, src: srcOther, tgt: s.tgtForms.other || '' }], 'translate', key, model, plural, plSys);
     const byI = {}; (out || []).forEach((o) => { if (o && o.i != null && o.text != null) byI[o.i] = o.text; });
     const heOne = polish(srcOne, byI[1] != null ? byI[1] : (s.tgtForms.one || ''));
     const heOther = polish(srcOther, byI[2] != null ? byI[2] : (s.tgtForms.other || ''));
