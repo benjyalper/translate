@@ -7,6 +7,7 @@ const AdmZip   = require('adm-zip');
 const os       = require('os');
 const fs       = require('fs');
 const path     = require('path');
+const crypto   = require('crypto');
 const { spawn } = require('child_process');
 const {
   Document, Packer, Paragraph, Table, TableRow, TableCell,
@@ -33,6 +34,53 @@ app.use((req, res, next) => {
   res.header('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Admin-Token');
   if (req.method === 'OPTIONS') return res.sendStatus(200);
   next();
+});
+
+// ── Admin auth (server-side gate for admin.html) ──────────────
+// The admin page is delivered ONLY to a browser holding a valid signed session
+// cookie. Set ADMIN_PASSWORD on Railway (falls back to ADMIN_TOKEN). If neither
+// is set the page is served ungated (dev only) with a loud warning.
+const ADMIN_PASSWORD    = process.env.ADMIN_PASSWORD || process.env.ADMIN_TOKEN || '';
+const SESSION_SECRET    = process.env.ADMIN_SESSION_SECRET || ADMIN_PASSWORD || 'insecure-dev-secret';
+const SESSION_TTL_MS    = 30 * 24 * 60 * 60 * 1000;   // 30 days ("remember this device")
+const ROOT_DIR          = path.join(__dirname, '..');
+
+function signSession(expMs) {
+  const mac = crypto.createHmac('sha256', SESSION_SECRET).update(String(expMs)).digest('base64url');
+  return `${expMs}.${mac}`;
+}
+function verifySession(token) {
+  if (!token || token.indexOf('.') < 0) return false;
+  const [expStr, mac] = token.split('.');
+  const expMs = Number(expStr);
+  if (!expMs || expMs < Date.now()) return false;
+  const good = crypto.createHmac('sha256', SESSION_SECRET).update(String(expMs)).digest('base64url');
+  const a = Buffer.from(mac || '', 'utf8'), b = Buffer.from(good, 'utf8');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+function readCookie(req, name) {
+  const raw = req.headers.cookie || '';
+  for (const part of raw.split(';')) {
+    const i = part.indexOf('=');
+    if (i > -1 && part.slice(0, i).trim() === name) return decodeURIComponent(part.slice(i + 1).trim());
+  }
+  return null;
+}
+function isAdminAuthed(req) { return verifySession(readCookie(req, 'admin_session')); }
+function adminCookie(req, value, maxAgeSec) {
+  const secure = (req.headers['x-forwarded-proto'] === 'https' || req.secure) ? '; Secure' : '';
+  return `admin_session=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAgeSec}${secure}`;
+}
+
+// Gate MUST come before the static middleware, or express.static would serve
+// admin.html straight from disk with no check.
+app.get(['/admin.html', '/admin'], (req, res) => {
+  if (!ADMIN_PASSWORD) {
+    console.warn('[admin] ADMIN_PASSWORD/ADMIN_TOKEN not set — admin page is UNPROTECTED. Set ADMIN_PASSWORD on Railway.');
+    return res.sendFile(path.join(ROOT_DIR, 'admin.html'));
+  }
+  if (isAdminAuthed(req)) return res.sendFile(path.join(ROOT_DIR, 'admin.html'));
+  res.status(401).sendFile(path.join(ROOT_DIR, 'admin-login.html'));
 });
 
 // ── Static frontend ───────────────────────────────────────────
@@ -621,6 +669,23 @@ app.post('/api/scrape', async (req, res) => {
 // letter, then leaves the browser open for the user to review & submit.
 // Only runs locally (requires a display — skip on Railway).
 app.use(express.json({ limit: '1mb' }));
+
+// ── Admin login / logout ──────────────────────────────────────
+// POST the password → on match, set a signed HttpOnly session cookie. The
+// admin.html gate (above) checks that cookie. Password compared in constant time.
+app.post('/api/admin/login', (req, res) => {
+  if (!ADMIN_PASSWORD) return res.status(500).json({ error: 'Admin password not configured on the server (set ADMIN_PASSWORD).' });
+  const pw = (req.body && req.body.password) || '';
+  const hpw  = crypto.createHmac('sha256', SESSION_SECRET).update(String(pw)).digest();
+  const hexp = crypto.createHmac('sha256', SESSION_SECRET).update(String(ADMIN_PASSWORD)).digest();
+  if (!crypto.timingSafeEqual(hpw, hexp)) return res.status(401).json({ error: 'Incorrect password.' });
+  res.setHeader('Set-Cookie', adminCookie(req, signSession(Date.now() + SESSION_TTL_MS), Math.floor(SESSION_TTL_MS / 1000)));
+  res.json({ ok: true });
+});
+app.post('/api/admin/logout', (req, res) => {
+  res.setHeader('Set-Cookie', adminCookie(req, '', 0));
+  res.json({ ok: true });
+});
 
 const ASSIST_SCRIPT = path.join(__dirname, 'assistApply.js');
 const PROFILE_FILE  = path.join(__dirname, 'profile.json');

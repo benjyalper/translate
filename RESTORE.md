@@ -14,13 +14,24 @@ Starling Copilot extension) is versioned here. A full rebuild is a clone + insta
 | Starling Copilot | `starling-copilot/` | Chrome MV3 extension (Starling + YiCAT adapters). |
 | Support | `kb/`, `HebEngExamples/`, `JobScraper/` | Knowledge base / examples / scraper. |
 
-## The only secret
+## Secrets / env vars (Railway dashboard; local `transcriber/.env`)
 
-`OPENAI_API_KEY` — used by the transcriber and the GPT-backed admin tools.
-- **Live site:** stored in Railway's env-var dashboard (survives a laptop loss).
-- **Local dev:** recreate `transcriber/.env` from `transcriber/.env.example` and paste
-  the key. Keep the key itself in a password manager — it is **never** committed
-  (`.gitignore` blocks `.env` / `*.env`).
+Never committed — `.gitignore` blocks `.env` / `*.env`. Keep them in a password manager.
+
+- **`OPENAI_API_KEY`** — used by the transcriber and the GPT-backed admin tools.
+- **`ADMIN_PASSWORD`** — the admin-page login password. The server gates `admin.html`
+  and only serves it to a browser holding a valid signed session cookie (set after you
+  POST this password to `/api/admin/login`). **Must be set on Railway** — if unset the
+  server logs a warning and serves the admin page ungated. Falls back to `ADMIN_TOKEN`
+  if `ADMIN_PASSWORD` isn't set.
+- **`ADMIN_TOKEN`** — server-side token gating the `/api/firms` data endpoints (sent as
+  the `X-Admin-Token` header from the admin UI's sync feature). Keep it set on Railway.
+- **`ADMIN_SESSION_SECRET`** (optional) — HMAC key that signs the admin session cookie;
+  defaults to `ADMIN_PASSWORD`. Set a separate random value if you want to rotate the
+  login password without invalidating existing sessions (or vice-versa).
+
+Local dev: recreate `transcriber/.env` from `transcriber/.env.example` and paste the
+values. There is **no password in the page source** anymore — access is server-side.
 
 ## New-machine restore steps
 

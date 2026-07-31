@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Admin — Sign in</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+           font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+           background: radial-gradient(1200px 600px at 50% -10%, #1e1b4b, #0b1020); color: #e5e7eb; }
+    .box { width: 320px; max-width: 90vw; background: rgba(17,24,39,.85); border: 1px solid #334155;
+           border-radius: 14px; padding: 28px 24px; box-shadow: 0 20px 60px rgba(0,0,0,.45); text-align: center; }
+    .icon { font-size: 34px; }
+    h1 { font-size: 17px; margin: 8px 0 2px; }
+    p { font-size: 12px; color: #94a3b8; margin: 0 0 18px; }
+    input { width: 100%; padding: 11px 12px; border-radius: 9px; border: 1px solid #475569;
+            background: #0f172a; color: #e5e7eb; font-size: 14px; }
+    input:focus { outline: none; border-color: #6366f1; }
+    button { width: 100%; margin-top: 12px; padding: 11px; border: none; border-radius: 9px; cursor: pointer;
+             font-weight: 700; font-size: 14px; color: #fff; background: linear-gradient(135deg, #4f46e5, #7c3aed); }
+    button:disabled { opacity: .6; cursor: default; }
+    .err { min-height: 16px; margin-top: 10px; font-size: 12px; color: #f87171; }
+  </style>
+</head>
+<body>
+  <form class="box" id="f" autocomplete="off">
+    <div class="icon">🔒</div>
+    <h1>Admin sign in</h1>
+    <p>Enter your admin password to continue.</p>
+    <input type="password" id="pw" placeholder="Password" autocomplete="current-password" autofocus />
+    <button type="submit" id="go">Sign in</button>
+    <div class="err" id="err"></div>
+  </form>
+  <script>
+    const f = document.getElementById('f'), go = document.getElementById('go'), err = document.getElementById('err');
+    f.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      err.textContent = ''; go.disabled = true; go.textContent = 'Checking…';
+      try {
+        const r = await fetch('/api/admin/login', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: document.getElementById('pw').value })
+        });
+        if (r.ok) { location.href = '/admin.html'; return; }
+        const d = await r.json().catch(() => ({}));
+        err.textContent = d.error || 'Incorrect password.';
+      } catch (e2) { err.textContent = 'Network error — is the server running?'; }
+      go.disabled = false; go.textContent = 'Sign in';
+      document.getElementById('pw').select();
+    });
+  </script>
+</body>
+</html>

@@ -62,7 +62,7 @@
     .lock-error{color:#f87171;font-size:.82rem;margin-top:.8rem;height:1.2rem}
 
     /* ── ADMIN APP ── */
-    #admin-app{display:none}
+    #admin-app{display:block}
     .topbar{
       background:#0a0a0f;padding:1rem 3vw;
       display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:1rem;
@@ -471,17 +471,9 @@
 </head>
 <body>
 
-<!-- LOCK SCREEN -->
-<div id="lock-screen">
-  <div class="lock-box">
-    <div class="lock-icon">🔐</div>
-    <div class="lock-title">Admin Access</div>
-    <div class="lock-sub">Enter your password to view translation jobs</div>
-    <input type="password" id="pw-input" class="lock-input" placeholder="Password" onkeydown="if(event.key==='Enter')unlock()"/>
-    <button class="lock-btn" onclick="unlock()">Unlock</button>
-    <div class="lock-error" id="lock-error"></div>
-  </div>
-</div>
+<!-- Access is gated SERVER-SIDE (see transcriber/server.js): the server only
+     sends this page to an authenticated session, otherwise it serves the
+     login page. No password lives in this file. -->
 
 <!-- ADMIN APP -->
 <div id="admin-app">
@@ -2498,34 +2490,13 @@
 </div>
 
 <script>
-// ── PASSWORD ──────────────────────────────────────────────
-// Change this to your preferred password
-const ADMIN_PW = 'benjytrans';
-
-function unlock() {
-  const val = document.getElementById('pw-input').value;
-  if (val === ADMIN_PW) {
-    sessionStorage.setItem('admin_auth', '1');
-    document.getElementById('lock-screen').style.display = 'none';
-    document.getElementById('admin-app').style.display = 'block';
-    loadJobs();
-  } else {
-    document.getElementById('lock-error').textContent = 'Incorrect password. Try again.';
-    document.getElementById('pw-input').value = '';
-    document.getElementById('pw-input').focus();
-    setTimeout(() => document.getElementById('lock-error').textContent = '', 3000);
-  }
-}
-
-function logout() {
-  sessionStorage.removeItem('admin_auth');
-  location.reload();
-}
-
-// Auto-unlock if already authenticated this session
-if (sessionStorage.getItem('admin_auth') === '1') {
-  document.getElementById('lock-screen').style.display = 'none';
-  document.getElementById('admin-app').style.display = 'block';
+// ── AUTH ──────────────────────────────────────────────────
+// The page itself is gated on the server (a signed session cookie set by the
+// login page). There is NO password in this file anymore. "Log out" clears the
+// server session cookie and returns you to the login screen.
+async function logout() {
+  try { await fetch('/api/admin/logout', { method: 'POST' }); } catch (e) {}
+  location.href = '/admin.html';
 }
 
 // ── DATA ──────────────────────────────────────────────────
@@ -2841,10 +2812,8 @@ async function runScraper() {
   }
 }
 
-// Auto-load if unlocked on page load
-if (sessionStorage.getItem('admin_auth') === '1') {
-  loadJobs();
-}
+// The server only serves this page to an authenticated session, so load now.
+loadJobs();
 
 
 // ══════════════════════════════════════════════════════════════
