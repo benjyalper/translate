@@ -13,7 +13,7 @@
   // tab is running an older version, re-injects this file via chrome.scripting so stale tabs
   // self-heal (no page reload needed). Re-injection tears down the previous version's message
   // listener first (below) so there's never a double-listener race.
-  const CS_VERSION = 22;
+  const CS_VERSION = 23;
   if (window.__scVer === CS_VERSION) return;                         // this exact version already live here
   if (typeof window.__scCleanup === 'function') { try { window.__scCleanup(); } catch (e) {} }  // remove an older/stale one
   window.__scVer = CS_VERSION;
@@ -903,6 +903,82 @@
     } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
   }
 
+  // ---- PLURAL (ICU one/two/many/other) support -----------------------------
+  // A plural segment is ONE data-API row whose source/target `textExtra` =
+  // {zero,one,two,few,many,other}. The editor renders 4 TARGET `.plural-wrapper`
+  // blocks (label `.plural-no`); only the focused form has a live `.dual-editor-
+  // content` (LIGHT-EDITOR) — the rest are `.dual-editor-content-div` placeholders
+  // that mount on click. READS come from the API (all forms, no lazy problem);
+  // WRITES filter the segment into view, then mount+insertText each form (auto-saves).
+  const PLURAL_FORMS = ['zero', 'one', 'two', 'few', 'many', 'other'];
+  function nonEmptyForms(obj) {
+    const o = {};
+    if (obj) PLURAL_FORMS.forEach((f) => { const v = obj[f]; if (v != null && String(v).trim() !== '') o[f] = String(v); });
+    return o;
+  }
+  async function apiPlurals(id) {
+    try {
+      const tid = id || taskId();
+      const u = API + 'getSourceTextListWithTargetText?limit=10000&sortType=1&offset=0&editMode=dual&taskId=' + encodeURIComponent(tid);
+      const r = await fetch(u, { credentials: 'same-origin', headers: { accept: 'application/json' } });
+      if (!r.ok) return { ok: false, error: 'HTTP ' + r.status };
+      const j = await r.json();
+      if (!j || j.status_code !== 1000) return { ok: false, error: 'status_code ' + (j && j.status_code) };
+      const rows = (j.data && j.data.rows) || [];
+      const plurals = [];
+      for (const row of rows) {
+        const s = row.sourceText || {}, t = row.targetText || {};
+        const srcForms = nonEmptyForms(s.textExtra), tgtForms = nonEmptyForms(t.textExtra);
+        const isPlural = Object.keys(srcForms).length || Object.keys(tgtForms).length || /,\s*plural\s*,/.test(String(t.content || s.content || ''));
+        if (!isPlural) continue;
+        plurals.push({ rank: row.RankNo, key: s.key, srcForms, tgtForms });
+      }
+      return { ok: true, taskId: String(tid), count: plurals.length, plurals };
+    } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
+  }
+  function targetPluralWrappers() { return [...document.querySelectorAll('.plural-wrapper')].filter((w) => w.closest('[class*="target"]')); }
+  function pluralWrapperFor(form) {
+    return targetPluralWrappers().find((w) => { const l = w.querySelector('.plural-no'); return l && l.textContent.trim() === form; });
+  }
+  async function mountPluralForm(form) {
+    const w = pluralWrapperFor(form);
+    if (!w) return null;
+    let ce = w.querySelector('[contenteditable="true"]');
+    if (ce) return ce;
+    const ph = w.querySelector('.dual-editor-content-div') || w;
+    ['mousedown', 'mouseup', 'click'].forEach((t) => ph.dispatchEvent(new MouseEvent(t, { bubbles: true })));
+    for (let i = 0; i < 15; i++) { await sleep(80); ce = w.querySelector('[contenteditable="true"]'); if (ce) return ce; }
+    return null;
+  }
+  // Distinctive English chunk for the search box: strip {placeholders}/ICU braces.
+  function pluralSearchStr(edit) {
+    const s = (edit.srcForms && (edit.srcForms.other || edit.srcForms.one)) || (edit.tgtForms && (edit.tgtForms.other || edit.tgtForms.one)) || '';
+    return String(s).replace(/\{[^}]*\}/g, ' ').replace(/[{}]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+  }
+  function searchClear() {
+    const b = searchBox();
+    if (b) { nativeSet(b, ''); for (const t of ['keydown', 'keyup']) b.dispatchEvent(new KeyboardEvent(t, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true })); }
+  }
+  // edit = { rank, key, srcForms, forms:{one:he,two:he,...} }. Writes each provided form.
+  async function writePlural(edit) {
+    const results = {};
+    const q = pluralSearchStr(edit);
+    if (q) { await searchForKey(q); await sleep(250); }
+    if (!targetPluralWrappers().length) { searchClear(); return { ok: false, rank: edit.rank, error: 'plural segment not in view (search "' + q + '" found no plural rows)' }; }
+    for (const form of PLURAL_FORMS) {
+      const text = edit.forms && edit.forms[form];
+      if (text == null) continue;
+      const ce = await mountPluralForm(form);
+      if (!ce) { results[form] = { ok: false, reason: 'editor did not mount' }; continue; }
+      const ok = insertText(ce, String(text));
+      await sleep(280);
+      const got = ce.innerText;
+      results[form] = { ok: ok && norm(got) === norm(String(text)), got: got.slice(0, 60) };
+    }
+    searchClear();
+    return { ok: Object.keys(results).length > 0 && Object.values(results).every((r) => r.ok), rank: edit.rank, results };
+  }
+
   // ---- message router ------------------------------------------------------
   const __onMessage = (msg, sender, sendResponse) => {
     (async () => {
@@ -914,6 +990,8 @@
           case 'DIAG': sendResponse(await diag()); break;
           case 'HARVEST': sendResponse({ ok: true, segments: await harvest() }); break;
           case 'WRITE': sendResponse({ ok: true, results: await writeAll(msg.edits || []) }); break;
+          case 'HARVEST_PLURALS': sendResponse(await apiPlurals(msg.taskId)); break;
+          case 'WRITE_PLURAL': sendResponse(await writePlural(msg.edit || {})); break;
           case 'CONFIRM_ALL': sendResponse(await confirmAll(msg.ignoreNormal !== false)); break;
           case 'WB_CTX': sendResponse(wbCtx()); break;
           case 'WB_FIND': sendResponse(await wbFind(msg.key, msg.expectSource)); break;

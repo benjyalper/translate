@@ -940,7 +940,7 @@ function wbBuildIndex() {
 }
 const WB_FIELDS = [['key', 'Key'], ['valid', 'Valid (Y/N)'], ['final', 'Final Translation'], ['src', 'Source (EN)'], ['tgt', 'Current target'], ['lang', 'Language']];
 const STAR_KEY_URL = 'https://starling.bytedance.com/#/all-task?pageNum=1&pageSize=10&progress=all&translateTypeList=%5B%5D&sortType=1&order=0&sourceLocales=en&targetLocales=he-IL&textKeys=';
-const CS_EXPECT = 22;   // must match content.js CS_VERSION
+const CS_EXPECT = 23;   // must match content.js CS_VERSION
 
 // Direct call surface — invokes the page's window.__wb.* via chrome.scripting.executeScript.
 // This bypasses chrome.runtime messaging entirely, so a stale/duplicate content-script
@@ -1969,6 +1969,89 @@ function setMode(m) {
   store.set({ mode_ui: m });
 }
 
+// ---- PLURAL (one/two/many/other) sub-forms --------------------------------
+// Harvest is via the data API (all forms, no lazy-editor problem). Propose runs
+// each source form through GPT (number-position rule already in the prompt), then
+// he-IL fills one=distinct, two=many=other=the plural form. Write mounts+types each
+// sub-form via the content script (WRITE_PLURAL). See project memory for the DOM model.
+const PL = { segs: [] };
+async function plScan() {
+  info('pl-info', 'Scanning plural segments…');
+  try {
+    const r = await send({ type: 'HARVEST_PLURALS' });
+    if (!r || !r.ok) throw new Error((r && r.error) || 'scan failed');
+    PL.segs = (r.plurals || []).map((s) => ({ rank: s.rank, key: s.key, srcForms: s.srcForms || {}, tgtForms: s.tgtForms || {}, forms: null, approved: false }));
+    info('pl-info', PL.segs.length ? `Found ${PL.segs.length} plural segment(s). Propose each, review, then write.` : 'No plural segments in this task.', PL.segs.length ? 'good' : '');
+    plRender();
+  } catch (e) { info('pl-info', e.message, 'err'); }
+}
+async function plPropose(idx) {
+  const key = await store.get('key', '');
+  if (!key) { info('pl-info', 'Add your OpenAI key in Settings first.', 'err'); $('settings').open = true; return; }
+  const model = $('model').value, plural = $('plural').checked;
+  const s = PL.segs[idx];
+  const srcOne = s.srcForms.one || s.srcForms.other || '';
+  const srcOther = s.srcForms.other || s.srcForms.one || '';
+  info('pl-info', `Proposing #${s.rank}…`);
+  try {
+    const out = await gptBatch([{ i: 1, src: srcOne, tgt: s.tgtForms.one || '' }, { i: 2, src: srcOther, tgt: s.tgtForms.other || '' }], 'translate', key, model, plural);
+    const byI = {}; (out || []).forEach((o) => { if (o && o.i != null && o.text != null) byI[o.i] = o.text; });
+    const heOne = polish(srcOne, byI[1] != null ? byI[1] : (s.tgtForms.one || ''));
+    const heOther = polish(srcOther, byI[2] != null ? byI[2] : (s.tgtForms.other || ''));
+    // Fill the forms the target actually uses; default to he-IL's set. one=distinct, rest=plural.
+    const need = Object.keys(s.tgtForms).length ? Object.keys(s.tgtForms) : ['one', 'two', 'many', 'other'];
+    s.forms = {}; need.forEach((f) => { s.forms[f] = (f === 'one' || f === 'zero') ? heOne : heOther; });
+    s.approved = true;
+    plRender();
+    info('pl-info', `Proposed #${s.rank}. Review the forms, then write.`, 'good');
+  } catch (e) { info('pl-info', e.message, 'err'); }
+}
+function plRender() {
+  const box = $('pl-list');
+  box.innerHTML = PL.segs.map((s, idx) => {
+    const src = Object.entries(s.srcForms).map(([f, v]) => `<div class="rc-psrc" dir="ltr"><b>${esc(f)}</b> · ${hl(esc(v))}</div>`).join('');
+    const forms = s.forms
+      ? Object.entries(s.forms).map(([f, v]) => `<div class="rc-part"><span class="rc-pidx" title="${esc(f)}">${esc(f)}</span><div class="rc-pbody"><div class="rc-ptxt" dir="rtl" contenteditable="true" spellcheck="false" data-i="${idx}" data-form="${esc(f)}">${esc(v)}</div></div></div>`).join('')
+      : '<div class="info">Not proposed yet — click ✨ Propose.</div>';
+    return `<div class="rc${s.written ? ' unchanged' : ''}" data-i="${idx}">
+      <div class="rc-top"><span class="rc-seg">#${esc(s.rank)}</span>
+        <div class="rc-ctl">${s.forms ? `<label><input type="checkbox" class="pl-cb" data-i="${idx}" ${s.approved ? 'checked' : ''}/> write</label>` : ''}<button class="rc-write pl-propose" type="button" data-i="${idx}">✨ Propose</button></div>
+      </div>
+      <div class="rc-src">${src}</div>
+      <div class="rc-parts">${forms}</div>
+    </div>`;
+  }).join('') || '<div class="info">No plural segments.</div>';
+  box.querySelectorAll('.pl-propose').forEach((b) => b.addEventListener('click', () => plPropose(+b.dataset.i)));
+  box.querySelectorAll('.pl-cb').forEach((cb) => cb.addEventListener('change', (e) => { PL.segs[+e.target.dataset.i].approved = e.target.checked; plUpdateWrite(); }));
+  box.querySelectorAll('.rc-ptxt[contenteditable]').forEach((ed) => ed.addEventListener('input', (e) => { const s = PL.segs[+e.target.dataset.i]; if (s.forms) s.forms[e.target.dataset.form] = e.target.innerText; }));
+  plUpdateWrite();
+}
+function plUpdateWrite() {
+  const n = PL.segs.filter((s) => s.forms && s.approved && !s.written).length;
+  $('pl-write-wrap').hidden = n === 0;
+  $('pl-write').hidden = n === 0;
+  $('pl-write').textContent = `✍ Write ${n} approved plural segment(s)`;
+}
+async function plWrite() {
+  if (!$('pl-enable-write').checked) { info('pl-write-info', 'Tick "enable writing plural forms" first.', 'err'); return; }
+  const todo = PL.segs.filter((s) => s.forms && s.approved && !s.written);
+  if (!todo.length) { info('pl-write-info', 'Nothing approved to write.', 'err'); return; }
+  if (!confirm(`Write ${todo.length} plural segment(s) into Starling? Each fills its one/two/many/other boxes (it briefly filters the list per segment).`)) return;
+  $('pl-write').disabled = true;
+  let ok = 0, bad = 0;
+  for (const s of todo) {
+    info('pl-write-info', `Writing #${s.rank}…`);
+    try {
+      const r = await send({ type: 'WRITE_PLURAL', edit: { rank: s.rank, key: s.key, srcForms: s.srcForms, forms: s.forms } });
+      if (r && r.ok) { ok++; s.written = true; }
+      else { bad++; log(`plural #${s.rank} failed: ${(r && (r.error || JSON.stringify(r.results))) || '?'}`); }
+    } catch (e) { bad++; log(`plural #${s.rank} error: ${e.message}`); }
+  }
+  info('pl-write-info', `✅ Wrote ${ok}${bad ? ` · ${bad} failed (see log)` : ''}`, bad ? 'err' : 'good');
+  plRender();
+  $('pl-write').disabled = false;
+}
+
 // ---- wire up ---------------------------------------------------------------
 async function init() {
   $('key').value = await store.get('key', '');
@@ -2008,6 +2091,8 @@ async function init() {
   $('write').addEventListener('click', doWrite);
   $('confirm-all').addEventListener('click', doConfirmAll);
   $('qa-read').addEventListener('click', doQaSummary);
+  $('pl-scan').addEventListener('click', plScan);
+  $('pl-write').addEventListener('click', plWrite);
 
   $('only-changed').addEventListener('click', (e) => { onlyChanged = true; e.target.classList.add('active'); renderReview(); });
   $('sel-all').addEventListener('click', () => { state.proposals.forEach((p) => p.approved = true); $('only-changed').classList.remove('active'); onlyChanged = false; renderReview(); });
