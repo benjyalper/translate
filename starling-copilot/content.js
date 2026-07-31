@@ -13,7 +13,7 @@
   // tab is running an older version, re-injects this file via chrome.scripting so stale tabs
   // self-heal (no page reload needed). Re-injection tears down the previous version's message
   // listener first (below) so there's never a double-listener race.
-  const CS_VERSION = 23;
+  const CS_VERSION = 24;
   if (window.__scVer === CS_VERSION) return;                         // this exact version already live here
   if (typeof window.__scCleanup === 'function') { try { window.__scCleanup(); } catch (e) {} }  // remove an older/stale one
   window.__scVer = CS_VERSION;
@@ -940,15 +940,26 @@
   function pluralWrapperFor(form) {
     return targetPluralWrappers().find((w) => { const l = w.querySelector('.plural-no'); return l && l.textContent.trim() === form; });
   }
-  async function mountPluralForm(form) {
-    const w = pluralWrapperFor(form);
-    if (!w) return null;
-    let ce = w.querySelector('[contenteditable="true"]');
-    if (ce) return ce;
-    const ph = w.querySelector('.dual-editor-content-div') || w;
-    ['mousedown', 'mouseup', 'click'].forEach((t) => ph.dispatchEvent(new MouseEvent(t, { bubbles: true })));
-    for (let i = 0; i < 15; i++) { await sleep(80); ce = w.querySelector('[contenteditable="true"]'); if (ce) return ce; }
-    return null;
+  // Write ONE plural form: mount its (lazy) editor, replace all, settle, verify;
+  // retry once on mismatch. Generous waits — a too-fast write races the filter/mount
+  // re-render and silently leaves the box unchanged (the v23 bug).
+  async function writeOnePluralForm(form, text) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const w = pluralWrapperFor(form);
+      if (!w) { await sleep(350); continue; }
+      let ce = w.querySelector('[contenteditable="true"]');
+      if (!ce) {
+        const ph = w.querySelector('.dual-editor-content-div') || w;
+        ['mousedown', 'mouseup', 'click'].forEach((t) => ph.dispatchEvent(new MouseEvent(t, { bubbles: true })));
+        for (let i = 0; i < 25 && !ce; i++) { await sleep(100); ce = w.querySelector('[contenteditable="true"]'); }
+      }
+      if (!ce) { await sleep(300); continue; }
+      insertText(ce, String(text));
+      await sleep(500);
+      if (norm(ce.innerText) === norm(String(text))) return { ok: true, got: ce.innerText.slice(0, 60) };
+    }
+    const w2 = pluralWrapperFor(form), ce2 = w2 && w2.querySelector('[contenteditable="true"]');
+    return { ok: false, reason: 'mount/verify failed', got: ce2 ? ce2.innerText.slice(0, 60) : '' };
   }
   // Distinctive English chunk for the search box: strip {placeholders}/ICU braces.
   function pluralSearchStr(edit) {
@@ -963,17 +974,16 @@
   async function writePlural(edit) {
     const results = {};
     const q = pluralSearchStr(edit);
-    if (q) { await searchForKey(q); await sleep(250); }
-    if (!targetPluralWrappers().length) { searchClear(); return { ok: false, rank: edit.rank, error: 'plural segment not in view (search "' + q + '" found no plural rows)' }; }
+    if (q) await searchForKey(q);
+    // Wait for the filtered segment's plural wrappers to appear AND stop changing —
+    // writing before the list settles is what corrupted the first form(s) in v23.
+    let n = -1;
+    for (let i = 0; i < 30; i++) { await sleep(120); const c = targetPluralWrappers().length; if (c > 0 && c === n) break; n = c; }
+    if (!targetPluralWrappers().length) { searchClear(); return { ok: false, rank: edit.rank, error: 'plural segment not in view (search "' + q + '")' }; }
     for (const form of PLURAL_FORMS) {
       const text = edit.forms && edit.forms[form];
       if (text == null) continue;
-      const ce = await mountPluralForm(form);
-      if (!ce) { results[form] = { ok: false, reason: 'editor did not mount' }; continue; }
-      const ok = insertText(ce, String(text));
-      await sleep(280);
-      const got = ce.innerText;
-      results[form] = { ok: ok && norm(got) === norm(String(text)), got: got.slice(0, 60) };
+      results[form] = await writeOnePluralForm(form, String(text));
     }
     searchClear();
     return { ok: Object.keys(results).length > 0 && Object.values(results).every((r) => r.ok), rank: edit.rank, results };
