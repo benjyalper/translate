@@ -484,7 +484,7 @@ function renderReview() {
         ${hasSpacingIssue(p.old) || edgeMismatch(p.src, p.old) ? '<span class="rc-warn" title="Spacing adjusted — space before punctuation, double spaces, or leading/trailing space to match the source.">⚠ spacing</span>' : ''}
         ${brandIssue(p.src, p.next) ? `<span class="rc-warn" title="A product name from the source (${esc(brandIssue(p.src, p.next))}) isn't kept verbatim — check the brand spelling/spacing.">⚠ brand</span>` : ''}
         ${boldIssue(p.src, p.next) ? `<span class="rc-warn" title="Markdown **bold** from the source (**${esc(boldIssue(p.src, p.next))}**) isn't wrapped in the target — the asterisks were dropped. Add ** around the matching term.">⚠ bold</span>` : ''}
-        ${control}
+        <div class="rc-ctl">${control}</div>
       </div>
       ${p.src ? `<div class="rc-src" dir="ltr">${hl(esc(p.src))}</div>` : ''}
       ${changed && String(p.old).trim() ? `<div class="rc-old" dir="rtl">${hl(esc(p.old))}</div>` : ''}

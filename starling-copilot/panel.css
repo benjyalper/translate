@@ -121,10 +121,13 @@ textarea { font-family: ui-monospace, Menlo, Consolas, monospace; resize: vertic
 .rc { border: 1px solid var(--border); border-radius: 9px; padding: 8px 9px; background: var(--card2); }
 .rc.tagged { box-shadow: inset 3px 0 0 var(--warn); }
 .rc.unchanged { opacity: .5; }
-.rc-top { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; }
+.rc-top { display: flex; align-items: center; gap: 7px; row-gap: 5px; margin-bottom: 5px; flex-wrap: wrap; }
 .rc-seg { font-family: ui-monospace, Menlo, monospace; font-size: 11px; font-weight: 700; color: var(--dim); }
-.rc-warn { font-size: 10px; font-weight: 700; color: #fbbf24; background: rgba(217,119,6,.18); padding: 1px 5px; border-radius: 5px; }
-.rc-top label { margin-left: auto; display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--dim); cursor: pointer; }
+.rc-warn { font-size: 10px; font-weight: 700; color: #fbbf24; background: rgba(217,119,6,.18); padding: 1px 5px; border-radius: 5px; white-space: nowrap; }
+/* Controls (apply/hint + Copy + Write) as one right-aligned group that wraps to its
+   own line instead of leaking past the card when there are many ⚠ badges. */
+.rc-ctl { margin-left: auto; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; justify-content: flex-end; }
+.rc-top label { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--dim); cursor: pointer; }
 .rc-src { font-size: 11px; color: var(--dim2); direction: ltr; text-align: left; margin-bottom: 3px; overflow-wrap: anywhere; }
 .rc-old { font-size: 12px; color: #b4879b; direction: rtl; text-align: right; text-decoration: line-through; text-decoration-color: #6b3450; overflow-wrap: anywhere; }
 .rc-new { font-size: 13.5px; color: var(--ink); direction: rtl; text-align: right; overflow-wrap: anywhere; }
@@ -132,7 +135,7 @@ textarea { font-family: ui-monospace, Menlo, Consolas, monospace; resize: vertic
 .rc-new[contenteditable]:focus { background: rgba(79,70,229,.14); }
 .rc-new.ro { color: var(--dim); }
 .rc.manual { box-shadow: inset 3px 0 0 var(--warn); }
-.rc-manual { margin-left: auto; font-size: 10px; font-weight: 700; color: #fbbf24; background: rgba(217,119,6,.18); padding: 2px 7px; border-radius: 6px; white-space: nowrap; }
+.rc-manual { font-size: 10px; font-weight: 700; color: #fbbf24; background: rgba(217,119,6,.18); padding: 2px 7px; border-radius: 6px; white-space: nowrap; }
 .tok { font-family: ui-monospace, Menlo, monospace; font-size: .84em; padding: .5px 4px; border-radius: 4px; unicode-bidi: isolate; }
 .tok-var { color: #d8b4fe; background: rgba(124,58,237,.2); }
 .tok-tag { color: #93c5fd; background: rgba(37,99,235,.2); }
@@ -148,7 +151,7 @@ textarea { font-family: ui-monospace, Menlo, Consolas, monospace; resize: vertic
 .rc-copy { border: none; border-radius: 6px; padding: 4px 9px; cursor: pointer; font: inherit; font-size: 11px; font-weight: 700; color: #fff; background: linear-gradient(135deg, var(--acc), var(--acc2)); }
 .rc-copy:hover { filter: brightness(1.08); }
 .rc-copy.copied { background: var(--good); }
-.rc-write { margin-left: 6px; border: 1px solid var(--acc); border-radius: 6px; padding: 3px 9px; cursor: pointer; font: inherit; font-size: 11px; font-weight: 700; color: var(--acc); background: transparent; white-space: nowrap; }
+.rc-write { border: 1px solid var(--acc); border-radius: 6px; padding: 3px 9px; cursor: pointer; font: inherit; font-size: 11px; font-weight: 700; color: var(--acc); background: transparent; white-space: nowrap; }
 .rc-write:hover { background: rgba(99,102,241,.14); }
 .rc-write:disabled { opacity: .7; cursor: default; }
 
