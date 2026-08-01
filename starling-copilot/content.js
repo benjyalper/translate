@@ -13,7 +13,7 @@
   // tab is running an older version, re-injects this file via chrome.scripting so stale tabs
   // self-heal (no page reload needed). Re-injection tears down the previous version's message
   // listener first (below) so there's never a double-listener race.
-  const CS_VERSION = 25;
+  const CS_VERSION = 26;
   if (window.__scVer === CS_VERSION) return;                         // this exact version already live here
   if (typeof window.__scCleanup === 'function') { try { window.__scCleanup(); } catch (e) {} }  // remove an older/stale one
   window.__scVer = CS_VERSION;
@@ -261,14 +261,43 @@
     if (cell) return cell;
     return await scanFrom(seg, scroll, 0);             // last resort: full pass from the top
   }
+  // Press Enter the way a human does. This LIGHT-EDITOR is a controlled React editor:
+  // a trailing "\n" fed to execCommand('insertText') becomes a <div><br></div> that the
+  // editor trims on save, so the source's blue "↵" never persisted. An Enter KEYDOWN makes
+  // the editor insert a real newline token (<span data-other-key="\n">) that DOES save.
+  function pressEnter(editor) {
+    const opt = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
+    editor.dispatchEvent(new KeyboardEvent('keydown', opt));
+    try { editor.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertLineBreak', bubbles: true, cancelable: true })); } catch (e) {}
+    editor.dispatchEvent(new KeyboardEvent('keypress', opt));
+    try { editor.dispatchEvent(new InputEvent('input', { inputType: 'insertLineBreak', bubbles: true })); } catch (e) {}
+    editor.dispatchEvent(new KeyboardEvent('keyup', opt));
+  }
+  function caretToEnd(editor) {
+    const sel = window.getSelection(), r = document.createRange();
+    r.selectNodeContents(editor); r.collapse(false);
+    sel.removeAllRanges(); sel.addRange(r);
+  }
   function insertText(editor, text) {
     editor.focus();
     const sel = window.getSelection();
     const r = document.createRange();
     r.selectNodeContents(editor);
     sel.removeAllRanges(); sel.addRange(r);
+    // Newlines can't ride along in execCommand('insertText') — the browser turns each one
+    // into a <div><br></div> block that this editor drops (losing the source's ↵). So split
+    // on "\n" and press Enter between parts, which the editor stores as a real newline token.
+    // No-newline text (the vast majority) takes the identical single-insertText path as before.
+    const parts = String(text == null ? '' : text).split('\n');
     // execCommand insertText auto-converts typed {tokens}/<tags> into protected chips
-    const ok = document.execCommand('insertText', false, text);
+    if (parts[0]) document.execCommand('insertText', false, parts[0]);
+    else document.execCommand('delete', false);   // clear the (fully-selected) editor for a leading newline
+    let ok = true;
+    for (let i = 1; i < parts.length; i++) {
+      caretToEnd(editor);
+      pressEnter(editor);
+      if (parts[i]) { caretToEnd(editor); ok = document.execCommand('insertText', false, parts[i]) && ok; }
+    }
     return ok;
   }
   // The target must carry the SAME leading/trailing whitespace as the source — a trailing
