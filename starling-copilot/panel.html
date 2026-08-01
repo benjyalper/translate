@@ -108,6 +108,12 @@
       <button id="write" class="btn">↩ Write approved to Starling</button>
       <div id="write-info" class="info"></div>
       <div class="prog"><i id="write-bar"></i></div>
+    </section>
+
+    <!-- CONFIRM ALL · standalone, no GPT/harvest needed -->
+    <section class="card" id="confirm-card">
+      <div class="step"><span class="num">✓</span> Confirm all</div>
+      <div class="hint">Confirms every unconfirmed segment straight through Starling's API — works on its own, no Harvest or GPT needed. Ignores normal QA errors (only Critical blocks). Never submits the task.</div>
       <button id="confirm-all" class="btn ghost">✔ Confirm all (ignore normal QA)</button>
       <div id="confirm-info" class="info"></div>
       <div id="post-summary" class="summary" hidden></div>
