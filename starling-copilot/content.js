@@ -13,7 +13,7 @@
   // tab is running an older version, re-injects this file via chrome.scripting so stale tabs
   // self-heal (no page reload needed). Re-injection tears down the previous version's message
   // listener first (below) so there's never a double-listener race.
-  const CS_VERSION = 28;
+  const CS_VERSION = 29;
   if (window.__scVer === CS_VERSION) return;                         // this exact version already live here
   if (typeof window.__scCleanup === 'function') { try { window.__scCleanup(); } catch (e) {} }  // remove an older/stale one
   window.__scVer = CS_VERSION;
@@ -1033,11 +1033,18 @@
         || mbtns.find((b) => /^\s*(submit task|submit|提交|确定|确认)\s*$/i.test((b.textContent || '').trim()))
         || mbtns[0];
       if (!confirm) return { ok: false, error: 'Could not find the confirm button in the submit popup.', modalText: (modal.innerText || '').replace(/\s+/g, ' ').slice(0, 120) };
-      confirm.click(); await sleep(900);
-      const modalGone = ![...document.querySelectorAll('.semi-modal-content,.semi-modal,[role="dialog"]')].some((m) => m.offsetParent !== null);
-      const now = (submitTrigger() || {}).textContent ? (submitTrigger().textContent || '').trim() : '';
-      const submitted = modalGone && /submitted|已提交/i.test(now);
-      return { ok: modalGone, submitted, before, buttonNow: now };
+      confirm.click();
+      // Verify by the RESULT, not the modal: a brief success dialog can keep a modal on screen
+      // (that was the false "Submit failed"). The real signal is the trigger flipping
+      // "Submit task" → "Task submitted". Poll up to ~6s; it usually lands in <1s.
+      let now = before, submitted = false;
+      for (let i = 0; i < 20; i++) {
+        await sleep(300);
+        const t = submitTrigger();
+        now = t ? (t.textContent || '').trim() : now;
+        if (/submitted|已提交/i.test(now)) { submitted = true; break; }
+      }
+      return { ok: submitted, submitted, before, buttonNow: now };
     } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
   }
 

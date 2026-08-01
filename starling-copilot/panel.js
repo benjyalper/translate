@@ -638,7 +638,9 @@ async function doSubmit() {
     } else if (r && r.disabled) {
       info('submit-info', '⚠ Nothing to submit — no pending changes (the task is already submitted). Edit/confirm a segment first.', 'err');
     } else {
-      info('submit-info', (r && r.error) || 'Submit failed.', 'err');
+      // Couldn't positively confirm — the submit may still have gone through (Starling shows a
+      // brief success dialog and the button flips to "Task submitted"). Say so instead of "failed".
+      info('submit-info', (r && r.error) || `Couldn't confirm the submit here${r && r.buttonNow ? ` (button now: "${r.buttonNow}")` : ''} — check Starling; if it shows "Task submitted", it went through.`, 'err');
     }
   } catch (e) { info('submit-info', e.message, 'err'); }
 }
@@ -1013,7 +1015,7 @@ function wbBuildIndex() {
 }
 const WB_FIELDS = [['key', 'Key'], ['valid', 'Valid (Y/N)'], ['final', 'Final Translation'], ['src', 'Source (EN)'], ['tgt', 'Current target'], ['lang', 'Language']];
 const STAR_KEY_URL = 'https://starling.bytedance.com/#/all-task?pageNum=1&pageSize=10&progress=all&translateTypeList=%5B%5D&sortType=1&order=0&sourceLocales=en&targetLocales=he-IL&textKeys=';
-const CS_EXPECT = 28;   // must match content.js CS_VERSION
+const CS_EXPECT = 29;   // must match content.js CS_VERSION
 
 // Direct call surface — invokes the page's window.__wb.* via chrome.scripting.executeScript.
 // This bypasses chrome.runtime messaging entirely, so a stale/duplicate content-script
