@@ -289,7 +289,16 @@ async function refreshConn() {
   try {
     const r = await send({ type: 'PING' });
     if (r && r.ok) {
-      c.textContent = `task ${r.taskId} · ${r.cells} cells`;
+      // Surface the LIVE content-script version. A stale tab (extension reloaded but the
+      // page not Ctrl+R'd) keeps running old code and silently drops edits like the ↵ —
+      // so make the mismatch loud right here instead of letting writes misbehave.
+      if (r.ver !== CS_EXPECT) {
+        c.textContent = `⚠ page v${r.ver == null ? '—' : r.ver} · need v${CS_EXPECT} — Ctrl+R this page`;
+        c.className = 'conn conn-bad';
+        info('harvest-info', `This Starling tab is running content-script v${r.ver == null ? '—' : r.ver}, but the panel is v${CS_EXPECT}. Reload the extension, then Ctrl+R (F5) this page so the fix takes effect.`, 'err');
+        return false;
+      }
+      c.textContent = `task ${r.taskId} · ${r.cells} cells · v${r.ver}`;
       c.className = 'conn conn-ok';
       return true;
     }
