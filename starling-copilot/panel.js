@@ -595,13 +595,29 @@ async function doWrite() {
   }
 }
 
+// Confirm-all via Starling's API (confirmTextTaskTargetV2 per pending segment) instead of
+// clicking the label-less, zoom-fragile toolbar ✓ dropdown. Previews the count first, then
+// confirms every not-yet-confirmed segment and re-reads to verify. Never submits the task.
 async function doConfirmAll() {
-  if (!confirm('Confirm ALL segments (ticking "Ignore normal QA errors")? Only Critical errors will block. This does not submit the task.')) return;
-  info('confirm-info', 'Confirming all…');
+  info('confirm-info', 'Checking how many segments still need confirming…');
+  let pre;
+  try { pre = await send({ type: 'API_CONFIRM_ALL', opts: { dryRun: true } }); }
+  catch (e) { info('confirm-info', e.message, 'err'); return; }
+  if (!pre || !pre.ok) { info('confirm-info', (pre && pre.error) || 'Could not read the task.', 'err'); return; }
+  if (!pre.count) { info('confirm-info', '✅ Nothing to confirm — all segments are already confirmed.', 'good'); return; }
+  if (!confirm(`Confirm ${pre.count} segment(s) via Starling's API (ignoring normal QA errors — only Critical errors block)? This does NOT submit the task.`)) return;
+  info('confirm-info', `Confirming ${pre.count} segment(s)…`);
   try {
-    const r = await send({ type: 'CONFIRM_ALL', ignoreNormal: true });
-    if (r && r.ok) { info('confirm-info', '✅ Confirm-all triggered.', 'good'); await showPostSummary(); }
-    else info('confirm-info', (r && r.error) || 'Confirm-all failed.', 'err');
+    const r = await send({ type: 'API_CONFIRM_ALL', opts: { ignoreQa: true } });
+    if (r && r.ok) {
+      info('confirm-info', `✅ Confirmed ${r.confirmed}/${r.attempted}. All segments confirmed.`, 'good');
+      await showPostSummary();
+    } else {
+      const f = (r && r.failed) || [];
+      const stuck = (r && r.remaining && r.remaining.length) ? ` · still pending: ${r.remaining.slice(0, 10).join(', ')}` : '';
+      const why = f.length ? ` · failures: ${f.slice(0, 5).map((x) => '#' + x.rank + ' ' + x.msg).join('; ')}` : (r && r.error ? ' · ' + r.error : '');
+      info('confirm-info', `Confirmed ${(r && r.confirmed) || 0}/${(r && r.attempted) || 0}${stuck}${why}`, 'err');
+    }
   } catch (e) { info('confirm-info', e.message, 'err'); }
 }
 
@@ -975,7 +991,7 @@ function wbBuildIndex() {
 }
 const WB_FIELDS = [['key', 'Key'], ['valid', 'Valid (Y/N)'], ['final', 'Final Translation'], ['src', 'Source (EN)'], ['tgt', 'Current target'], ['lang', 'Language']];
 const STAR_KEY_URL = 'https://starling.bytedance.com/#/all-task?pageNum=1&pageSize=10&progress=all&translateTypeList=%5B%5D&sortType=1&order=0&sourceLocales=en&targetLocales=he-IL&textKeys=';
-const CS_EXPECT = 26;   // must match content.js CS_VERSION
+const CS_EXPECT = 27;   // must match content.js CS_VERSION
 
 // Direct call surface — invokes the page's window.__wb.* via chrome.scripting.executeScript.
 // This bypasses chrome.runtime messaging entirely, so a stale/duplicate content-script

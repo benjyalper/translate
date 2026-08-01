@@ -13,7 +13,7 @@
   // tab is running an older version, re-injects this file via chrome.scripting so stale tabs
   // self-heal (no page reload needed). Re-injection tears down the previous version's message
   // listener first (below) so there's never a double-listener race.
-  const CS_VERSION = 26;
+  const CS_VERSION = 27;
   if (window.__scVer === CS_VERSION) return;                         // this exact version already live here
   if (typeof window.__scCleanup === 'function') { try { window.__scCleanup(); } catch (e) {} }  // remove an older/stale one
   window.__scVer = CS_VERSION;
@@ -937,6 +937,66 @@
     } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
   }
 
+  // ---- CONFIRM ALL (API) ---------------------------------------------------
+  // The toolbar ✓ "confirm proofreading for all" is a Semi split-button with no text
+  // label and a portal dropdown — brittle to click and it breaks under page zoom. But
+  // its per-segment effect is a plain POST to confirmTextTaskTargetV2 (proven: that's
+  // exactly what a single ✓ click fires). So confirm-all = iterate that endpoint over
+  // every not-yet-confirmed segment. Zero DOM, zoom-proof, and it re-reads to verify.
+  // targetText.status === 3 means proofread-confirmed; 1 means edited/unconfirmed.
+  async function confirmOne(row, ignoreQa) {
+    const body = {
+      SubTaskID: String(row.subtaskId), TextKey: row.key, sourceTextId: row.sourceTextId,
+      FlowSequence: row.flowSequence == null ? 2 : row.flowSequence,
+      IgnoreQa: !!ignoreQa, TMScore: '0', PreTranslationType: 0,
+      targetText: { Content: row.target, OrderSourceID: row.sourceTextId, TextKey: row.key }
+    };
+    const r = await fetch(API + 'confirmTextTaskTargetV2', {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify(body)
+    });
+    let j = null; try { j = await r.json(); } catch (e) {}
+    return { ok: r.ok && (!j || j.status_code === 1000), http: r.status, status_code: j && j.status_code, msg: (j && (j.status_message || j.message)) || '' };
+  }
+  function pendingConfirmRows(rows, tid) {
+    const out = [];
+    for (const row of rows) {
+      const s = row.sourceText || {}, t = row.targetText || {};
+      const target = t.content == null ? '' : String(t.content);
+      // needs confirm = has a real target, not already confirmed (status 3), still editable by us
+      if (t.status !== 3 && target.trim() && t.isModifiableByUser !== false) {
+        out.push({ rank: row.RankNo, subtaskId: tid, key: s.key, sourceTextId: s.id, target, flowSequence: t.flowSequence });
+      }
+    }
+    return out;
+  }
+  async function apiConfirmAll(p) {
+    p = p || {};
+    const tid = p.taskId || taskId();
+    const ignoreQa = p.ignoreQa !== false;   // default true — mirrors "ignore normal QA errors"
+    try {
+      const u = API + 'getSourceTextListWithTargetText?limit=10000&sortType=1&offset=0&editMode=dual&taskId=' + encodeURIComponent(tid);
+      const j = await fetch(u, { credentials: 'same-origin', headers: { accept: 'application/json' } }).then((r) => r.json());
+      if (!j || j.status_code !== 1000) return { ok: false, error: 'read failed (status_code ' + (j && j.status_code) + ')' };
+      const pending = pendingConfirmRows((j.data && j.data.rows) || [], tid);
+      if (p.dryRun) return { ok: true, taskId: String(tid), count: pending.length, pending: pending.map((x) => x.rank) };
+      if (!pending.length) return { ok: true, taskId: String(tid), attempted: 0, confirmed: 0, failed: [], note: 'Nothing to confirm — all segments already confirmed.' };
+      const failed = [];
+      let done = 0;
+      for (const row of pending) {
+        const res = await confirmOne(row, ignoreQa);
+        if (res.ok) done++;
+        else failed.push({ rank: row.rank, msg: res.msg || ('status_code ' + res.status_code) || ('HTTP ' + res.http) });
+        await sleep(60);   // gentle pacing so we don't hammer the endpoint
+      }
+      // verify: re-read and see what (if anything) is still unconfirmed
+      let remaining = null;
+      const v = await fetch(u, { credentials: 'same-origin', headers: { accept: 'application/json' } }).then((r) => r.json()).catch(() => null);
+      if (v && v.status_code === 1000) remaining = pendingConfirmRows((v.data && v.data.rows) || [], tid).map((x) => x.rank);
+      return { ok: failed.length === 0 && (!remaining || remaining.length === 0), taskId: String(tid), attempted: pending.length, confirmed: done, failed, remaining };
+    } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
+  }
+
   // ---- PLURAL (ICU one/two/many/other) support -----------------------------
   // A plural segment is ONE data-API row whose source/target `textExtra` =
   // {zero,one,two,few,many,other}. The editor renders 4 TARGET `.plural-wrapper`
@@ -1037,6 +1097,7 @@
           case 'HARVEST_PLURALS': sendResponse(await apiPlurals(msg.taskId)); break;
           case 'WRITE_PLURAL': sendResponse(await writePlural(msg.edit || {})); break;
           case 'CONFIRM_ALL': sendResponse(await confirmAll(msg.ignoreNormal !== false)); break;
+          case 'API_CONFIRM_ALL': sendResponse(await apiConfirmAll(msg.opts || {})); break;
           case 'WB_CTX': sendResponse(wbCtx()); break;
           case 'WB_FIND': sendResponse(await wbFind(msg.key, msg.expectSource)); break;
           case 'WB_WRITE': sendResponse(await wbWrite(msg.edit || {})); break;
@@ -1059,6 +1120,7 @@
   window.__wb = {
     ver: CS_VERSION, ctx: () => wbCtx(), find: (k, s) => wbFind(k, s), write: (e) => wbWrite(e || {}),
     apiTask: (id) => apiTask(id), apiConfirm: (p) => apiConfirm(p || {}), apiTasks: (k) => apiTasks(k),
+    apiConfirmAll: (p) => apiConfirmAll(p || {}),
     reveal: (seg) => revealSeg(seg).then((c) => !!c).catch(() => false),
     writeSeg: (e) => wbWriteBySeg(e || {})
   };
