@@ -625,6 +625,24 @@ async function doConfirmAll() {
   } catch (e) { info('confirm-info', e.message, 'err'); }
 }
 
+// Submit the task via Starling's own dialog (text-matched DOM — the submit has no capturable
+// HTTP endpoint, it goes over a WebSocket/internal channel). Delivers the task to the requester,
+// so it always asks first. Never auto-runs.
+async function doSubmit() {
+  if (!confirm('Submit this task to the requester?\n\nThis runs Starling\'s "Submit all translations" → confirm, delivering your translation. It can\'t be undone from here.')) return;
+  info('submit-info', 'Submitting…');
+  try {
+    const r = await send({ type: 'SUBMIT_TASK' });
+    if (r && r.ok) {
+      info('submit-info', r.submitted ? '✅ Task submitted to the requester.' : '✅ Submit confirmed (dialog closed).', 'good');
+    } else if (r && r.disabled) {
+      info('submit-info', '⚠ Nothing to submit — no pending changes (the task is already submitted). Edit/confirm a segment first.', 'err');
+    } else {
+      info('submit-info', (r && r.error) || 'Submit failed.', 'err');
+    }
+  } catch (e) { info('submit-info', e.message, 'err'); }
+}
+
 // ---- QA summary + post-confirm summary -------------------------------------
 function qaCategory(row) {
   if (/critical/i.test(row.level)) return 'critical';
@@ -995,7 +1013,7 @@ function wbBuildIndex() {
 }
 const WB_FIELDS = [['key', 'Key'], ['valid', 'Valid (Y/N)'], ['final', 'Final Translation'], ['src', 'Source (EN)'], ['tgt', 'Current target'], ['lang', 'Language']];
 const STAR_KEY_URL = 'https://starling.bytedance.com/#/all-task?pageNum=1&pageSize=10&progress=all&translateTypeList=%5B%5D&sortType=1&order=0&sourceLocales=en&targetLocales=he-IL&textKeys=';
-const CS_EXPECT = 27;   // must match content.js CS_VERSION
+const CS_EXPECT = 28;   // must match content.js CS_VERSION
 
 // Direct call surface — invokes the page's window.__wb.* via chrome.scripting.executeScript.
 // This bypasses chrome.runtime messaging entirely, so a stale/duplicate content-script
@@ -2155,6 +2173,7 @@ async function init() {
   $('run-gpt').addEventListener('click', doGpt);
   $('write').addEventListener('click', doWrite);
   $('confirm-all').addEventListener('click', doConfirmAll);
+  $('submit-task').addEventListener('click', doSubmit);
   $('qa-read').addEventListener('click', doQaSummary);
   $('pl-scan').addEventListener('click', plScan);
   $('pl-write').addEventListener('click', plWrite);

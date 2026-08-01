@@ -13,7 +13,7 @@
   // tab is running an older version, re-injects this file via chrome.scripting so stale tabs
   // self-heal (no page reload needed). Re-injection tears down the previous version's message
   // listener first (below) so there's never a double-listener race.
-  const CS_VERSION = 27;
+  const CS_VERSION = 28;
   if (window.__scVer === CS_VERSION) return;                         // this exact version already live here
   if (typeof window.__scCleanup === 'function') { try { window.__scCleanup(); } catch (e) {} }  // remove an older/stale one
   window.__scVer = CS_VERSION;
@@ -997,6 +997,50 @@
     } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
   }
 
+  // ---- SUBMIT TASK (DOM) ---------------------------------------------------
+  // Unlike confirm, the final submit fires over a non-HTTP channel (WebSocket/internal) —
+  // there's no endpoint to replay. But its whole flow is TEXT-LABELLED, so a text-matched
+  // DOM walk is reliable and zoom-proof (no coordinates): the "Submit task" split-button →
+  // "Submit all translations" menu item → a confirm modal whose primary button also reads
+  // "Submit task" (Cancel is the other). We scope the confirm to the modal so we don't
+  // re-hit the toolbar trigger, and verify by watching the trigger flip to "Task submitted".
+  function submitTrigger() {
+    const rx = /^\s*(submit task|task submitted|提交任务|已提交)\s*$/i;
+    const scope = document.querySelector('.text-editor-header-right') || document;
+    return [...scope.querySelectorAll('button,.semi-button')].find((b) => b.offsetParent !== null && rx.test((b.textContent || '').trim()))
+      || [...document.querySelectorAll('button,.semi-button')].find((b) => b.offsetParent !== null && rx.test((b.textContent || '').trim())) || null;
+  }
+  async function domSubmit() {
+    try {
+      const trigger = submitTrigger();
+      if (!trigger) return { ok: false, error: 'Submit-task button not found in the header.' };
+      const before = (trigger.textContent || '').trim();
+      trigger.click(); await sleep(400);
+      const itemRx = /submit all translations|提交全部翻译|提交所有/i;
+      let item = [...document.querySelectorAll('.semi-dropdown-item')].find((e) => e.offsetParent !== null && itemRx.test(e.textContent || ''));
+      if (!item) { trigger.click(); await sleep(450); item = [...document.querySelectorAll('.semi-dropdown-item')].find((e) => e.offsetParent !== null && itemRx.test(e.textContent || '')); }
+      if (!item) return { ok: false, error: 'The "Submit all translations" menu item did not appear.' };
+      if (/disable/.test((item.className || '').toString()) || item.getAttribute('aria-disabled') === 'true') {
+        document.body.click();
+        return { ok: false, disabled: true, error: 'The "Submit all translations" option is disabled — nothing to submit (task already submitted with no pending changes). Edit/confirm a segment first.' };
+      }
+      item.click(); await sleep(550);
+      // Confirm modal: primary button reads "Submit task"; Cancel is the other. Scope to the modal.
+      const modal = [...document.querySelectorAll('.semi-modal-content,.semi-modal,.semi-dialog,[role="dialog"]')].find((m) => m.offsetParent !== null);
+      if (!modal) return { ok: false, error: 'The submit confirmation popup did not appear.' };
+      const mbtns = [...modal.querySelectorAll('button,.semi-button')].filter((b) => b.offsetParent !== null && !/cancel|取消/i.test(b.textContent || ''));
+      const confirm = mbtns.find((b) => /semi-button-primary/.test((b.className || '').toString()))
+        || mbtns.find((b) => /^\s*(submit task|submit|提交|确定|确认)\s*$/i.test((b.textContent || '').trim()))
+        || mbtns[0];
+      if (!confirm) return { ok: false, error: 'Could not find the confirm button in the submit popup.', modalText: (modal.innerText || '').replace(/\s+/g, ' ').slice(0, 120) };
+      confirm.click(); await sleep(900);
+      const modalGone = ![...document.querySelectorAll('.semi-modal-content,.semi-modal,[role="dialog"]')].some((m) => m.offsetParent !== null);
+      const now = (submitTrigger() || {}).textContent ? (submitTrigger().textContent || '').trim() : '';
+      const submitted = modalGone && /submitted|已提交/i.test(now);
+      return { ok: modalGone, submitted, before, buttonNow: now };
+    } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
+  }
+
   // ---- PLURAL (ICU one/two/many/other) support -----------------------------
   // A plural segment is ONE data-API row whose source/target `textExtra` =
   // {zero,one,two,few,many,other}. The editor renders 4 TARGET `.plural-wrapper`
@@ -1098,6 +1142,7 @@
           case 'WRITE_PLURAL': sendResponse(await writePlural(msg.edit || {})); break;
           case 'CONFIRM_ALL': sendResponse(await confirmAll(msg.ignoreNormal !== false)); break;
           case 'API_CONFIRM_ALL': sendResponse(await apiConfirmAll(msg.opts || {})); break;
+          case 'SUBMIT_TASK': sendResponse(await domSubmit()); break;
           case 'WB_CTX': sendResponse(wbCtx()); break;
           case 'WB_FIND': sendResponse(await wbFind(msg.key, msg.expectSource)); break;
           case 'WB_WRITE': sendResponse(await wbWrite(msg.edit || {})); break;
@@ -1120,7 +1165,7 @@
   window.__wb = {
     ver: CS_VERSION, ctx: () => wbCtx(), find: (k, s) => wbFind(k, s), write: (e) => wbWrite(e || {}),
     apiTask: (id) => apiTask(id), apiConfirm: (p) => apiConfirm(p || {}), apiTasks: (k) => apiTasks(k),
-    apiConfirmAll: (p) => apiConfirmAll(p || {}),
+    apiConfirmAll: (p) => apiConfirmAll(p || {}), submitTask: () => domSubmit(),
     reveal: (seg) => revealSeg(seg).then((c) => !!c).catch(() => false),
     writeSeg: (e) => wbWriteBySeg(e || {})
   };
