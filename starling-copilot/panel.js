@@ -610,7 +610,11 @@ async function doConfirmAll() {
   try {
     const r = await send({ type: 'API_CONFIRM_ALL', opts: { ignoreQa: true } });
     if (r && r.ok) {
-      info('confirm-info', `✅ Confirmed ${r.confirmed}/${r.attempted}. All segments confirmed.`, 'good');
+      // The API confirms server-side, but the editor's cached React state still shows the
+      // rows as unconfirmed (the ✓✓ stays blue) until the task is re-fetched. Reloading the
+      // tab — exactly what the user does by hand — re-reads from the server so they turn green.
+      info('confirm-info', `✅ Confirmed ${r.confirmed}/${r.attempted}. Refreshing so the ✓✓ turn green…`, 'good');
+      try { const t = await activeTab(); if (t) { await new Promise((res) => setTimeout(res, 700)); await chrome.tabs.reload(t.id); return; } } catch (e) {}
       await showPostSummary();
     } else {
       const f = (r && r.failed) || [];
