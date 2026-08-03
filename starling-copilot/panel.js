@@ -1271,25 +1271,63 @@ function wbStampAgreeForKey(key) {
 // Build restore them: mark those cards done and re-stamp Column I, so Export still reflects
 // everything you did last session. Scoped by file name + sheet so a different report can't collide.
 function wbFileSig() { return (WB.fileName || '') + '|' + (WB.sheetName || ''); }
+// Persist BOTH written keys (+task ids) and skipped keys, per file. Called after each Write AND
+// after each Skip, so the stored record always mirrors the queue. Stored shape:
+//   wbProgress[fileSig] = { done: { key: [taskIds] }, skipped: [keys] }
 async function wbPersistProgress() {
   if (!WB.lqa || !WB.fileName) return;
-  const map = {};
-  for (const q of WB.queue) if (q.doneTasks && q.doneTasks.length) map[q.key] = q.doneTasks.slice();
-  try { const all = await store.get('wbProgress', {}); all[wbFileSig()] = map; await store.set({ wbProgress: all }); } catch (e) {}
+  const done = {}, skipped = [];
+  for (const q of WB.queue) {
+    if (q.doneTasks && q.doneTasks.length) done[q.key] = q.doneTasks.slice();
+    else if (q.status === 'done') skipped.push(q.key);   // marked done without a write = skipped
+  }
+  try { const all = await store.get('wbProgress', {}); all[wbFileSig()] = { done, skipped }; await store.set({ wbProgress: all }); } catch (e) {}
+}
+// Does the LOADED sheet already carry a non-empty Column I for this key? Lets progress ride
+// along INSIDE the .xlsx: re-loading an exported/with-agrees file restores done-state with no
+// storage at all (portable across machines).
+function wbColIFilledForKey(key) {
+  if (typeof XLSX === 'undefined' || !WB.workbook || !WB.sheetName) return false;
+  const ws = WB.workbook.Sheets[WB.sheetName];
+  const colI = WB.map.valid, colKey = WB.map.key;
+  if (!ws || !ws['!ref'] || colI == null || colI < 0 || colKey == null || colKey < 0) return false;
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  const want = String(key == null ? '' : key).trim();
+  for (let R = range.s.r; R <= range.e.r; R++) {
+    const kc = ws[XLSX.utils.encode_cell({ r: R, c: colKey })];
+    if (!kc || String(kc.v == null ? '' : kc.v).trim() !== want) continue;
+    const vc = ws[XLSX.utils.encode_cell({ r: R, c: colI })];
+    if (vc && String(vc.v == null ? '' : vc.v).trim()) return true;
+  }
+  return false;
 }
 async function wbRestoreProgress() {
-  if (!WB.lqa || !WB.fileName) return;
-  let all; try { all = await store.get('wbProgress', {}); } catch (e) { return; }
-  const map = all && all[wbFileSig()]; if (!map) return;
-  let n = 0;
+  if (!WB.lqa) return;
+  let all; try { all = await store.get('wbProgress', {}); } catch (e) { all = {}; }
+  const rec = (all && all[wbFileSig()]) || null;
+  // new shape {done,skipped}; tolerate the old flat {key:[tasks]} = all-done
+  let doneMap = {}; const skipSet = new Set();
+  if (rec) {
+    if (rec.done || rec.skipped) { doneMap = rec.done || {}; (rec.skipped || []).forEach((k) => skipSet.add(k)); }
+    else doneMap = rec;
+  }
+  let nDone = 0, nSkip = 0, nFile = 0;
   for (const q of WB.queue) {
-    const tasks = map[q.key];
-    if (tasks && tasks.length && q.status !== 'conflict') {
-      q.doneTasks = tasks.slice(); q.status = 'done'; q.agreed = true;
-      wbStampAgreeForKey(q.key); n++;
+    if (q.status === 'conflict') continue;
+    const tasks = doneMap[q.key];
+    if (tasks && tasks.length) {
+      q.doneTasks = tasks.slice(); q.status = 'done'; q.agreed = true; wbStampAgreeForKey(q.key); nDone++;
+    } else if (skipSet.has(q.key)) {
+      q.status = 'done'; q.note = 'Skipped last session (not written).'; nSkip++;
+    } else if (wbColIFilledForKey(q.key)) {
+      q.status = 'done'; q.agreed = true; q.note = 'Already filled in the sheet (Column I).'; nFile++;
     }
   }
-  if (n) { wbRenderQueue(); info('wb-build-info', `↩ Restored ${n} key(s) you already wrote last session — marked done, Column I re-stamped (Export reflects them). Switch to “All” to see them.`, 'good'); }
+  const parts = [];
+  if (nDone) parts.push(`${nDone} written`);
+  if (nFile) parts.push(`${nFile} already in the sheet`);
+  if (nSkip) parts.push(`${nSkip} skipped`);
+  if (parts.length) { wbRenderQueue(); info('wb-build-info', `↩ Restored progress: ${parts.join(' · ')} — marked done (switch to “All” to see them).`, 'good'); }
 }
 // Download the (already-stamped) workbook. Re-stamps every written key defensively first, so it
 // works even if a per-write stamp was missed. Never clobbers cells you filled yourself.
@@ -1691,8 +1729,8 @@ function wbRenderQueue() {
     if (act === 'search') wbSearch(i);
     else if (act === 'check') wbCheck(i);
     else if (act === 'write') wbWriteOne(i);
-    else if (act === 'skip') { WB.queue[i].status = 'done'; WB.queue[i].note = 'Skipped by you (not written).'; wbRenderQueue(); }
-    else if (act === 'done') { WB.queue[i].status = 'done'; WB.queue[i].note = 'Marked done for all tasks.' + (WB.queue[i].doneTasks && WB.queue[i].doneTasks.length ? ' Wrote to: ' + WB.queue[i].doneTasks.join(', ') : ''); wbRenderQueue(); }
+    else if (act === 'skip') { WB.queue[i].status = 'done'; WB.queue[i].note = 'Skipped by you (not written).'; wbRenderQueue(); wbPersistProgress(); }
+    else if (act === 'done') { WB.queue[i].status = 'done'; WB.queue[i].note = 'Marked done for all tasks.' + (WB.queue[i].doneTasks && WB.queue[i].doneTasks.length ? ' Wrote to: ' + WB.queue[i].doneTasks.join(', ') : ''); wbRenderQueue(); wbPersistProgress(); }
     else if (act === 'copy-final') panelCopy(WB.queue[i].final, b);
   }));
   const done = WB.queue.filter((q) => q.status === 'done').length;

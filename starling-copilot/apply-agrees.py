@@ -84,10 +84,29 @@ def main():
     if len(sys.argv) < 3:
         sys.exit(__doc__)
 
-    orig_path, exp_path = sys.argv[1], sys.argv[2]
-    for p in (orig_path, exp_path):
+    a_path, b_path = sys.argv[1], sys.argv[2]
+    for p in (a_path, b_path):
         if not os.path.exists(p):
             sys.exit('File not found: ' + p)
+
+    # Order-agnostic: the EXPORT is whichever file has more filled Column I cells (the agrees);
+    # the ORIGINAL is the other one. Lets a drag-and-drop launcher pass files in any order.
+    def col_i_fills(path):
+        try:
+            wb = openpyxl.load_workbook(path, data_only=True)
+            tab = lqa_tab(wb) or wb.sheetnames[0]
+            rows = list(wb[tab].iter_rows(values_only=True))
+            hi, hdr = find_header(rows)
+            if hi is None:
+                return 0
+            ci = col_index(hdr, r'validation feedback')
+            return sum(1 for r in rows[hi + 1:] if 0 <= ci < len(r) and s(r[ci]).strip())
+        except Exception:
+            return 0
+    if col_i_fills(a_path) >= col_i_fills(b_path):
+        exp_path, orig_path = a_path, b_path
+    else:
+        exp_path, orig_path = b_path, a_path
 
     if len(sys.argv) > 3:
         out_path = sys.argv[3]
