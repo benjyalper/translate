@@ -1460,18 +1460,26 @@ function wbExportForm() {
   if (typeof XLSX === 'undefined') { info('wb-queue-info', 'xlsx writer not loaded — reload the extension.', 'err'); return; }
   if (!WB.workbook || !WB.sheetName) { info('wb-queue-info', 'Export needs the original .xlsx (load the file, not pasted text).', 'err'); return; }
   if (WB.map.valid == null || WB.map.valid < 0 || WB.map.key == null || WB.map.key < 0) { info('wb-queue-info', 'Column I ("Validation feedback") or Key isn\'t mapped — fix the mapping.', 'err'); return; }
+  // Re-stamp anything written THIS session first, then gate on what's actually in Column I —
+  // so a file whose agrees were restored from the sheet (no doneTasks) still exports.
   const wroteKeys = [...new Set(WB.queue.filter((q) => q.doneTasks && q.doneTasks.length).map((q) => q.key))];
-  if (!wroteKeys.length) { info('wb-queue-info', 'Nothing written yet — write some fixes to Starling first, then export.', 'err'); return; }
   for (const k of wroteKeys) wbStampAgreeForKey(k);
+  let filled = 0;
+  const ws0 = WB.workbook.Sheets[WB.sheetName];
+  if (ws0 && ws0['!ref']) {
+    const rg = XLSX.utils.decode_range(ws0['!ref']);
+    for (let R = rg.s.r + 1; R <= rg.e.r; R++) { const c = ws0[XLSX.utils.encode_cell({ r: R, c: WB.map.valid })]; if (c && c.v != null && String(c.v).trim()) filled++; }
+  }
+  if (!filled) { info('wb-queue-info', 'Nothing in Column I to export yet — write/agree to some rows (or load a file that already has agrees) first.', 'err'); return; }
   const base = WB.fileName ? WB.fileName.replace(/\.xlsx?$/i, '') : (WB.sheetName || 'LQA');
   const fname = base + ' with-agrees.xlsx';
   if (WB.rawBytes && typeof DecompressionStream !== 'undefined' && typeof CompressionStream !== 'undefined') {
     info('wb-queue-info', 'Building the formatted file…', 'good');
     wbStyledExport(fname)
       .then((n) => info('wb-queue-info', `⬇ Exported ${fname} — ${n} "agree"(s) in Column I, original formatting kept. Ready to submit.`, 'good'))
-      .catch((e) => { wbLog('styled export failed: ' + (e && e.message)); info('wb-queue-info', 'Formatted export failed (' + (e && e.message) + ') — wrote a plain copy instead.', 'err'); wbExportPlain(fname, wroteKeys.length); });
+      .catch((e) => { wbLog('styled export failed: ' + (e && e.message)); info('wb-queue-info', 'Formatted export failed (' + (e && e.message) + ') — wrote a plain copy instead.', 'err'); wbExportPlain(fname, filled); });
   } else {
-    wbExportPlain(fname, wroteKeys.length);
+    wbExportPlain(fname, filled);
   }
 }
 
