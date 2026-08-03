@@ -960,7 +960,7 @@ function lqOnFile(input) {
 // RELOAD — the URL param only applies on a real load), open the task, read the
 // live segment, write the Final Translation, and proofread-confirm that one row.
 // It guards on source-match and shows live-vs-sheet before every write. NEVER submits.
-const WB = { header: [], records: [], map: {}, rows: [], queue: [], filter: 'todo', workbook: null, tabNames: [], engine: 'api', index: new Map(), indexTabs: [], lqa: false, sheetName: '' };
+const WB = { header: [], records: [], map: {}, rows: [], queue: [], filter: 'todo', workbook: null, tabNames: [], engine: 'api', index: new Map(), indexTabs: [], lqa: false, sheetName: '', fileName: '' };
 
 // Join normaliser for sheet-source ↔ live-source comparison. The API returns the TRUE
 // characters, and real content uses fullwidth punctuation ("Man United defender｜…") and
@@ -1101,7 +1101,7 @@ function wbReadFile(input) {
       if (isXlsx) {
         if (typeof XLSX === 'undefined') { info('wb-info', 'xlsx reader not loaded — reload the extension.', 'err'); return; }
         const wb = XLSX.read(new Uint8Array(r.result), { type: 'array' });
-        WB.workbook = wb; WB.tabNames = wb.SheetNames;
+        WB.workbook = wb; WB.tabNames = wb.SheetNames; WB.fileName = f.name;
         const sel = $('wb-tab'); sel.innerHTML = wb.SheetNames.map((n) => `<option>${esc(n)}</option>`).join('');
         // Prefer the tab whose HEADER is an LQA report with data — the TikTok report's data tab
         // is named "All", which no Hebrew name-pattern matches, so name-matching alone left the
@@ -1114,7 +1114,7 @@ function wbReadFile(input) {
         $('wb-tab-row').hidden = false;
         info('wb-info', `Workbook "${f.name}" · ${wb.SheetNames.length} tab(s).${lqaTab ? ` LQA data tab "${lqaTab}" auto-selected —` : ' Pick the tab, then'} click Load.`, 'good');
       } else {
-        WB.workbook = null; $('wb-tab-row').hidden = true;
+        WB.workbook = null; WB.fileName = ''; $('wb-tab-row').hidden = true;
         $('wb-input').value = r.result;
         info('wb-info', `Loaded ${f.name}. Click Load.`, 'good');
       }
@@ -1241,6 +1241,7 @@ function wbBuild() {
   if ($('wb-export')) $('wb-export').hidden = !(WB.lqa && WB.workbook);
   const tail = (skipped ? ` · ${skipped} missing key/fix` : '') + (nochange ? ` · ${nochange} no-change skipped` : '') + (notYes ? ` · ${notYes} not "agree"` : '') + (notHe ? ` · ${notHe} non-he skipped` : '');
   info('wb-build-info', `Queue: ${WB.queue.length} key(s)` + (conflicts ? ` · ⚠ ${conflicts} conflict` : '') + tail, conflicts ? 'err' : 'good');
+  wbRestoreProgress();   // re-mark keys written in a previous session (and re-stamp their Column I)
 }
 // Stamp "agree" into Column I for every sheet row carrying `key` whose cell is still empty.
 // Called on each successful Write + confirm (LQA mode) so the in-memory workbook always mirrors
@@ -1263,6 +1264,32 @@ function wbStampAgreeForKey(key) {
     if (cur == null || String(cur).trim() === '') { ws[addr] = { t: 's', v: 'agree' }; n++; }
   }
   return n;
+}
+// ---- progress persistence (survives panel close / re-load of the SAME report) ----------
+// The in-memory workbook (and its "agree" stamps) dies when the side panel closes. So persist
+// the set of written keys (+ their task ids) per file to chrome.storage.local, and on the next
+// Build restore them: mark those cards done and re-stamp Column I, so Export still reflects
+// everything you did last session. Scoped by file name + sheet so a different report can't collide.
+function wbFileSig() { return (WB.fileName || '') + '|' + (WB.sheetName || ''); }
+async function wbPersistProgress() {
+  if (!WB.lqa || !WB.fileName) return;
+  const map = {};
+  for (const q of WB.queue) if (q.doneTasks && q.doneTasks.length) map[q.key] = q.doneTasks.slice();
+  try { const all = await store.get('wbProgress', {}); all[wbFileSig()] = map; await store.set({ wbProgress: all }); } catch (e) {}
+}
+async function wbRestoreProgress() {
+  if (!WB.lqa || !WB.fileName) return;
+  let all; try { all = await store.get('wbProgress', {}); } catch (e) { return; }
+  const map = all && all[wbFileSig()]; if (!map) return;
+  let n = 0;
+  for (const q of WB.queue) {
+    const tasks = map[q.key];
+    if (tasks && tasks.length && q.status !== 'conflict') {
+      q.doneTasks = tasks.slice(); q.status = 'done'; q.agreed = true;
+      wbStampAgreeForKey(q.key); n++;
+    }
+  }
+  if (n) { wbRenderQueue(); info('wb-build-info', `↩ Restored ${n} key(s) you already wrote last session — marked done, Column I re-stamped (Export reflects them). Switch to “All” to see them.`, 'good'); }
 }
 // Download the (already-stamped) workbook. Re-stamps every written key defensively first, so it
 // works even if a per-write stamp was missed. Never clobbers cells you filled yourself.
@@ -1371,7 +1398,7 @@ async function wbWriteDom(i) {
     // Clear the live read so the next task must be Checked, and keep the buttons live so
     // you can Search → open another 👁 → Check → Write again. "Done" ends the card.
     q.live = null; q.decision = null; q.status = 'written';
-    if (WB.lqa && WB.workbook) { q.agreed = true; const st = wbStampAgreeForKey(q.key); if (st) wbLog(`📋 Column I → "agree" for ${q.key} (${st} row) — Export form to download`); }
+    if (WB.lqa && WB.workbook) { q.agreed = true; const st = wbStampAgreeForKey(q.key); if (st) wbLog(`📋 Column I → "agree" for ${q.key} (${st} row) — Export form to download`); wbPersistProgress(); }
     q.note = `Wrote${r.confirmed ? ' + proofread-confirmed ✓' : ' (auto-confirm off / not found — confirm by hand)'} to task ${tid}. Same key in another task? Search again, open it with 👁, Check, Write. Click “Done” when every task is fixed. You resubmit each task.`;
     wbRenderQueue();
   } catch (e) { wbSetStatus(i, 'checked', e.message); }
@@ -1604,7 +1631,7 @@ async function wbWriteApi(i) {
     wbLog(`API-wrote ${q.key} @task ${a.taskId} id=${a.sourceTextId} (${why}) — server=${ok2 ? 'matches ✓' : (seg2 ? 'not-yet(status ' + seg2.status + ')' : 're-read failed')}`);
     q.doneTasks = q.doneTasks || []; if (!q.doneTasks.includes(a.taskId)) q.doneTasks.push(a.taskId);
     q.live = null; q.decision = null; q.api = null; q.status = 'written';
-    if (WB.lqa && WB.workbook) { q.agreed = true; const st = wbStampAgreeForKey(q.key); if (st) wbLog(`📋 Column I → "agree" for ${q.key} (${st} row) — Export form to download`); }
+    if (WB.lqa && WB.workbook) { q.agreed = true; const st = wbStampAgreeForKey(q.key); if (st) wbLog(`📋 Column I → "agree" for ${q.key} (${st} row) — Export form to download`); wbPersistProgress(); }
     q.note = `✅ Written + confirmed via the API · task ${a.taskId}${ok2 ? ' · server confirms it saved' : ' · sent'} · refreshing the task so the fix shows in the editor… Same key elsewhere? Search → 👁 → Check → Write. You resubmit each task.`;
     wbRenderQueue();
     // The API write saves server-side but doesn't repaint the on-screen editor — reload the
@@ -1648,7 +1675,7 @@ async function wbWriteApi(i) {
     q.doneTasks = q.doneTasks || [];
     if (!q.doneTasks.includes(a.taskId)) q.doneTasks.push(a.taskId);
     q.live = null; q.decision = null; q.api = null; q.status = 'written';
-    if (WB.lqa && WB.workbook) { q.agreed = true; const st = wbStampAgreeForKey(q.key); if (st) wbLog(`📋 Column I → "agree" for ${q.key} (${st} row) — Export form to download`); }
+    if (WB.lqa && WB.workbook) { q.agreed = true; const st = wbStampAgreeForKey(q.key); if (st) wbLog(`📋 Column I → "agree" for ${q.key} (${st} row) — Export form to download`); wbPersistProgress(); }
     const serverNote = persisted ? 'server confirms it saved' : 'typed into the editor — it will save on confirm/resubmit';
     q.note = `✅ Typed into the editor + ${r.confirmed ? 'proofread-confirmed' : 'written (not confirmed — confirm by hand)'} · task ${a.taskId} (seg #${a.rank}) · ${serverNote}. The editor now shows the fix. Same key in another task? Search again, open it with 👁, Check, Write. Click “Done” when every task is fixed. You resubmit each task.`;
     wbRenderQueue();
