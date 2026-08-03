@@ -274,6 +274,7 @@
       <section class="card" id="wb-build-card" hidden>
         <div class="step"><span class="num">3</span> Build the write queue</div>
         <div class="hint">Keeps rows where <b>Valid = Yes</b>, a <b>Final Translation</b> is present, and a <b>Key</b> exists. Rows sharing a key are de-duped; conflicting finals are flagged and skipped.</div>
+        <label class="ck" id="wb-lqa-row" hidden style="margin-top:6px"><input type="checkbox" id="wb-lqa-all" checked /> 📋 LQA report: queue every row whose <b>Suggested</b> differs from <b>Before</b> (review each), not only "agree" rows</label>
         <button id="wb-build" class="btn" style="margin-top:8px">🧱 Build queue</button>
         <div id="wb-build-info" class="info"></div>
       </section>
@@ -292,6 +293,7 @@
         </div>
         <p class="hint"><b>Resolve all</b> (API engine) finds every en→he task for each key, reads them, and fills in every verdict — <b>read-only, nothing is written</b>. Then review and hit <b>Write + confirm</b> on the ones you approve. Or keep working one key at a time with Search → 👁 → Check.</p>
         <div id="wb-queue" class="review"></div>
+        <button id="wb-export" class="btn sm ghost" hidden style="margin-top:8px">⬇ Export form (.xlsx · Column I = "agree" for written rows)</button>
         <div id="wb-queue-info" class="info"></div>
       </section>
 

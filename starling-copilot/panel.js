@@ -960,7 +960,7 @@ function lqOnFile(input) {
 // RELOAD — the URL param only applies on a real load), open the task, read the
 // live segment, write the Final Translation, and proofread-confirm that one row.
 // It guards on source-match and shows live-vs-sheet before every write. NEVER submits.
-const WB = { header: [], records: [], map: {}, rows: [], queue: [], filter: 'todo', workbook: null, tabNames: [], engine: 'api', index: new Map(), indexTabs: [] };
+const WB = { header: [], records: [], map: {}, rows: [], queue: [], filter: 'todo', workbook: null, tabNames: [], engine: 'api', index: new Map(), indexTabs: [], lqa: false, sheetName: '' };
 
 // Join normaliser for sheet-source ↔ live-source comparison. The API returns the TRUE
 // characters, and real content uses fullwidth punctuation ("Man United defender｜…") and
@@ -1107,9 +1107,27 @@ function wbReadFile(input) {
   if (isXlsx) r.readAsArrayBuffer(f); else r.readAsText(f);
   input.value = '';
 }
+// TikTok interior-LQA report layout (the July combined file): the reviewer decides
+// agree/disagree and writes "agree" in "Validation feedback (from proofreader)" (col I).
+// Columns: Key | Source | Before translation | Suggested translation | Error category |
+// Sub category | Severity | LQA comments | Validation feedback (from proofreader) | …
+function wbIsLqaReport(header) {
+  const h = header.map((x) => String(x).toLowerCase());
+  const has = (re) => h.some((x) => re.test(x));
+  return has(/suggested translation/) && has(/before translation|lqa comment|validation feedback/);
+}
 function wbAutoMap(header) {
   const used = new Set(), map = {};
   const find = (re) => { for (let i = 0; i < header.length; i++) { if (used.has(i)) continue; if (re.test(header[i])) { used.add(i); return i; } } return -1; };
+  if (wbIsLqaReport(header)) {
+    map.key   = find(/^key$|\bkey\b/i);
+    map.src   = find(/^source$|source/i);                 // first "Source" (col B), not the far-right "Source"
+    map.tgt   = find(/before translation|^before/i);      // current Hebrew = the "Before"
+    map.final = find(/suggested translation|suggest/i);   // the LQA fix to write into Starling
+    map.valid = find(/validation feedback/i);             // col I (proofreader) — your "agree"
+    map.lang  = find(/^lang|language/i);
+    return map;
+  }
   map.key = find(/^key$|\bkey\b|键|鍵/i);
   map.final = find(/final/i);                                  // "Final Translation (only for valid…)"
   map.valid = find(/valid/i);
@@ -1139,13 +1157,18 @@ function wbLoad() {
   WB.records = rows.slice(hi + 1).filter((r) => r.some((c) => String(c).trim().length));
   if (!WB.records.length) { info('wb-info', 'Header found but no data rows below it.', 'err'); return; }
   WB.map = wbAutoMap(WB.header);
+  WB.lqa = wbIsLqaReport(WB.header);
+  WB.sheetName = WB.workbook ? (($('wb-tab').value) || WB.tabNames[0]) : '';
   wbBuildRowObjs(); wbRenderMap(); wbBuildIndex();
   $('wb-map-card').hidden = false; $('wb-build-card').hidden = false;
   $('wb-queue-card').hidden = true; $('wb-queue').innerHTML = ''; if ($('wb-log')) $('wb-log').textContent = '';
+  if ($('wb-lqa-row')) $('wb-lqa-row').hidden = !WB.lqa;                 // "queue all with a fix" toggle
+  if ($('wb-export')) $('wb-export').hidden = !(WB.lqa && WB.workbook);  // export needs the original .xlsx
   const idxNote = WB.index.size
     ? ` · cross-tab index: ${WB.index.size} keys from ${WB.indexTabs.join(', ')}`
     : ' · no cross-tab index (paste/CSV input — API engine will match against this tab only)';
-  info('wb-info', `Loaded ${WB.rows.length} rows (header row ${hi + 1})${idxNote}. Check the mapping, then build the queue.`, 'good');
+  const lqaNote = WB.lqa ? ' · 📋 LQA report detected — mapped Before→current, Suggested→fix, Column I→"agree".' : '';
+  info('wb-info', `Loaded ${WB.rows.length} rows (header row ${hi + 1})${lqaNote}${idxNote}. Check the mapping, then build the queue.`, 'good');
 }
 function wbBuildRowObjs() {
   const m = WB.map, g = (r, i) => (i >= 0 && i < r.length) ? String(r[i]).trim() : '';
@@ -1157,15 +1180,24 @@ function wbRenderMap() {
   wrap.innerHTML = WB_FIELDS.map(([f, label]) => `<div><label>${label}</label><select data-f="${f}">${opts(WB.map[f])}</select></div>`).join('');
   wrap.querySelectorAll('select').forEach((s) => s.addEventListener('change', () => { WB.map[s.dataset.f] = parseInt(s.value, 10); wbBuildRowObjs(); info('wb-info', 'Mapping updated · ' + WB.rows.length + ' rows.', 'good'); }));
 }
-function wbIsYes(v) { return /^(yes|y|valid|true|1|✓)$/i.test(String(v == null ? '' : v).trim()); }
+function wbIsYes(v) { return /^(yes|y|valid|true|1|✓|agree|agreed|approve|approved|ok|👍)$/i.test(String(v == null ? '' : v).trim()); }
 function wbBuild() {
   if (!WB.rows.length) { info('wb-build-info', 'Load rows first.', 'err'); return; }
+  // LQA mode: an interior-LQA report isn't pre-adjudicated — YOU decide agree/disagree. So by
+  // default queue EVERY row that has a suggested fix which actually changes the target (you still
+  // approve each write). Untick to fall back to the normal gate (only "agree"/valid rows).
+  const lqaAll = WB.lqa && $('wb-lqa-all') && $('wb-lqa-all').checked;
   const byKey = new Map();
-  let skipped = 0, notHe = 0, notYes = 0;
+  let skipped = 0, notHe = 0, notYes = 0, nochange = 0;
   for (const r of WB.rows) {
     if (r.lang && !/^he|hebrew/i.test(r.lang)) { notHe++; continue; }   // multi-language tabs → he only
-    if (!wbIsYes(r.valid)) { notYes++; continue; }
-    if (!r.key || !r.final) { skipped++; continue; }
+    if (lqaAll) {
+      if (!r.key || !r.final) { skipped++; continue; }
+      if (wbNorm(r.final) === wbNorm(r.tgt)) { nochange++; continue; }  // Suggested == Before → nothing to change
+    } else {
+      if (!wbIsYes(r.valid)) { notYes++; continue; }
+      if (!r.key || !r.final) { skipped++; continue; }
+    }
     if (!byKey.has(r.key)) byKey.set(r.key, { key: r.key, final: r.final, src: r.src, rows: [r.n], conflict: false });
     else { const e = byKey.get(r.key); e.rows.push(r.n); if (wbNorm(e.final) !== wbNorm(r.final)) e.conflict = true; }
   }
@@ -1177,7 +1209,34 @@ function wbBuild() {
   const conflicts = WB.queue.filter((q) => q.conflict).length;
   WB.filter = 'todo'; wbRenderQueue();
   $('wb-queue-card').hidden = false;
-  info('wb-build-info', `Queue: ${WB.queue.length} key(s)` + (conflicts ? ` · ⚠ ${conflicts} conflict` : '') + (skipped ? ` · ${skipped} valid rows missing key/final` : '') + (notHe ? ` · ${notHe} non-he skipped` : ''), conflicts ? 'err' : 'good');
+  if ($('wb-export')) $('wb-export').hidden = !(WB.lqa && WB.workbook);
+  const tail = (skipped ? ` · ${skipped} missing key/fix` : '') + (nochange ? ` · ${nochange} no-change skipped` : '') + (notYes ? ` · ${notYes} not "agree"` : '') + (notHe ? ` · ${notHe} non-he skipped` : '');
+  info('wb-build-info', `Queue: ${WB.queue.length} key(s)` + (conflicts ? ` · ⚠ ${conflicts} conflict` : '') + tail, conflicts ? 'err' : 'good');
+}
+// Export the ORIGINAL .xlsx with "agree" stamped into Column I for every key you actually
+// wrote to Starling (rows that reached at least one written task). Scans the live worksheet by
+// key — robust to blank rows — and never overwrites a cell you already filled with a comment.
+function wbExportForm() {
+  if (typeof XLSX === 'undefined') { info('wb-queue-info', 'xlsx writer not loaded — reload the extension.', 'err'); return; }
+  if (!WB.workbook || !WB.sheetName) { info('wb-queue-info', 'Export needs the original .xlsx (load the file, not pasted text).', 'err'); return; }
+  const ws = WB.workbook.Sheets[WB.sheetName];
+  const colI = WB.map.valid, colKey = WB.map.key;
+  if (colI == null || colI < 0 || colKey == null || colKey < 0) { info('wb-queue-info', 'Column I ("Validation feedback") or Key isn\'t mapped — fix the mapping.', 'err'); return; }
+  const wroteKeys = new Set(WB.queue.filter((q) => q.doneTasks && q.doneTasks.length).map((q) => q.key));
+  if (!wroteKeys.size) { info('wb-queue-info', 'Nothing written yet — write some fixes to Starling first, then export.', 'err'); return; }
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  let stamped = 0;
+  for (let R = range.s.r; R <= range.e.r; R++) {
+    const kc = ws[XLSX.utils.encode_cell({ r: R, c: colKey })];
+    const key = kc ? String(kc.v == null ? '' : kc.v).trim() : '';
+    if (!key || !wroteKeys.has(key)) continue;                 // header row's "Key" naturally excluded
+    const addr = XLSX.utils.encode_cell({ r: R, c: colI });
+    const cur = ws[addr] && ws[addr].v;
+    if (cur == null || String(cur).trim() === '') { ws[addr] = { t: 's', v: 'agree' }; stamped++; }  // don't clobber your own comments
+  }
+  const fname = `${(WB.sheetName || 'LQA').replace(/[^\w-]+/g, '_')}_he_filled_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  try { XLSX.writeFile(WB.workbook, fname); info('wb-queue-info', `⬇ Exported ${fname} — stamped "agree" in Column I for ${stamped} written row(s). Review the rest by hand before returning the form.`, 'good'); }
+  catch (e) { info('wb-queue-info', 'Export failed: ' + e.message, 'err'); }
 }
 
 // ---- orchestration (drive the active Starling tab across hard reloads) ----
@@ -2201,6 +2260,7 @@ async function init() {
   $('wb-file').addEventListener('change', (e) => wbReadFile(e.target));
   $('wb-load').addEventListener('click', wbLoad);
   $('wb-build').addEventListener('click', wbBuild);
+  if ($('wb-export')) $('wb-export').addEventListener('click', wbExportForm);
   if ($('wb-resolve-all')) $('wb-resolve-all').addEventListener('click', () => {
     if ($('wb-resolve-all').textContent.indexOf('Stop') >= 0) { wbStopAll = true; return; }
     wbResolveAll();
