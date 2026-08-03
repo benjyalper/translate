@@ -1270,7 +1270,17 @@ function wbStampAgreeForKey(key) {
 // the set of written keys (+ their task ids) per file to chrome.storage.local, and on the next
 // Build restore them: mark those cards done and re-stamp Column I, so Export still reflects
 // everything you did last session. Scoped by file name + sheet so a different report can't collide.
-function wbFileSig() { return (WB.fileName || '') + '|' + (WB.sheetName || ''); }
+// Progress key: fingerprint the report's CONTENT (sheet + its set of keys), not the filename —
+// so the original and any exported/with-agrees copy of the same report share one record, and
+// skips restore no matter which file you re-load. wbFileSigLegacy is the old filename-based key,
+// still read for backward-compat and migrated on first restore.
+function wbFileSig() {
+  const keys = (WB.rows || []).map((r) => String((r && r.key) || '')).filter(Boolean).sort();
+  let h = 5381; const s = keys.join('');
+  for (let i = 0; i < s.length; i++) h = (((h << 5) + h) ^ s.charCodeAt(i)) >>> 0;
+  return (WB.sheetName || '') + '#' + keys.length + '#' + h.toString(36);
+}
+function wbFileSigLegacy() { return (WB.fileName || '') + '|' + (WB.sheetName || ''); }
 // Persist BOTH written keys (+task ids) and skipped keys, per file. Called after each Write AND
 // after each Skip, so the stored record always mirrors the queue. Stored shape:
 //   wbProgress[fileSig] = { done: { key: [taskIds] }, skipped: [keys] }
@@ -1304,12 +1314,13 @@ function wbColIFilledForKey(key) {
 async function wbRestoreProgress() {
   if (!WB.lqa) return;
   let all; try { all = await store.get('wbProgress', {}); } catch (e) { all = {}; }
-  const rec = (all && all[wbFileSig()]) || null;
-  // new shape {done,skipped}; tolerate the old flat {key:[tasks]} = all-done
+  // Read BOTH the content key and the legacy filename key, merging — so skips saved under an
+  // older filename-based record still come back and get migrated to the content key below.
+  const recs = [all && all[wbFileSig()], all && all[wbFileSigLegacy()]].filter(Boolean);
   let doneMap = {}; const skipSet = new Set();
-  if (rec) {
-    if (rec.done || rec.skipped) { doneMap = rec.done || {}; (rec.skipped || []).forEach((k) => skipSet.add(k)); }
-    else doneMap = rec;
+  for (const rec of recs) {
+    if (rec.done || rec.skipped) { Object.assign(doneMap, rec.done || {}); (rec.skipped || []).forEach((k) => skipSet.add(k)); }
+    else Object.assign(doneMap, rec);   // old flat {key:[tasks]} = all-done
   }
   let nDone = 0, nSkip = 0, nFile = 0;
   for (const q of WB.queue) {
@@ -1328,6 +1339,7 @@ async function wbRestoreProgress() {
   if (nFile) parts.push(`${nFile} already in the sheet`);
   if (nSkip) parts.push(`${nSkip} skipped`);
   if (parts.length) { wbRenderQueue(); info('wb-build-info', `↩ Restored progress: ${parts.join(' · ')} — marked done (switch to “All” to see them).`, 'good'); }
+  if (recs.length) wbPersistProgress();   // re-save under the content key (migrates a legacy filename record)
 }
 // ---- in-browser xlsx zip-surgery (STYLE-PRESERVING export) ---------------------------------
 // SheetJS mini rewrites the whole workbook and strips Excel styling. Instead we edit the ORIGINAL
