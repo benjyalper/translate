@@ -13,7 +13,7 @@
   // tab is running an older version, re-injects this file via chrome.scripting so stale tabs
   // self-heal (no page reload needed). Re-injection tears down the previous version's message
   // listener first (below) so there's never a double-listener race.
-  const CS_VERSION = 29;
+  const CS_VERSION = 30;
   if (window.__scVer === CS_VERSION) return;                         // this exact version already live here
   if (typeof window.__scCleanup === 'function') { try { window.__scCleanup(); } catch (e) {} }  // remove an older/stale one
   window.__scVer = CS_VERSION;
@@ -924,7 +924,7 @@
       const body = {
         SubTaskID: String(p.taskId), TextKey: p.key, sourceTextId: p.sourceTextId,
         FlowSequence: p.flowSequence == null ? 2 : p.flowSequence,
-        IgnoreQa: false, TMScore: '0', PreTranslationType: 0,
+        IgnoreQa: !!p.ignoreQa, TMScore: '0', PreTranslationType: 0,
         targetText: { Content: p.text, OrderSourceID: p.sourceTextId, TextKey: p.key }
       };
       const r = await fetch(API + 'confirmTextTaskTargetV2', {

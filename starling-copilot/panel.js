@@ -1022,7 +1022,7 @@ function wbBuildIndex() {
 }
 const WB_FIELDS = [['key', 'Key'], ['valid', 'Valid (Y/N)'], ['final', 'Final Translation'], ['src', 'Source (EN)'], ['tgt', 'Current target'], ['lang', 'Language']];
 const STAR_KEY_URL = 'https://starling.bytedance.com/#/all-task?pageNum=1&pageSize=10&progress=all&translateTypeList=%5B%5D&sortType=1&order=0&sourceLocales=en&targetLocales=he-IL&textKeys=';
-const CS_EXPECT = 29;   // must match content.js CS_VERSION
+const CS_EXPECT = 30;   // must match content.js CS_VERSION
 
 // Direct call surface — invokes the page's window.__wb.* via chrome.scripting.executeScript.
 // This bypasses chrome.runtime messaging entirely, so a stale/duplicate content-script
@@ -1555,43 +1555,60 @@ async function wbWriteApi(i) {
     wbSetStatus(i, 'checked', `⚠ This segment is in task ${a.taskId}, but task ${openTask} is open. Open the right task (👁), run Check, then Write.`); return;
   }
   const doConfirm = !($('wb-autoconfirm') && $('wb-autoconfirm').checked === false);
+
+  // ---- API write (editor-agnostic) --------------------------------------
+  // Addressed by the exact sourceTextId the Check step pinned from the SAME API read that
+  // matched the sheet — so it can never land on the wrong row, no matter which editor the
+  // task uses. confirmTextTaskTargetV2 is atomic write+confirm; we re-read to verify.
+  // ignoreQa mirrors confirm-all: an LQA-approved Final must still save even if Starling's
+  // auto-QA flags it (e.g. a period the proofreader deliberately kept).
+  const apiWrite = async (why) => {
+    if (!a.sourceTextId) { wbSetStatus(i, 'checked', '⚠ No sourceTextId on this row — write it by hand.'); return false; }
+    wbSetStatus(i, 'writing', 'Writing the Final via the Starling API…');
+    const ar = await wbCall('API_CONFIRM', {
+      taskId: a.taskId, key: q.key, sourceTextId: a.sourceTextId,
+      flowSequence: a.flowSequence, text: a.final, ignoreQa: WB.lqa === true && doConfirm
+    });
+    if (!(ar && ar.ok)) {
+      const msg = (ar && (ar.msg || (ar.status_code != null && 'status_code ' + ar.status_code) || (ar.http != null && 'HTTP ' + ar.http) || ar.error)) || 'unknown';
+      wbLog(`⚠ API write failed (${why}) — ${msg}`);
+      wbSetStatus(i, 'checked', `⚠ API write failed (${msg}). ${WB.lqa ? 'Do this key by hand.' : 'Try the DOM engine, or write by hand.'}`);
+      return false;
+    }
+    await wbSleep(350);
+    const v2 = await wbCall('API_TASK', { taskId: a.taskId });
+    const seg2 = v2 && v2.ok && v2.rows.find((x) => x.sourceTextId === a.sourceTextId);
+    const ok2 = seg2 && wbFold(seg2.target) === wbFold(a.final);
+    wbLog(`API-wrote ${q.key} @task ${a.taskId} id=${a.sourceTextId} (${why}) — server=${ok2 ? 'matches ✓' : (seg2 ? 'not-yet(status ' + seg2.status + ')' : 're-read failed')}`);
+    q.doneTasks = q.doneTasks || []; if (!q.doneTasks.includes(a.taskId)) q.doneTasks.push(a.taskId);
+    q.live = null; q.decision = null; q.api = null; q.status = 'written';
+    if (WB.lqa && WB.workbook) { q.agreed = true; const st = wbStampAgreeForKey(q.key); if (st) wbLog(`📋 Column I → "agree" for ${q.key} (${st} row) — Export form to download`); }
+    q.note = `✅ Written + confirmed via the API · task ${a.taskId}${ok2 ? ' · server confirms it saved' : ' · sent — reload the task to verify'}. Reload the task to see the fix in the editor. Same key elsewhere? Search → 👁 → Check → Write. You resubmit each task.`;
+    wbRenderQueue(); return true;
+  };
+
+  // LQA tasks overwhelmingly use the Document (virtual-table) editor the DOM writer can't
+  // reach, and its source-sanity abort used to block the fallback entirely. Go straight to
+  // the API — it's addressed by sourceTextId, so it's exact and reload-verifiable.
+  if (WB.lqa && a.sourceTextId) { await apiWrite('lqa-first'); return; }
+
   wbSetStatus(i, 'writing', 'Typing the Final into the editor…');
   try {
     const before = q.live && q.live.target;
     const r = await wbCall('WB_WRITE_SEG', { seg: a.rank, text: a.final, confirm: doConfirm, expectSource: q.live && q.live.source });
+    // Any DOM failure → API fallback (broadened from the old narrow "didn't mount" regex, which
+    // let the source-mismatch abort slip through). The API write is keyed by sourceTextId, so
+    // it's safe regardless of why the DOM path bailed.
     if (!r || !r.ok) {
       const reason = (r && r.reason) || 'unknown';
-      // The DOM writer types into the String/LIGHT editor. Some tasks use the Document
-      // (virtual-table) editor whose row it can't reach ("row not found / didn't mount").
-      // Write those editor-agnostically via the API (confirmTextTaskTargetV2 = write + confirm).
-      const editorMiss = /not found|did not mount|didn.t mount|virtuali|out of range|no editor|mount/i.test(reason);
-      if (editorMiss && a.sourceTextId) {
-        wbLog(`DOM editor unreachable (${reason}) — API-writing ${q.key} @task ${a.taskId} seg#${a.rank}`);
-        wbSetStatus(i, 'writing', "Editor isn't typeable here — writing via the API…");
-        const ar = await wbCall('API_CONFIRM', { taskId: a.taskId, key: q.key, sourceTextId: a.sourceTextId, flowSequence: a.flowSequence, text: a.final });
-        if (ar && ar.ok) {
-          await wbSleep(350);
-          const v2 = await wbCall('API_TASK', { taskId: a.taskId });
-          const seg2 = v2 && v2.ok && v2.rows.find((x) => x.sourceTextId === a.sourceTextId);
-          const ok2 = seg2 && wbFold(seg2.target) === wbFold(a.final);
-          wbLog(`  API write ${q.key}: server=${ok2 ? 'matches' : (seg2 ? 'not-yet(status ' + seg2.status + ')' : 're-read failed')}`);
-          q.doneTasks = q.doneTasks || []; if (!q.doneTasks.includes(a.taskId)) q.doneTasks.push(a.taskId);
-          q.live = null; q.decision = null; q.api = null; q.status = 'written';
-          if (WB.lqa && WB.workbook) { q.agreed = true; const st = wbStampAgreeForKey(q.key); if (st) wbLog(`📋 Column I → "agree" for ${q.key} (${st} row)`); }
-          q.note = `✅ Written + confirmed via the API (this task's editor can't be typed into) · task ${a.taskId}${ok2 ? ' · server confirms it saved' : ' · sent — reload the task to verify'}. Reload the task to see it in the editor. Same key elsewhere? Search → 👁 → Check → Write. You resubmit each task.`;
-          wbRenderQueue(); return;
-        }
-        wbLog(`⚠ API write failed — ${(ar && (ar.msg || ('status_code ' + ar.status_code) || ('HTTP ' + ar.http))) || 'unknown'}`);
-        wbSetStatus(i, 'checked', `⚠ Couldn't write here — the editor isn't typeable and the API write failed (${(ar && (ar.msg || ar.status_code)) || 'unknown'}). Do this key by hand.`);
-        return;
-      }
-      wbLog(`⚠ write refused — task ${a.taskId} seg#${a.rank} id=${a.sourceTextId} → ${reason}${r && r.sawSource ? ` · saw "${String(r.sawSource).slice(0, 90)}"` : ''}`);
-      wbSetStatus(i, 'checked', `⚠ Write failed — ${reason}${r && r.sawSource ? ` · the row read "${String(r.sawSource).slice(0, 70)}"` : ''}`);
+      wbLog(`DOM write failed (${reason}) — API fallback for ${q.key} @task ${a.taskId} seg#${a.rank}${r && r.sawSource ? ` · row read "${String(r.sawSource).slice(0, 90)}"` : ''}`);
+      await apiWrite('dom-fail: ' + reason);
       return;
     }
     if (!r.wrote) {
-      wbLog(`⚠ typed but editor text ≠ Final — seg#${a.rank}: after="${String(r.after || '').slice(0, 120)}"`);
-      wbSetStatus(i, 'checked', `⚠ Typed into seg #${a.rank}, but the editor text doesn't match the Final (placeholders/chips may differ) — check this row by hand before resubmitting.`); return;
+      wbLog(`typed but editor text ≠ Final — seg#${a.rank}: after="${String(r.after || '').slice(0, 120)}" — API fallback`);
+      await apiWrite('dom-mismatch');
+      return;
     }
     // verify-after-write: re-read the task via the API and confirm the value persisted server-side.
     await wbSleep(400);
