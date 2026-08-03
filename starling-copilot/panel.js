@@ -1560,8 +1560,33 @@ async function wbWriteApi(i) {
     const before = q.live && q.live.target;
     const r = await wbCall('WB_WRITE_SEG', { seg: a.rank, text: a.final, confirm: doConfirm, expectSource: q.live && q.live.source });
     if (!r || !r.ok) {
-      wbLog(`⚠ write refused — task ${a.taskId} seg#${a.rank} id=${a.sourceTextId} → ${(r && r.reason) || '?'}${r && r.sawSource ? ` · saw "${String(r.sawSource).slice(0, 90)}"` : ''}`);
-      wbSetStatus(i, 'checked', `⚠ Write failed — ${(r && r.reason) || 'unknown'}${r && r.sawSource ? ` · the row read "${String(r.sawSource).slice(0, 70)}"` : ''}`);
+      const reason = (r && r.reason) || 'unknown';
+      // The DOM writer types into the String/LIGHT editor. Some tasks use the Document
+      // (virtual-table) editor whose row it can't reach ("row not found / didn't mount").
+      // Write those editor-agnostically via the API (confirmTextTaskTargetV2 = write + confirm).
+      const editorMiss = /not found|did not mount|didn.t mount|virtuali|out of range|no editor|mount/i.test(reason);
+      if (editorMiss && a.sourceTextId) {
+        wbLog(`DOM editor unreachable (${reason}) — API-writing ${q.key} @task ${a.taskId} seg#${a.rank}`);
+        wbSetStatus(i, 'writing', "Editor isn't typeable here — writing via the API…");
+        const ar = await wbCall('API_CONFIRM', { taskId: a.taskId, key: q.key, sourceTextId: a.sourceTextId, flowSequence: a.flowSequence, text: a.final });
+        if (ar && ar.ok) {
+          await wbSleep(350);
+          const v2 = await wbCall('API_TASK', { taskId: a.taskId });
+          const seg2 = v2 && v2.ok && v2.rows.find((x) => x.sourceTextId === a.sourceTextId);
+          const ok2 = seg2 && wbFold(seg2.target) === wbFold(a.final);
+          wbLog(`  API write ${q.key}: server=${ok2 ? 'matches' : (seg2 ? 'not-yet(status ' + seg2.status + ')' : 're-read failed')}`);
+          q.doneTasks = q.doneTasks || []; if (!q.doneTasks.includes(a.taskId)) q.doneTasks.push(a.taskId);
+          q.live = null; q.decision = null; q.api = null; q.status = 'written';
+          if (WB.lqa && WB.workbook) { q.agreed = true; const st = wbStampAgreeForKey(q.key); if (st) wbLog(`📋 Column I → "agree" for ${q.key} (${st} row)`); }
+          q.note = `✅ Written + confirmed via the API (this task's editor can't be typed into) · task ${a.taskId}${ok2 ? ' · server confirms it saved' : ' · sent — reload the task to verify'}. Reload the task to see it in the editor. Same key elsewhere? Search → 👁 → Check → Write. You resubmit each task.`;
+          wbRenderQueue(); return;
+        }
+        wbLog(`⚠ API write failed — ${(ar && (ar.msg || ('status_code ' + ar.status_code) || ('HTTP ' + ar.http))) || 'unknown'}`);
+        wbSetStatus(i, 'checked', `⚠ Couldn't write here — the editor isn't typeable and the API write failed (${(ar && (ar.msg || ar.status_code)) || 'unknown'}). Do this key by hand.`);
+        return;
+      }
+      wbLog(`⚠ write refused — task ${a.taskId} seg#${a.rank} id=${a.sourceTextId} → ${reason}${r && r.sawSource ? ` · saw "${String(r.sawSource).slice(0, 90)}"` : ''}`);
+      wbSetStatus(i, 'checked', `⚠ Write failed — ${reason}${r && r.sawSource ? ` · the row read "${String(r.sawSource).slice(0, 70)}"` : ''}`);
       return;
     }
     if (!r.wrote) {
