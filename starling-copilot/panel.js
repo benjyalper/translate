@@ -1000,7 +1000,10 @@ function wbBuildIndex() {
     // anything not clearly Hebrew is skipped wholesale.
     // The LQA report is a Hebrew-only file whose data tab ("All") isn't name-tagged he — always
     // index the tab the user actually loaded, so its keys resolve instead of coming back "norev".
-    const isLoadedLqaTab = WB.lqa && name === WB.sheetName;
+    // Index the tab if it's the loaded LQA tab OR its own header self-identifies as an LQA
+    // report (independent of the tab selector / WB.lqa — the data tab "All" matches no locale
+    // name, so name-matching alone dropped it and the index came back empty).
+    const isLoadedLqaTab = (WB.lqa && name === WB.sheetName) || wbIsLqaReport(header);
     if (!isLoadedLqaTab && m.lang < 0 && !/he[_-]?il|hebrew|^he$|\bhe\b|sync/i.test(name)) { WB.indexTabs.push(`${name}:skipped(non-he)`); continue; }
     const g = (r, i) => (i >= 0 && i < r.length) ? String(r[i]).trim() : '';
     let n = 0, dropped = 0;
@@ -1100,10 +1103,16 @@ function wbReadFile(input) {
         const wb = XLSX.read(new Uint8Array(r.result), { type: 'array' });
         WB.workbook = wb; WB.tabNames = wb.SheetNames;
         const sel = $('wb-tab'); sel.innerHTML = wb.SheetNames.map((n) => `<option>${esc(n)}</option>`).join('');
+        // Prefer the tab whose HEADER is an LQA report with data — the TikTok report's data tab
+        // is named "All", which no Hebrew name-pattern matches, so name-matching alone left the
+        // selector on tab 1 ("Issue mapping") → wrong WB.lqa/sheetName → empty index. Fall back
+        // to a Hebrew-named tab for non-LQA files.
+        const lqaTab = wb.SheetNames.find((n) => wbTabIsLqaWithData(wb, n));
         const heTab = wb.SheetNames.find((n) => /he[_-]?il|hebrew|^he$/i.test(n)) || wb.SheetNames.find((n) => /\bhe\b/i.test(n));
-        if (heTab) sel.value = heTab;
+        const pick = lqaTab || heTab;
+        if (pick) sel.value = pick;
         $('wb-tab-row').hidden = false;
-        info('wb-info', `Workbook "${f.name}" · ${wb.SheetNames.length} tab(s). Pick the tab, then Load.`, 'good');
+        info('wb-info', `Workbook "${f.name}" · ${wb.SheetNames.length} tab(s).${lqaTab ? ` LQA data tab "${lqaTab}" auto-selected —` : ' Pick the tab, then'} click Load.`, 'good');
       } else {
         WB.workbook = null; $('wb-tab-row').hidden = true;
         $('wb-input').value = r.result;
@@ -1122,6 +1131,19 @@ function wbIsLqaReport(header) {
   const h = header.map((x) => String(x).toLowerCase());
   const has = (re) => h.some((x) => re.test(x));
   return has(/suggested translation/) && has(/before translation|lqa comment|validation feedback/);
+}
+// True if a workbook tab's own header is an LQA report AND it has at least one data row.
+// Used to auto-select the data tab on load (its name — e.g. "All" — matches no locale pattern).
+function wbTabIsLqaWithData(wb, name) {
+  try {
+    const ws = wb.Sheets[name]; if (!ws) return false;
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: false, blankrows: false });
+    if (!rows || rows.length < 2) return false;
+    let hi = rows.findIndex((r) => r.some((c) => /key/i.test(c)) && r.some((c) => /valid|final|suggested/i.test(c)));
+    if (hi < 0) return false;
+    if (!wbIsLqaReport(rows[hi].map((c) => String(c).trim()))) return false;
+    return rows.slice(hi + 1).some((r) => r.some((c) => String(c).trim().length));   // has data
+  } catch (e) { return false; }
 }
 function wbAutoMap(header) {
   const used = new Set(), map = {};
