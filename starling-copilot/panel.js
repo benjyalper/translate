@@ -998,7 +998,10 @@ function wbBuildIndex() {
     // would let a Korean final match a Hebrew segment and get written. Tabs with a
     // Language column are filtered per row; tabs without one are judged by tab name, and
     // anything not clearly Hebrew is skipped wholesale.
-    if (m.lang < 0 && !/he[_-]?il|hebrew|^he$|\bhe\b|sync/i.test(name)) { WB.indexTabs.push(`${name}:skipped(non-he)`); continue; }
+    // The LQA report is a Hebrew-only file whose data tab ("All") isn't name-tagged he — always
+    // index the tab the user actually loaded, so its keys resolve instead of coming back "norev".
+    const isLoadedLqaTab = WB.lqa && name === WB.sheetName;
+    if (!isLoadedLqaTab && m.lang < 0 && !/he[_-]?il|hebrew|^he$|\bhe\b|sync/i.test(name)) { WB.indexTabs.push(`${name}:skipped(non-he)`); continue; }
     const g = (r, i) => (i >= 0 && i < r.length) ? String(r[i]).trim() : '';
     let n = 0, dropped = 0;
     rows.slice(hi + 1).forEach((r, idx) => {
@@ -1006,8 +1009,12 @@ function wbBuildIndex() {
       if (!key || !src) return;
       const lang = g(r, m.lang);
       if (m.lang >= 0 && !/^he|hebrew/i.test(lang)) { dropped++; return; }   // he rows only
+      const final = g(r, m.final);
+      // LQA: you adjudicate per card (Write = agree), so any row with a Suggested fix is a
+      // candidate — don't gate on Column I being pre-filled with "agree". Otherwise use Valid.
+      const valid = isLoadedLqaTab ? !!final : wbIsYes(g(r, m.valid));
       if (!WB.index.has(key)) WB.index.set(key, []);
-      WB.index.get(key).push({ tab: name, row: hi + 2 + idx, source: src, valid: wbIsYes(g(r, m.valid)), final: g(r, m.final) });
+      WB.index.get(key).push({ tab: name, row: hi + 2 + idx, source: src, valid, final });
       n++;
     });
     if (n || dropped) WB.indexTabs.push(`${name}:${n}` + (dropped ? ` (+${dropped} non-he dropped)` : ''));
@@ -1213,29 +1220,39 @@ function wbBuild() {
   const tail = (skipped ? ` · ${skipped} missing key/fix` : '') + (nochange ? ` · ${nochange} no-change skipped` : '') + (notYes ? ` · ${notYes} not "agree"` : '') + (notHe ? ` · ${notHe} non-he skipped` : '');
   info('wb-build-info', `Queue: ${WB.queue.length} key(s)` + (conflicts ? ` · ⚠ ${conflicts} conflict` : '') + tail, conflicts ? 'err' : 'good');
 }
-// Export the ORIGINAL .xlsx with "agree" stamped into Column I for every key you actually
-// wrote to Starling (rows that reached at least one written task). Scans the live worksheet by
-// key — robust to blank rows — and never overwrites a cell you already filled with a comment.
+// Stamp "agree" into Column I for every sheet row carrying `key` whose cell is still empty.
+// Called on each successful Write + confirm (LQA mode) so the in-memory workbook always mirrors
+// your decisions; never clobbers a comment you typed yourself. Returns the number of cells set.
+// (Browsers can't silently overwrite the file on disk — the actual .xlsx download is the Export
+// button. Because this keeps the workbook current, Export always reflects everything written.)
+function wbStampAgreeForKey(key) {
+  if (typeof XLSX === 'undefined' || !WB.workbook || !WB.sheetName) return 0;
+  const ws = WB.workbook.Sheets[WB.sheetName];
+  const colI = WB.map.valid, colKey = WB.map.key;
+  if (!ws || !ws['!ref'] || colI == null || colI < 0 || colKey == null || colKey < 0) return 0;
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  const want = String(key == null ? '' : key).trim();
+  let n = 0;
+  for (let R = range.s.r; R <= range.e.r; R++) {
+    const kc = ws[XLSX.utils.encode_cell({ r: R, c: colKey })];
+    if (!kc || String(kc.v == null ? '' : kc.v).trim() !== want) continue;
+    const addr = XLSX.utils.encode_cell({ r: R, c: colI });
+    const cur = ws[addr] && ws[addr].v;
+    if (cur == null || String(cur).trim() === '') { ws[addr] = { t: 's', v: 'agree' }; n++; }
+  }
+  return n;
+}
+// Download the (already-stamped) workbook. Re-stamps every written key defensively first, so it
+// works even if a per-write stamp was missed. Never clobbers cells you filled yourself.
 function wbExportForm() {
   if (typeof XLSX === 'undefined') { info('wb-queue-info', 'xlsx writer not loaded — reload the extension.', 'err'); return; }
   if (!WB.workbook || !WB.sheetName) { info('wb-queue-info', 'Export needs the original .xlsx (load the file, not pasted text).', 'err'); return; }
-  const ws = WB.workbook.Sheets[WB.sheetName];
-  const colI = WB.map.valid, colKey = WB.map.key;
-  if (colI == null || colI < 0 || colKey == null || colKey < 0) { info('wb-queue-info', 'Column I ("Validation feedback") or Key isn\'t mapped — fix the mapping.', 'err'); return; }
-  const wroteKeys = new Set(WB.queue.filter((q) => q.doneTasks && q.doneTasks.length).map((q) => q.key));
-  if (!wroteKeys.size) { info('wb-queue-info', 'Nothing written yet — write some fixes to Starling first, then export.', 'err'); return; }
-  const range = XLSX.utils.decode_range(ws['!ref']);
-  let stamped = 0;
-  for (let R = range.s.r; R <= range.e.r; R++) {
-    const kc = ws[XLSX.utils.encode_cell({ r: R, c: colKey })];
-    const key = kc ? String(kc.v == null ? '' : kc.v).trim() : '';
-    if (!key || !wroteKeys.has(key)) continue;                 // header row's "Key" naturally excluded
-    const addr = XLSX.utils.encode_cell({ r: R, c: colI });
-    const cur = ws[addr] && ws[addr].v;
-    if (cur == null || String(cur).trim() === '') { ws[addr] = { t: 's', v: 'agree' }; stamped++; }  // don't clobber your own comments
-  }
+  if (WB.map.valid == null || WB.map.valid < 0 || WB.map.key == null || WB.map.key < 0) { info('wb-queue-info', 'Column I ("Validation feedback") or Key isn\'t mapped — fix the mapping.', 'err'); return; }
+  const wroteKeys = [...new Set(WB.queue.filter((q) => q.doneTasks && q.doneTasks.length).map((q) => q.key))];
+  if (!wroteKeys.length) { info('wb-queue-info', 'Nothing written yet — write some fixes to Starling first, then export.', 'err'); return; }
+  for (const k of wroteKeys) wbStampAgreeForKey(k);
   const fname = `${(WB.sheetName || 'LQA').replace(/[^\w-]+/g, '_')}_he_filled_${new Date().toISOString().slice(0, 10)}.xlsx`;
-  try { XLSX.writeFile(WB.workbook, fname); info('wb-queue-info', `⬇ Exported ${fname} — stamped "agree" in Column I for ${stamped} written row(s). Review the rest by hand before returning the form.`, 'good'); }
+  try { XLSX.writeFile(WB.workbook, fname); info('wb-queue-info', `⬇ Exported ${fname} — Column I = "agree" on ${wroteKeys.length} written key(s). Review/annotate the rest by hand before returning the form.`, 'good'); }
   catch (e) { info('wb-queue-info', 'Export failed: ' + e.message, 'err'); }
 }
 
@@ -1332,6 +1349,7 @@ async function wbWriteDom(i) {
     // Clear the live read so the next task must be Checked, and keep the buttons live so
     // you can Search → open another 👁 → Check → Write again. "Done" ends the card.
     q.live = null; q.decision = null; q.status = 'written';
+    if (WB.lqa && WB.workbook) { q.agreed = true; const st = wbStampAgreeForKey(q.key); if (st) wbLog(`📋 Column I → "agree" for ${q.key} (${st} row) — Export form to download`); }
     q.note = `Wrote${r.confirmed ? ' + proofread-confirmed ✓' : ' (auto-confirm off / not found — confirm by hand)'} to task ${tid}. Same key in another task? Search again, open it with 👁, Check, Write. Click “Done” when every task is fixed. You resubmit each task.`;
     wbRenderQueue();
   } catch (e) { wbSetStatus(i, 'checked', e.message); }
@@ -1561,6 +1579,7 @@ async function wbWriteApi(i) {
     q.doneTasks = q.doneTasks || [];
     if (!q.doneTasks.includes(a.taskId)) q.doneTasks.push(a.taskId);
     q.live = null; q.decision = null; q.api = null; q.status = 'written';
+    if (WB.lqa && WB.workbook) { q.agreed = true; const st = wbStampAgreeForKey(q.key); if (st) wbLog(`📋 Column I → "agree" for ${q.key} (${st} row) — Export form to download`); }
     const serverNote = persisted ? 'server confirms it saved' : 'typed into the editor — it will save on confirm/resubmit';
     q.note = `✅ Typed into the editor + ${r.confirmed ? 'proofread-confirmed' : 'written (not confirmed — confirm by hand)'} · task ${a.taskId} (seg #${a.rank}) · ${serverNote}. The editor now shows the fix. Same key in another task? Search again, open it with 👁, Check, Write. Click “Done” when every task is fixed. You resubmit each task.`;
     wbRenderQueue();
