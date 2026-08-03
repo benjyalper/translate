@@ -1011,7 +1011,7 @@ function wbBuildIndex() {
       const key = g(r, m.key), src = g(r, m.src);
       if (!key || !src) return;
       const lang = g(r, m.lang);
-      if (m.lang >= 0 && !/^he|hebrew/i.test(lang)) { dropped++; return; }   // he rows only
+      if (!isLoadedLqaTab && m.lang >= 0 && !/^he|hebrew/i.test(lang)) { dropped++; return; }   // he rows only (never drop on the loaded LQA tab — it's single-language)
       const final = g(r, m.final);
       // LQA: you adjudicate per card (Write = agree), so any row with a Suggested fix is a
       // candidate — don't gate on Column I being pre-filled with "agree". Otherwise use Valid.
@@ -1154,7 +1154,7 @@ function wbAutoMap(header) {
     map.tgt   = find(/before translation|^before/i);      // current Hebrew = the "Before"
     map.final = find(/suggested translation|suggest/i);   // the LQA fix to write into Starling
     map.valid = find(/validation feedback/i);             // col I (proofreader) — your "agree"
-    map.lang  = find(/^lang|language/i);
+    map.lang  = find(/^lang(uage)?$/i);   // exact "Language"/"Lang" only — NOT "Validation feedback (from Language Leads)"
     return map;
   }
   map.key = find(/^key$|\bkey\b|键|鍵/i);
