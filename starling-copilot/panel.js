@@ -960,7 +960,7 @@ function lqOnFile(input) {
 // RELOAD — the URL param only applies on a real load), open the task, read the
 // live segment, write the Final Translation, and proofread-confirm that one row.
 // It guards on source-match and shows live-vs-sheet before every write. NEVER submits.
-const WB = { header: [], records: [], map: {}, rows: [], queue: [], filter: 'todo', workbook: null, tabNames: [], engine: 'api', index: new Map(), indexTabs: [], lqa: false, sheetName: '', fileName: '' };
+const WB = { header: [], records: [], map: {}, rows: [], queue: [], filter: 'todo', workbook: null, tabNames: [], engine: 'api', index: new Map(), indexTabs: [], lqa: false, sheetName: '', fileName: '', rawBytes: null };
 
 // Join normaliser for sheet-source ↔ live-source comparison. The API returns the TRUE
 // characters, and real content uses fullwidth punctuation ("Man United defender｜…") and
@@ -1101,7 +1101,7 @@ function wbReadFile(input) {
       if (isXlsx) {
         if (typeof XLSX === 'undefined') { info('wb-info', 'xlsx reader not loaded — reload the extension.', 'err'); return; }
         const wb = XLSX.read(new Uint8Array(r.result), { type: 'array' });
-        WB.workbook = wb; WB.tabNames = wb.SheetNames; WB.fileName = f.name;
+        WB.workbook = wb; WB.tabNames = wb.SheetNames; WB.fileName = f.name; WB.rawBytes = new Uint8Array(r.result);
         const sel = $('wb-tab'); sel.innerHTML = wb.SheetNames.map((n) => `<option>${esc(n)}</option>`).join('');
         // Prefer the tab whose HEADER is an LQA report with data — the TikTok report's data tab
         // is named "All", which no Hebrew name-pattern matches, so name-matching alone left the
@@ -1114,7 +1114,7 @@ function wbReadFile(input) {
         $('wb-tab-row').hidden = false;
         info('wb-info', `Workbook "${f.name}" · ${wb.SheetNames.length} tab(s).${lqaTab ? ` LQA data tab "${lqaTab}" auto-selected —` : ' Pick the tab, then'} click Load.`, 'good');
       } else {
-        WB.workbook = null; WB.fileName = ''; $('wb-tab-row').hidden = true;
+        WB.workbook = null; WB.fileName = ''; WB.rawBytes = null; $('wb-tab-row').hidden = true;
         $('wb-input').value = r.result;
         info('wb-info', `Loaded ${f.name}. Click Load.`, 'good');
       }
@@ -1329,8 +1329,133 @@ async function wbRestoreProgress() {
   if (nSkip) parts.push(`${nSkip} skipped`);
   if (parts.length) { wbRenderQueue(); info('wb-build-info', `↩ Restored progress: ${parts.join(' · ')} — marked done (switch to “All” to see them).`, 'good'); }
 }
-// Download the (already-stamped) workbook. Re-stamps every written key defensively first, so it
-// works even if a per-write stamp was missed. Never clobbers cells you filled yourself.
+// ---- in-browser xlsx zip-surgery (STYLE-PRESERVING export) ---------------------------------
+// SheetJS mini rewrites the whole workbook and strips Excel styling. Instead we edit the ORIGINAL
+// file's bytes: inflate only the target sheet's XML, inject inline-string cells into Column I,
+// re-deflate that one entry, and copy every other entry's compressed bytes verbatim — so all
+// formatting survives. Core (crc32/zipEntries/zipBuild/injectCol) is byte-for-byte the code
+// verified in Node against the real report; only inflate/deflate use the browser streams here.
+const CRC_TABLE = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1); t[n] = c >>> 0; } return t; })();
+function crc32(buf) { let c = 0xFFFFFFFF; for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+function zipEntries(bytes) {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const u16 = (o) => dv.getUint16(o, true), u32 = (o) => dv.getUint32(o, true);
+  let eocd = -1;
+  for (let i = bytes.length - 22; i >= 0 && i >= bytes.length - 22 - 65536; i--) { if (u32(i) === 0x06054b50) { eocd = i; break; } }
+  if (eocd < 0) throw new Error('EOCD not found');
+  const count = u16(eocd + 10); let off = u32(eocd + 16);
+  const entries = [];
+  for (let n = 0; n < count; n++) {
+    if (u32(off) !== 0x02014b50) throw new Error('bad central header');
+    const flag = u16(off + 8), method = u16(off + 10), crc = u32(off + 16);
+    const csize = u32(off + 20), usize = u32(off + 24);
+    const nameLen = u16(off + 28), extraLen = u16(off + 30), commentLen = u16(off + 32);
+    const localOff = u32(off + 42);
+    const name = new TextDecoder().decode(bytes.subarray(off + 46, off + 46 + nameLen));
+    entries.push({ name, flag, method, crc, csize, usize, localOff });
+    off += 46 + nameLen + extraLen + commentLen;
+  }
+  for (const e of entries) {
+    const lo = e.localOff;
+    if (u32(lo) !== 0x04034b50) throw new Error('bad local header for ' + e.name);
+    const dataStart = lo + 30 + u16(lo + 26) + u16(lo + 28);
+    e.cdata = bytes.subarray(dataStart, dataStart + e.csize);
+  }
+  return entries;
+}
+function zipBuild(entries) {
+  const enc = new TextEncoder(); const parts = []; let offset = 0; const central = [];
+  for (const e of entries) {
+    const nb = enc.encode(e.name);
+    const lh = new Uint8Array(30 + nb.length); const dv = new DataView(lh.buffer);
+    dv.setUint32(0, 0x04034b50, true); dv.setUint16(4, 20, true); dv.setUint16(6, (e.flag || 0) & ~0x8, true);
+    dv.setUint16(8, e.method, true); dv.setUint32(14, e.crc, true);
+    dv.setUint32(18, e.cdata.length, true); dv.setUint32(22, e.usize, true);
+    dv.setUint16(26, nb.length, true); lh.set(nb, 30);
+    parts.push(lh, e.cdata);
+    const ch = new Uint8Array(46 + nb.length); const cv = new DataView(ch.buffer);
+    cv.setUint32(0, 0x02014b50, true); cv.setUint16(4, 20, true); cv.setUint16(6, 20, true);
+    cv.setUint16(8, (e.flag || 0) & ~0x8, true); cv.setUint16(10, e.method, true);
+    cv.setUint32(16, e.crc, true); cv.setUint32(20, e.cdata.length, true); cv.setUint32(24, e.usize, true);
+    cv.setUint16(28, nb.length, true); cv.setUint32(42, offset, true); ch.set(nb, 46);
+    central.push(ch); offset += lh.length + e.cdata.length;
+  }
+  const cdStart = offset; let cdSize = 0; for (const c of central) cdSize += c.length;
+  const eocd = new Uint8Array(22); const ev = new DataView(eocd.buffer);
+  ev.setUint32(0, 0x06054b50, true); ev.setUint16(8, central.length, true); ev.setUint16(10, central.length, true);
+  ev.setUint32(12, cdSize, true); ev.setUint32(16, cdStart, true);
+  const all = [...parts, ...central, eocd]; let total = 0; for (const a of all) total += a.length;
+  const out = new Uint8Array(total); let p = 0; for (const a of all) { out.set(a, p); p += a.length; }
+  return out;
+}
+function zipXmlEsc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function zipColGt(a, b) { return a.length !== b.length ? a.length > b.length : a > b; }
+function zipColLetter(idx) { let s = '', n = idx + 1; while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); } return s; }
+function injectCol(xml, colLetter, stampMap) {
+  let n = 0;
+  const out = xml.replace(/(<row[^>]*\br="(\d+)"[^>]*>)([\s\S]*?)(<\/row>)/g, (m, head, rnum, body, tail) => {
+    if (!(rnum in stampMap)) return m;
+    const ref = colLetter + rnum;
+    const existing = new RegExp('<c\\b[^>]*\\br="' + ref + '"[^>]*?(?:/>|>[\\s\\S]*?</c>)');
+    const em = body.match(existing);
+    let sAttr = '';
+    if (em) { const sm = em[0].match(/^<c\b[^>]*?\ss="(\d+)"/); if (sm) sAttr = ' s="' + sm[1] + '"'; }
+    const cell = `<c r="${ref}"${sAttr} t="inlineStr"><is><t xml:space="preserve">${zipXmlEsc(stampMap[rnum])}</t></is></c>`;
+    if (em) { body = body.replace(existing, cell); }
+    else {
+      let ins = body.length;
+      const cellRe = /<c\b[^>]*\br="([A-Z]+)\d+"/g; let mm;
+      while ((mm = cellRe.exec(body))) { if (zipColGt(mm[1], colLetter)) { ins = mm.index; break; } }
+      body = body.slice(0, ins) + cell + body.slice(ins);
+    }
+    n++; return head + body + tail;
+  });
+  return { xml: out, n };
+}
+async function zipInflateRaw(bytes) { const ds = new DecompressionStream('deflate-raw'); return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(ds)).arrayBuffer()); }
+async function zipDeflateRaw(bytes) { const cs = new CompressionStream('deflate-raw'); return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(cs)).arrayBuffer()); }
+
+// Style-preserving export: inject the in-memory Column I values into the ORIGINAL file's bytes.
+async function wbStyledExport(fname) {
+  const entries = zipEntries(WB.rawBytes);
+  const byName = {}; for (const e of entries) byName[e.name] = e;
+  const getText = async (name) => { const e = byName[name]; if (!e) return null; const raw = e.method === 0 ? e.cdata : await zipInflateRaw(e.cdata); return new TextDecoder().decode(raw); };
+  const wbx = await getText('xl/workbook.xml');
+  const rels = await getText('xl/_rels/workbook.xml.rels');
+  if (!wbx || !rels) throw new Error('workbook parts missing');
+  const ne = WB.sheetName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const ridM = wbx.match(new RegExp('<sheet[^>]*name="' + ne + '"[^>]*r:id="(rId\\d+)"')) || wbx.match(new RegExp('<sheet[^>]*r:id="(rId\\d+)"[^>]*name="' + ne + '"'));
+  if (!ridM) throw new Error('sheet "' + WB.sheetName + '" not in workbook.xml');
+  const tgtM = rels.match(new RegExp('Id="' + ridM[1] + '"[^>]*Target="([^"]+)"'));
+  if (!tgtM) throw new Error('sheet relationship not found');
+  const tgt = tgtM[1]; const sheetPath = tgt.charAt(0) === '/' ? tgt.slice(1) : (tgt.slice(0, 3) === 'xl/' ? tgt : 'xl/' + tgt);
+  const xml = await getText(sheetPath);
+  if (!xml) throw new Error('sheet xml missing: ' + sheetPath);
+  const ws = WB.workbook.Sheets[WB.sheetName];
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  const colI = WB.map.valid, colLetter = zipColLetter(colI);
+  const stampMap = {};
+  for (let R = range.s.r; R <= range.e.r; R++) {
+    const cell = ws[XLSX.utils.encode_cell({ r: R, c: colI })];
+    const val = cell && cell.v != null ? String(cell.v).trim() : '';
+    if (val) stampMap[R + 1] = val;
+  }
+  const res = injectCol(xml, colLetter, stampMap);
+  const nb = new TextEncoder().encode(res.xml);
+  const te = byName[sheetPath];
+  te.usize = nb.length; te.crc = crc32(nb); te.method = 8; te.cdata = await zipDeflateRaw(nb);
+  const out = zipBuild(entries);
+  const url = URL.createObjectURL(new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+  const a = document.createElement('a'); a.href = url; a.download = fname; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  return res.n;
+}
+function wbExportPlain(fname, count) {
+  try { XLSX.writeFile(WB.workbook, fname.replace(/ with-agrees\.xlsx$/i, '_he_filled.xlsx')); info('wb-queue-info', `⬇ Exported (plain — Excel styling NOT preserved) · Column I = "agree" on ${count} key(s). To keep formatting, run make-deliverable.bat on the original + this file.`, 'good'); }
+  catch (e) { info('wb-queue-info', 'Export failed: ' + e.message, 'err'); }
+}
+// Export orchestrator: re-stamp defensively, then produce the FORMATTED file in-browser
+// (falls back to the plain SheetJS write only if the zip surgery isn't available/fails).
 function wbExportForm() {
   if (typeof XLSX === 'undefined') { info('wb-queue-info', 'xlsx writer not loaded — reload the extension.', 'err'); return; }
   if (!WB.workbook || !WB.sheetName) { info('wb-queue-info', 'Export needs the original .xlsx (load the file, not pasted text).', 'err'); return; }
@@ -1338,9 +1463,16 @@ function wbExportForm() {
   const wroteKeys = [...new Set(WB.queue.filter((q) => q.doneTasks && q.doneTasks.length).map((q) => q.key))];
   if (!wroteKeys.length) { info('wb-queue-info', 'Nothing written yet — write some fixes to Starling first, then export.', 'err'); return; }
   for (const k of wroteKeys) wbStampAgreeForKey(k);
-  const fname = `${(WB.sheetName || 'LQA').replace(/[^\w-]+/g, '_')}_he_filled_${new Date().toISOString().slice(0, 10)}.xlsx`;
-  try { XLSX.writeFile(WB.workbook, fname); info('wb-queue-info', `⬇ Exported ${fname} — Column I = "agree" on ${wroteKeys.length} written key(s). Review/annotate the rest by hand before returning the form.`, 'good'); }
-  catch (e) { info('wb-queue-info', 'Export failed: ' + e.message, 'err'); }
+  const base = WB.fileName ? WB.fileName.replace(/\.xlsx?$/i, '') : (WB.sheetName || 'LQA');
+  const fname = base + ' with-agrees.xlsx';
+  if (WB.rawBytes && typeof DecompressionStream !== 'undefined' && typeof CompressionStream !== 'undefined') {
+    info('wb-queue-info', 'Building the formatted file…', 'good');
+    wbStyledExport(fname)
+      .then((n) => info('wb-queue-info', `⬇ Exported ${fname} — ${n} "agree"(s) in Column I, original formatting kept. Ready to submit.`, 'good'))
+      .catch((e) => { wbLog('styled export failed: ' + (e && e.message)); info('wb-queue-info', 'Formatted export failed (' + (e && e.message) + ') — wrote a plain copy instead.', 'err'); wbExportPlain(fname, wroteKeys.length); });
+  } else {
+    wbExportPlain(fname, wroteKeys.length);
+  }
 }
 
 // ---- orchestration (drive the active Starling tab across hard reloads) ----
