@@ -1605,8 +1605,13 @@ async function wbWriteApi(i) {
     q.doneTasks = q.doneTasks || []; if (!q.doneTasks.includes(a.taskId)) q.doneTasks.push(a.taskId);
     q.live = null; q.decision = null; q.api = null; q.status = 'written';
     if (WB.lqa && WB.workbook) { q.agreed = true; const st = wbStampAgreeForKey(q.key); if (st) wbLog(`📋 Column I → "agree" for ${q.key} (${st} row) — Export form to download`); }
-    q.note = `✅ Written + confirmed via the API · task ${a.taskId}${ok2 ? ' · server confirms it saved' : ' · sent — reload the task to verify'}. Reload the task to see the fix in the editor. Same key elsewhere? Search → 👁 → Check → Write. You resubmit each task.`;
-    wbRenderQueue(); return true;
+    q.note = `✅ Written + confirmed via the API · task ${a.taskId}${ok2 ? ' · server confirms it saved' : ' · sent'} · refreshing the task so the fix shows in the editor… Same key elsewhere? Search → 👁 → Check → Write. You resubmit each task.`;
+    wbRenderQueue();
+    // The API write saves server-side but doesn't repaint the on-screen editor — reload the
+    // task tab (as Confirm-all does) so the fix + green ✓✓ show without a manual refresh. The
+    // open tab was already verified to be this task earlier in wbWriteApi.
+    try { const t = await wbActiveTab(); if (t) { await wbSleep(600); await chrome.tabs.reload(t.id); } } catch (e) {}
+    return true;
   };
 
   // LQA tasks overwhelmingly use the Document (virtual-table) editor the DOM writer can't
