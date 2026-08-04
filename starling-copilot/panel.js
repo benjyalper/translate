@@ -1062,6 +1062,7 @@ async function wbCall(type, payload) {
         const api = window.__wb;
         if (!api || api.ver !== expect) return { __noapi: true, ver: api && api.ver };
         if (type === 'WB_CTX') return await api.ctx();
+        if (type === 'WB_OPEN') return api.open ? await api.open(payload.taskId) : { ok: false, error: 'open not in this content script' };
         if (type === 'WB_FIND') return await api.find(payload.key, payload.expectSource);
         if (type === 'WB_WRITE') return await api.write(payload.edit || payload);
         if (type === 'API_TASK') return await api.apiTask(payload.taskId);
@@ -1546,8 +1547,14 @@ async function wbSearch(i) {
     const n = (ctx && ctx.matchCount) ? ` (~${ctx.matchCount} hit)` : '';
     // Auto-open the task by clicking its 👁 and navigating the same tab into the editor, so the
     // next step is just Check. If several tasks match the key, open the TOP one (Check verifies
-    // the source; if it's the wrong revision, Skip / open another by hand).
-    let op = null; try { op = await wbCall('WB_OPEN', { taskId: q.taskId }); } catch (e) {}
+    // the source; if it's the wrong revision, Skip / open another by hand). Retry a few times —
+    // right after the reload the React table may not have painted the eye rows yet.
+    let op = null;
+    for (let a = 0; a < 8; a++) {
+      try { op = await wbCall('WB_OPEN', { taskId: q.taskId }); } catch (e) { op = { ok: false, error: e.message }; }
+      if (op && (op.ok || !/still loading|no task rows/i.test(op.error || ''))) break;
+      await wbSleep(400);
+    }
     if (op && op.ok && op.url) {
       wbSetStatus(i, 'searching', `Opening task ${op.taskId}…`);
       try { await wbNav(op.url); } catch (e) {}
