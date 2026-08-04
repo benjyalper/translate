@@ -13,7 +13,7 @@
   // tab is running an older version, re-injects this file via chrome.scripting so stale tabs
   // self-heal (no page reload needed). Re-injection tears down the previous version's message
   // listener first (below) so there's never a double-listener race.
-  const CS_VERSION = 30;
+  const CS_VERSION = 31;
   if (window.__scVer === CS_VERSION) return;                         // this exact version already live here
   if (typeof window.__scCleanup === 'function') { try { window.__scCleanup(); } catch (e) {} }  // remove an older/stale one
   window.__scVer = CS_VERSION;
@@ -511,6 +511,43 @@
       rows.push({ taskId: id });
     });
     return rows;
+  }
+  // The all-task list's "eye" action (svg.semi-icons-eye_opened, wrapped in a semi button)
+  // opens the task's editor via window.open(url, '_blank'). Work button-first: there's exactly
+  // one eye svg per task row, so we take each unique VISIBLE eye button (offsetParent != null)
+  // and pair it with its Task ID by row position — the Task ID lives in .copy-icon-wrapper, and
+  // matching on the nearest vertical top avoids Semi's duplicated fixed-column row containers.
+  function wbEyeRows() {
+    const btns = [...document.querySelectorAll('svg.semi-icons-eye_opened')]
+      .map((s) => s.closest('button,[role="button"]'))
+      .filter((b, i, a) => b && b.offsetParent !== null && a.indexOf(b) === i);
+    const ids = [...document.querySelectorAll('.copy-icon-wrapper')]
+      .map((w) => ({ top: w.getBoundingClientRect().top, id: (w.textContent || '').replace(/\D/g, '').slice(0, 15) }))
+      .filter((c) => c.id.length >= 9);
+    return btns.map((btn) => {
+      const top = btn.getBoundingClientRect().top;
+      let id = '', best = 40;                                           // pair with the id cell in the same row (±40px)
+      for (const c of ids) { const d = Math.abs(c.top - top); if (d < best) { best = d; id = c.id; } }
+      return { id, btn };
+    });
+  }
+  // Click the eye for the matching task and hand the editor URL back to the panel, which
+  // navigates the SAME tab into it (so Check/Write keep talking to one tab). We intercept
+  // window.open so the eye doesn't spawn a background tab that a popup blocker might eat.
+  // taskId given → open that exact row; otherwise auto-open only when there's a single row.
+  function wbOpen(taskId) {
+    if (!/#\/all-task|\/all-task/.test(location.href)) return { ok: false, error: 'not on the All tasks list' };
+    const rows = wbEyeRows();
+    if (!rows.length) return { ok: false, error: 'no task rows with an eye icon (is the list still loading?)' };
+    // One eye per task is enough — if several rows match the key, just open the TOP one
+    // (rows are in list order). A specific taskId, if given, still wins.
+    const pick = (taskId && rows.find((r) => r.id === String(taskId))) || rows[0];
+    let captured = null; const orig = window.open;
+    window.open = function (u) { captured = u == null ? '' : String(u); return { closed: false, focus() {}, close() {} }; };
+    try { pick.btn.click(); } finally { window.open = orig; }                 // onClick→window.open is synchronous
+    if (!captured) return { ok: false, error: 'the eye click did not open a URL' };
+    let url; try { url = new URL(captured, location.href).href; } catch (e) { url = captured; }
+    return { ok: true, url, taskId: pick.id, count: rows.length };
   }
   // Starling's key search is a PREFIX/substring match, so filtering by one key can leave
   // several sibling segments visible (e.g. ..._title + ..._subtitle_paypal). Reading "the
@@ -1151,6 +1188,7 @@
           case 'API_CONFIRM_ALL': sendResponse(await apiConfirmAll(msg.opts || {})); break;
           case 'SUBMIT_TASK': sendResponse(await domSubmit()); break;
           case 'WB_CTX': sendResponse(wbCtx()); break;
+          case 'WB_OPEN': sendResponse(wbOpen(msg.taskId)); break;
           case 'WB_FIND': sendResponse(await wbFind(msg.key, msg.expectSource)); break;
           case 'WB_WRITE': sendResponse(await wbWrite(msg.edit || {})); break;
           case 'TASK_STATUS': sendResponse(taskStatus()); break;
@@ -1174,7 +1212,8 @@
     apiTask: (id) => apiTask(id), apiConfirm: (p) => apiConfirm(p || {}), apiTasks: (k) => apiTasks(k),
     apiConfirmAll: (p) => apiConfirmAll(p || {}), submitTask: () => domSubmit(),
     reveal: (seg) => revealSeg(seg).then((c) => !!c).catch(() => false),
-    writeSeg: (e) => wbWriteBySeg(e || {})
+    writeSeg: (e) => wbWriteBySeg(e || {}),
+    eyeRows: () => wbEyeRows().map((r) => r.id), open: (id) => wbOpen(id)
   };
   // Let a newer re-injection of this file cleanly replace us (no double-listener race).
   window.__scCleanup = () => { try { chrome.runtime.onMessage.removeListener(__onMessage); } catch (e) {} };

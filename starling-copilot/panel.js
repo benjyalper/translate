@@ -1046,7 +1046,7 @@ function wbBuildIndex() {
 }
 const WB_FIELDS = [['key', 'Key'], ['valid', 'Valid (Y/N)'], ['final', 'Final Translation'], ['src', 'Source (EN)'], ['tgt', 'Current target'], ['lang', 'Language']];
 const STAR_KEY_URL = 'https://starling.bytedance.com/#/all-task?pageNum=1&pageSize=10&progress=all&translateTypeList=%5B%5D&sortType=1&order=0&sourceLocales=en&targetLocales=he-IL&textKeys=';
-const CS_EXPECT = 30;   // must match content.js CS_VERSION
+const CS_EXPECT = 31;   // must match content.js CS_VERSION
 
 // Direct call surface — invokes the page's window.__wb.* via chrome.scripting.executeScript.
 // This bypasses chrome.runtime messaging entirely, so a stale/duplicate content-script
@@ -1544,7 +1544,18 @@ async function wbSearch(i) {
     await wbNav(STAR_KEY_URL + encodeURIComponent(q.key));
     let ctx = {}; try { ctx = await wbCall('WB_CTX'); } catch (e) {}
     const n = (ctx && ctx.matchCount) ? ` (~${ctx.matchCount} hit)` : '';
-    wbSetStatus(i, 'searched', `Filtered All tasks by key${n}. Open the matching task with 👁, then Check.`);
+    // Auto-open the task by clicking its 👁 and navigating the same tab into the editor, so the
+    // next step is just Check. If several tasks match the key, open the TOP one (Check verifies
+    // the source; if it's the wrong revision, Skip / open another by hand).
+    let op = null; try { op = await wbCall('WB_OPEN', { taskId: q.taskId }); } catch (e) {}
+    if (op && op.ok && op.url) {
+      wbSetStatus(i, 'searching', `Opening task ${op.taskId}…`);
+      try { await wbNav(op.url); } catch (e) {}
+      const more = op.count > 1 ? ` (top of ${op.count} matches)` : '';
+      wbSetStatus(i, 'searched', `Opened task ${op.taskId}${more} — run Check to read the live segment.`);
+      return;
+    }
+    wbSetStatus(i, 'searched', `Filtered All tasks by key${n}. ${op && op.error ? op.error + ' — ' : ''}Open the matching task with 👁, then Check.`);
   } catch (e) { wbSetStatus(i, 'todo', e.message); }
 }
 // Engine dispatch — the DOM path below is the proven v13 build, untouched. Flip the
