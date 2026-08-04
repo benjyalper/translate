@@ -2526,7 +2526,7 @@ async function plWrite() {
 async function init() {
   $('key').value = await store.get('key', '');
   $('model').value = await store.get('model', 'gpt-5.4');
-  $('plural').checked = await store.get('plural', true);
+  $('plural').checked = await store.get('plural', false);   // default OFF = singular gender-neutral slashes (TikTok guide); ON = plural לשון רבים for other clients
   $('selectors').value = await store.get('selectorsRaw', '');
   $('run-model').textContent = $('model').value;
 

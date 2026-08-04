@@ -37,7 +37,7 @@
         <option value="gpt-5.4-mini">gpt-5.4-mini (cheap draft)</option>
       </select>
       <label class="lbl">House style</label>
-      <label class="ck"><input type="checkbox" id="plural" checked /> Convert to plural gender-neutral (לשון רבים)</label>
+      <label class="ck"><input type="checkbox" id="plural" /> Plural form (לשון רבים) — <b>off</b> = singular gender-neutral slashes (לחץ/י), the TikTok default</label>
       <label class="lbl">↩ Sheet → Starling engine</label>
       <select id="wb-engine">
         <option value="api" selected>API check + editor write — exact matching, types into the editor (recommended)</option>
@@ -342,7 +342,7 @@
       <!-- STEP 3 · PROPOSE -->
       <section class="card" id="cw-propose-card" hidden>
         <div class="step"><span class="num">3</span> GPT-5.4 proposals</div>
-        <div class="hint">Uses your house style from Settings (plural gender-neutral, brand/placeholder preservation).</div>
+        <div class="hint">Uses your house style from Settings (gender-neutral form of address, brand+placeholder preservation).</div>
         <button id="cw-propose" class="btn" style="margin-top:8px">✨ Propose with <span id="cw-model">gpt-5.4</span></button>
         <div id="cw-propose-info" class="info"></div>
       </section>
@@ -399,7 +399,7 @@
       <!-- STEP 3 · PROPOSE -->
       <section class="card" id="mq-propose-card" hidden>
         <div class="step"><span class="num">3</span> GPT-5.4 proposals</div>
-        <div class="hint">Uses your house style from Settings (plural gender-neutral, brand/placeholder preservation). Inline tags show as ①②③ and are kept in place.</div>
+        <div class="hint">Uses your house style from Settings (gender-neutral form of address, brand+placeholder preservation). Inline tags show as ①②③ and are kept in place.</div>
         <button id="mq-propose" class="btn" style="margin-top:8px">✨ Propose with <span id="mq-model">gpt-5.4</span></button>
         <div id="mq-propose-info" class="info"></div>
       </section>
@@ -456,7 +456,7 @@
       <!-- STEP 3 · PROPOSE -->
       <section class="card" id="yc-propose-card" hidden>
         <div class="step"><span class="num">3</span> GPT-5.4 proposals</div>
-        <div class="hint">Uses your house style from Settings (plural gender-neutral, brand/placeholder preservation). Inline tags show as ①②③ and are kept in place.</div>
+        <div class="hint">Uses your house style from Settings (gender-neutral form of address, brand+placeholder preservation). Inline tags show as ①②③ and are kept in place.</div>
         <button id="yc-propose" class="btn" style="margin-top:8px">✨ Propose with <span id="yc-model">gpt-5.4</span></button>
         <div id="yc-propose-info" class="info"></div>
       </section>
