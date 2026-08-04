@@ -311,8 +311,27 @@ async function refreshConn() {
   }
 }
 
+// TikTok Hebrew Style Guide — injected into the TikTok modes only (🐦 Starling, ⚖️ Feishu LQA).
+// NOT applied to memoQ / Crowdin (other clients). Full reference: HEBREW-STYLE-GUIDE.md.
+const STYLE_GUIDE =
+  '\nTIKTOK HEBREW STYLE GUIDE (he-IL):\n' +
+  '- VOICE: inclusive, approachable, conversational, clear and casual — keep it short, natural and consistent; plain everyday Hebrew.\n' +
+  '- REGISTER: medium-low. Prefer the lower/natural register — use אנחנו (not אנו), עכשיו (not כעת), על (not אודות), ל־ (not עבור).\n' +
+  '- UI CONTEXT overrides the address form:\n' +
+  '  • Buttons / labels / titles → GERUND (שם פעולה), never the infinitive and never the imperative: "Save" → שמירה (not לשמור, not שמור/שמרי). Titles are short with NO trailing period.\n' +
+  '  • Tooltips / inline instructions → a conjugated verb (with the gender slash for 2nd person): "Record your ending" → הקלט/הקליטי את הסיום.\n' +
+  '  • When a string names another UI element, keep the name and do NOT wrap it in quotes (the app bolds it).\n' +
+  '- ERROR MESSAGES: neutral, helpful tone — no blaming words like "failed"/נכשל; describe the situation without assigning fault.\n' +
+  '- AMPERSAND: Hebrew has no "&" — render it as the word ו ("A & B" → "A ו-B").\n' +
+  '- QUOTES: straight double quotes " " only — never curly/diagonal “ ” and never single quotes.\n' +
+  '- SLASH BETWEEN ALTERNATIVES (not the gender slash): avoid "/" between whole words — use או; a slash is OK only when space is very tight.\n' +
+  '- SEMICOLONS: avoid — split into shorter sentences. COMMAS: follow Hebrew grammar, don\'t copy English commas that break it.\n' +
+  '- ELLIPSIS "…": for an action in progress ("מתבצעת העלאה…").\n' +
+  '- BRACKETS: translate text inside [square brackets]; NEVER translate or alter text inside {curly braces} (code placeholders).\n';
+
 // ---- GPT: system prompt (identical policy to the admin Copy Deck tool) ------
-function sysPrompt(mode, plural) {
+// tiktok=true appends the TikTok Hebrew Style Guide (Starling / Feishu). Omit it for memoQ/Crowdin/YiCAT.
+function sysPrompt(mode, plural, tiktok) {
   const base =
     'You are a professional English→Hebrew (he-IL) localization specialist for TikTok product UI and help-center content.\n' +
     'STRICT PRESERVATION (applies to every item):\n' +
@@ -326,16 +345,17 @@ function sysPrompt(mode, plural) {
     '- NO ADDITIONS: render ONLY what the source says. Never add names, facts, titles or clauses not present or implied in the source (e.g. do not insert a person\'s name like "דיוגו דאלוט" / "ראמי רביע" when the source has none). If the existing target contains such an addition, REMOVE it.\n' +
     '- NO SPACE BEFORE PUNCTUATION: no space before "." "," ":" ";" "!" "?"; no double spaces; no leading/trailing spaces.\n' +
     (plural
-      ? '- Hebrew MUST be in לשון רבים — plural, gender-neutral forms (e.g. הצטרפו, שלמו, לחצו, קראו ואשרו) — never masculine singular and never slash forms like שלם/י.\n'
-      : '') +
+      ? '- FORM OF ADDRESS: Hebrew MUST be in לשון רבים — plural, gender-neutral forms (e.g. הצטרפו, שלמו, לחצו, קראו ואשרו) — never masculine singular and never slash forms like שלם/י.\n'
+      : '- FORM OF ADDRESS: use the SINGULAR, gender-neutral second person with a slash for both genders (לחץ/י, את/ה, בחר/י). Put the final letter (אות סופית) BEFORE the slash. If the masculine and feminine suffixes differ, write BOTH words in full to avoid a malformed feminine (התחל/התחילי, not התחל/י). Use the imperative when the source is imperative. Do NOT use the plural form of address and do NOT use masculine-singular alone.\n') +
+    (tiktok ? STYLE_GUIDE : '') +
     '- Return ONLY the JSON object requested. No commentary, no markdown, no code fences.';
   if (mode === 'translate') return base + '\nTASK: Translate each item\'s English "src" into natural, idiomatic Hebrew.';
   return base + '\nTASK: Proofread and correct each item\'s Hebrew "tgt" (use "src" as the reference meaning): fix grammar, spelling, terminology, and punctuation' +
-    (plural ? ', and convert imperatives / second person to plural gender-neutral' : '') +
+    (plural ? ', and convert imperatives / second person to plural gender-neutral' : ', and convert imperatives / second person to the singular gender-neutral slash form (לחץ/י)') +
     '. Preserve the original meaning. If an item is already correct, return it unchanged.';
 }
 
-async function gptBatch(items, mode, key, model, plural, extraSys) {
+async function gptBatch(items, mode, key, model, plural, extraSys, tiktok) {
   const user = (mode === 'translate' ? 'Translate the "src" of each item. ' : 'Proofread the "tgt" of each item. ') +
     'Return JSON exactly as {"out":[{"i":<number>,"text":"<hebrew>"}]}, one entry per input item, same "i" numbers.\n' +
     JSON.stringify({ items });
@@ -345,7 +365,7 @@ async function gptBatch(items, mode, key, model, plural, extraSys) {
     body: JSON.stringify({
       model, temperature: mode === 'translate' ? 0.2 : 0.1,
       response_format: { type: 'json_object' },
-      messages: [{ role: 'system', content: sysPrompt(mode, plural) + (extraSys ? '\n' + extraSys : '') }, { role: 'user', content: user }]
+      messages: [{ role: 'system', content: sysPrompt(mode, plural, tiktok) + (extraSys ? '\n' + extraSys : '') }, { role: 'user', content: user }]
     })
   });
   const data = await r.json();
@@ -435,7 +455,7 @@ async function doGpt() {
         info('gpt-info', `✨ ${gm === 'translate' ? 'Translating' : 'Proofreading'} ${done + failed + 1}–${Math.min(done + failed + slice.length, total)} of ${total}…`);
         const items = slice.map((s, j) => ({ i: j + 1, src: String(s.src || ''), tgt: String(s.tgt || '') }));
         try {
-          const out = await gptBatch(items, gm, key, model, plural);
+          const out = await gptBatch(items, gm, key, model, plural, null, true);   // true = apply TikTok style guide
           out.forEach((o) => {
             const idx = (o.i | 0) - 1;
             if (idx >= 0 && idx < slice.length && o.text != null) {
@@ -791,8 +811,9 @@ function lqParseRange(str, max) {
 function lqSys(plural) {
   return 'You are a senior English→Hebrew (he-IL) localization QA reviewer for TikTok product & help-center copy.\n' +
     'For each item an automated checker flagged a POSSIBLE error in the Hebrew "tgt", described by "error_type" / "error_comment", with a machine "ai_suggested" rewrite. Judge whether the flagged error is a REAL error.\n' +
-    'HOUSE STYLE for any Hebrew you output: ' + (plural ? 'plural, gender-neutral (לשון רבים — e.g. הצטרפו, לחצו, קראו) — never masculine-singular, never שלם/י slash forms. ' : '') +
+    'HOUSE STYLE for any Hebrew you output (FORM OF ADDRESS): ' + (plural ? 'plural, gender-neutral (לשון רבים — e.g. הצטרפו, לחצו, קראו) — never masculine-singular, never שלם/י slash forms. ' : 'singular, gender-neutral with a slash for both genders (לחץ/י, את/ה, בחר/י) — final letter before the slash; write both words in full when the suffixes differ (התחל/התחילי, not התחל/י); NOT the plural form and NOT masculine-singular alone. ') +
     'Keep "TikTok" and brand / product / feature names in Latin script, EXACTLY as in "src" including internal spaces/capitalization ("TikTok Lite" stays "TikTok Lite", never "TikTok-Lite"/"TikTokLite"; a Hebrew prefix takes a maqaf before the name: ב-TikTok Lite). Keep EVERY placeholder / tag byte-for-byte and in order: {x}, {{x}}, %s, %1$s, <b>…</b>, <g id="1">…</g>, ①②③.\n' +
+    STYLE_GUIDE + '\n' +
     'PUNCTUATION: MIRROR the English "src" sentence-final full stop (.). If "src" ends with "." then "corrected" MUST end with "."; if "src" does NOT end with "." then "corrected" must NOT end with ".". Never add or drop it independently. Keep "?", "!", "…" as the meaning requires.\n' +
     'NUMBERS & CURRENCY (do-not-translate): "corrected" must copy every number, amount and currency symbol from "src" VERBATIM ("MX$67,000" stays "MX$67,000") — never translate/convert/reformat, never keep a different (stale TM) figure from "tgt". A differing figure IS a valid error → verdict "valid" and fix it.\n' +
     'ADDITIONS: if "tgt" contains a name, word or clause NOT present or implied in "src" (e.g. a player name like "ראמי רביע" the source omits), the Addition flag is VALID → verdict "valid" and "corrected" must REMOVE the added content. Never introduce content not in "src".\n' +
@@ -2443,7 +2464,7 @@ async function plPropose(idx) {
     // Tell GPT which item is which CLDR form — the English is often IDENTICAL for one
     // and other (e.g. "{s_number} people" for both), so it can't infer the number position.
     const plSys = 'These are two Hebrew plural forms of the SAME string. Item i=1 is the CLDR "one" form (count exactly 1): use the SINGULAR noun and put the {placeholder} AFTER the noun ("שעה {s_num}", "אדם {s_number}"). Item i=2 is the plural form: use the plural noun with the {placeholder} BEFORE it ("{s_num} שעות", "{s_number} אנשים").';
-    const out = await gptBatch([{ i: 1, src: srcOne, tgt: s.tgtForms.one || '' }, { i: 2, src: srcOther, tgt: s.tgtForms.other || '' }], 'translate', key, model, plural, plSys);
+    const out = await gptBatch([{ i: 1, src: srcOne, tgt: s.tgtForms.one || '' }, { i: 2, src: srcOther, tgt: s.tgtForms.other || '' }], 'translate', key, model, plural, plSys, true);   // true = TikTok style guide
     const byI = {}; (out || []).forEach((o) => { if (o && o.i != null && o.text != null) byI[o.i] = o.text; });
     const heOne = polish(srcOne, byI[1] != null ? byI[1] : (s.tgtForms.one || ''));
     const heOther = polish(srcOther, byI[2] != null ? byI[2] : (s.tgtForms.other || ''));

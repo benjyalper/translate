@@ -1,0 +1,106 @@
+# TikTok Hebrew (he-IL) Style Guide — working reference
+
+Distilled from the official **Hebrew Style Guide** (Feishu / Lark:
+`bytedance.sg.larkoffice.com/docx/AdLvdq9eOon3Bjxb0wHc16TXn5d`, last modified Jan 2026).
+This is the reference the Starling Copilot bakes into its GPT prompts for the **TikTok**
+modes only — **🐦 Starling** (proofread/translate + plural card), **⚖️ Feishu LQA**, and
+the GPT/QA step of **↩ Sheet → Starling**. It is **not** applied to memoQ / Crowdin (those
+are other clients). When the guide and a project's own approved "Suggested"/final conflicts,
+the human-approved final wins.
+
+---
+
+## Voice & tone
+- Inclusive, approachable, conversational, clear, **casual**. We're secondary to the content.
+- Four principles: **keep it short · keep it natural · be consistent · be inclusive.**
+
+## Register
+- **Medium-low register** — always prefer the lower/natural option that still sounds natural.
+- Avoid high-register words:
+  | Avoid | Use |
+  |------|-----|
+  | אנו | **אנחנו** |
+  | כעת | **עכשיו** |
+  | אודות | **על** |
+  | עבור | **ל־** |
+
+## Form of address (default = singular, gender-neutral, slashes)
+- Use the **singular** second person, gender-neutral, with a **slash** for both genders:
+  `לחץ/י`, `את/ה`, `בחר/י`. **Do not** use the plural form of address, and **do not** use the
+  masculine-singular alone.
+- Put the **final letter (אות סופית) *before* the slash**: `לחץ/י` (not `לח/יץ`).
+- If the masculine and feminine **suffixes differ, write both words in full** so the feminine
+  isn't malformed: `התחל/התחילי` (not `התחל/י`).
+- Use the **imperative** when the source is imperative (not the plural "cookbook" style):
+  `Click here to start` → `לחץ/י כאן כדי להתחיל`.
+- **Plural (לשון רבים)** remains a **toggle** in the panel for other clients that require it
+  (`הצטרפו`, `לחצו`, `קראו`) — off by default for TikTok.
+
+## Context overrides the address form
+- **Buttons / labels / titles → gerund (שם פעולה)**, *not* infinitive, *not* imperative:
+  `Save` → **שמירה** (not `לשמור`, not `שמור/שמרי`). Titles: short, **no trailing period**.
+  `Save new items` → `שמירת פריטים חדשים`.
+- **Tooltips / inline instructions → conjugated verb** (slash form for 2nd person):
+  `Record your ending` → `הקלט/הקליטי את הסיום`.
+- **UI-element references → bold** the element's name (don't wrap it in quotes):
+  `Remove from Saved` → `הסרה מ**פריטים שמורים**`.
+- **Error messages → neutral, helpful** tone. No blaming words like "failed"/`נכשל`; don't
+  assign fault.
+
+## Grammar & numbers
+- **Numerals, not spelled-out** numbers: `2`, not `שתיים`.
+- **Space** between a number and its unit: `512 KB`.
+- Negative numbers use the **minus sign** `–`: `–50%`.
+- Figures are fine for dates, addresses, percentages, fractions, decimals, scores, stats,
+  pages, IDs, and time.
+- **Hebrew number position** for counted nouns: singular/`one` → noun *before* the number
+  (`שעה {n}`, `אדם {n}`); plural → number *before* the noun (`{n} שעות`, `{n} אנשים`).
+- **Currency**: copy the symbol + figure from source verbatim; price *ranges* use an en-dash:
+  `$1–$20`.
+
+## Punctuation (Hebrew rules)
+- **Periods**: MIRROR the source's sentence-final `.`. Additionally, **no period** in:
+  acronyms, abbreviations, buttons, email subjects, headings, menu items, short standalone
+  sentences, titles, single-sentence toasts. `Save` → `שמירה` (not `שמירה.`).
+- **Ampersand**: Hebrew has no `&` → use the word **ו** (`A & B` → `A ו-B`). Exception: DNTs.
+- **Colons**: introduce a list; **no space before** a colon; use a colon to set off a
+  notification title (`צוות TikTok: ה-#TikTokTest כאן`).
+- **Commas**: follow Hebrew grammar; don't copy English commas that break it; split very long
+  comma chains into shorter sentences. No comma before "and" unless it's a compound sentence.
+- **Dashes/hyphens**: hyphen joins compounds (`חד-פעמי`) and number ranges (`12-15`); a dash
+  `–` separates clauses (`הצעה מיוחדת – לא כדאי לפספס`).
+- **Ellipsis** `…`: for an action in progress (`מתבצעת העלאה…`).
+- **Exclamation marks**: sparingly — overuse dilutes impact.
+- **Semicolons**: avoid — split into shorter sentences.
+- **Slashes (between alternatives, *not* the gender slash)**: avoid; use **או**. A slash is OK
+  only when space is very constrained.
+- **Quotation marks**: straight double quotes `"…"` only — never curly/diagonal `“ ”`, never
+  single quotes. Prefer **bold** over quotes for UI-element names.
+- **Hashtags**: no spaces; camelCase per word (`#asktiktok` → `#שאלואתטיקטוק`).
+
+## Placeholders & brackets
+- **`{curly braces}` → never translate or modify** (code placeholders). Preserve `%s`, `%%d%%`,
+  `{date}`, `{time}`, tags, and circled `①②③` byte-for-byte, same count/order.
+- **`[square brackets]` → translate** the text inside them.
+- **Brands** (`TikTok`, `LIVE`, `TikTok Lite`) stay in Latin script, exactly as source; a Hebrew
+  prefix takes a maqaf **before** the name (`ב-TikTok Lite`), never inside it.
+
+## Pluralization (CLDR: one / two / few / many / other)
+- Hebrew has a real **dual** (`two`): `יום → יומיים`, `שנה → שנתיים`, `חודש → חודשיים`,
+  `דקה → שתי דקות`; `few/many/other` use the plural (`X ימים`, `X שנים`, `X חודשים`, `X דקות`).
+- The pluralization function isn't always available; some strings must serve all forms.
+
+## RTL
+- Hebrew is right-to-left; reorder the translation to fit the RTL reading order when needed.
+
+## Normative references (when the guide is silent)
+- Academy of the Hebrew Language punctuation rules; Hebrew grammar terms; the TikTok
+  Multilingual Glossary; TikTok/LIVE Knowledge Base.
+
+---
+
+### Where this lives in the code
+- `panel.js` → `STYLE_GUIDE` constant, injected by `sysPrompt(mode, plural, tiktok)` (Starling
+  proofread/translate + plural card, gated by `tiktok=true`) and `lqSys(plural)` (Feishu LQA).
+- Form of address: `plural` toggle → plural rule; default (off) → the singular-slash rule above.
+- Not injected for memoQ / Crowdin / YiCAT (`tiktok` omitted).
