@@ -93,6 +93,18 @@ the human-approved final wins.
 ## RTL
 - Hebrew is right-to-left; reorder the translation to fit the RTL reading order when needed.
 
+## Glossary — handed-off terms (keep consistent across all TikTok tasks)
+When a term's rule is **"keep in English"** leave it in Latin; when it's **"Translate"**, use the
+approved Hebrew below. A brand kept inside a translated term (e.g. **TikTok**) still stays Latin.
+If a translation is already **approved**, don't change it — only comment on a real error.
+
+| Term (EN) | Rule | Hebrew | Status |
+|-----------|------|--------|--------|
+| **TikTok Membership** | Translate ("TikTok" stays Latin, translate "Membership") | `מנוי TikTok` / `חברות TikTok` — *pending Benjy's submission* | Handoff 2026-08-04, DDL 8/6 BJT (Hannah Wang / gientech) |
+
+*(Source: TikTok's unified platform-wide paid membership — premium dramas + eligible paid
+playlists; separate from individual Creator Subscriptions.)*
+
 ## Normative references (when the guide is silent)
 - Academy of the Hebrew Language punctuation rules; Hebrew grammar terms; the TikTok
   Multilingual Glossary; TikTok/LIVE Knowledge Base.
