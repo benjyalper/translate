@@ -357,6 +357,10 @@ function sysPrompt(mode, plural, tiktok) {
     '- STATUS-LABEL VERBS: translate English past-participle status labels as Hebrew VERB phrases, not noun phrases — "Last updated" → "עודכן לאחרונה" (NOT the noun "עדכון אחרון" / "עידכון אחרון", which also wrongly implies a final update), "Last modified" → "נערך לאחרונה", "Last edited" → "נערך לאחרונה", "Last synced" → "סונכרן לאחרונה", "Last seen" → "נצפה לאחרונה", "Last saved" → "נשמר לאחרונה". Keep any {placeholder}, its colon and position (e.g. "Last updated: {s_updateDate}" → "עודכן לאחרונה: {s_updateDate}").\n' +
     '- NO ADDITIONS: render ONLY what the source says. Never add names, facts, titles or clauses not present or implied in the source (e.g. do not insert a person\'s name like "דיוגו דאלוט" / "ראמי רביע" when the source has none). If the existing target contains such an addition, REMOVE it.\n' +
     '- NO SPACE BEFORE PUNCTUATION: no space before "." "," ":" ";" "!" "?"; no double spaces; no leading/trailing spaces.\n' +
+    '- SEGMENT CONTEXT (each item MAY include extra fields "key", "context", "fullSource" — USE them to decide, and NEVER echo them into the output):\n' +
+    '  • "key" = the string\'s resource key; its suffix/segments hint at the UI ROLE — resolve the register/role dilemma (gerund vs imperative) from it instead of guessing: suffixes like "_title"/"_heading"/"_desc"/"_subtitle" ⇒ a title/label/body → GERUND (שם פעולה); "_btn"/"_button"/"_cta" ⇒ a button → GERUND; "_toast"/"_tip"/"_tooltip"/"_hint"/"_placeholder" ⇒ inline instruction → IMPERATIVE slash; a list/enum namespace (e.g. "reasonForDispute", "...Reasons...") ⇒ a selectable option → short noun/nominal phrase. When "key" or "context" makes the role clear, do NOT set "flag".\n' +
+    '  • "context" = a human note from the string owner explaining the meaning, intent, what a term does or does NOT mean, or which tokens are variables. Treat it as AUTHORITATIVE and follow it (it overrides your default assumptions), but never translate the note itself.\n' +
+    '  • "fullSource" = the COMPLETE source string when "src" is only a split fragment of it. Use it to understand the fragment in context, but translate ONLY the "src" fragment — do NOT translate, add, or repeat the rest of "fullSource".\n' +
     (plural
       ? '- FORM OF ADDRESS: Hebrew MUST be in לשון רבים — plural, gender-neutral forms (e.g. הצטרפו, שלמו, לחצו, קראו ואשרו) — never masculine singular and never slash forms like שלם/י.\n'
       : '- FORM OF ADDRESS: use the SINGULAR, gender-neutral second person with a slash for both genders (לחץ/י, את/ה, בחר/י). Put the final letter (אות סופית) BEFORE the slash. If the masculine and feminine suffixes differ, write BOTH words in full to avoid a malformed feminine (התחל/התחילי, not התחל/י). Use the imperative when the source is imperative. Do NOT use the plural form of address and do NOT use masculine-singular alone.\n') +
@@ -466,7 +470,13 @@ async function doGpt() {
       for (let i = 0; i < list.length; i += B) {
         const slice = list.slice(i, i + B);
         info('gpt-info', `✨ ${gm === 'translate' ? 'Translating' : 'Proofreading'} ${done + failed + 1}–${Math.min(done + failed + slice.length, total)} of ${total}…`);
-        const items = slice.map((s, j) => ({ i: j + 1, src: String(s.src || ''), tgt: String(s.tgt || '') }));
+        const items = slice.map((s, j) => {
+          const it = { i: j + 1, src: String(s.src || ''), tgt: String(s.tgt || '') };
+          if (s.key) it.key = String(s.key);                 // role hint (…_title/_btn/_toast/…)
+          if (s.context) it.context = String(s.context);     // translator note from Starling
+          if (s.fullSrc) it.fullSource = String(s.fullSrc);  // complete string when src is a split fragment
+          return it;
+        });
         try {
           const out = await gptBatch(items, gm, key, model, plural, null, true);   // true = apply TikTok style guide
           out.forEach((o) => {
@@ -482,7 +492,7 @@ async function doGpt() {
               const tagWrapped = hasTags(next) || hasTags(s.src) || hasTags(s.tgt);
               const manual = !!s.chip || tagWrapped;
               const flag = (o.flag && String(o.flag).trim()) ? String(o.flag).trim() : '';
-              proposals.push({ seg: s.seg, src: s.src, old: s.tgt, next: next, tagged: !!s.tagged || tagWrapped, chip: !!s.chip, tagWrapped: tagWrapped, manual: manual, filled: gm === 'translate' && wasEmpty, flag: flag, approved: !manual && next !== String(s.tgt) });
+              proposals.push({ seg: s.seg, src: s.src, old: s.tgt, next: next, tagged: !!s.tagged || tagWrapped, chip: !!s.chip, tagWrapped: tagWrapped, manual: manual, filled: gm === 'translate' && wasEmpty, flag: flag, key: s.key || '', context: s.context || '', fullSrc: s.fullSrc || '', shots: s.shots || [], approved: !manual && next !== String(s.tgt) });
               done++;
               if (gm === 'translate' && wasEmpty) filled++;
             }
@@ -558,6 +568,9 @@ function renderReview() {
         <div class="rc-ctl">${control}</div>
       </div>
       ${p.src ? `<div class="rc-src" dir="ltr">${hl(esc(p.src))}</div>` : ''}
+      ${p.fullSrc && p.fullSrc !== p.src ? `<div class="rc-full" dir="ltr" title="Full source string this segment is a split fragment of — GPT sees it for context but translates only the fragment above.">↔ ${esc(p.fullSrc)}</div>` : ''}
+      ${p.context ? `<div class="rc-ctx" title="Translator note from Starling (Translation Information → Context) — GPT was given this as authoritative guidance.">ℹ️ ${esc(p.context)}</div>` : ''}
+      ${p.key || (p.shots && p.shots.length) ? `<div class="rc-meta">${p.key ? `<span class="rc-key" title="String key — its suffix (…_title / _btn / _toast / …) hints at the UI role.">🔑 ${esc(p.key)}</span>` : ''}${(p.shots || []).map((sh, i) => `<a class="rc-shot" href="${esc(sh.uri)}" target="_blank" rel="noopener" title="Open this segment's UI screenshot in a new tab">📷 screenshot${p.shots.length > 1 ? ' ' + (i + 1) : ''}</a>`).join('')}</div>` : ''}
       ${changed && String(p.old).trim() ? `<div class="rc-old" dir="rtl">${hl(esc(p.old))}</div>` : ''}
       ${newRow}
       ${copyBlock}
@@ -1072,7 +1085,7 @@ function wbBuildIndex() {
 }
 const WB_FIELDS = [['key', 'Key'], ['valid', 'Valid (Y/N)'], ['final', 'Final Translation'], ['src', 'Source (EN)'], ['tgt', 'Current target'], ['lang', 'Language']];
 const STAR_KEY_URL = 'https://starling.bytedance.com/#/all-task?pageNum=1&pageSize=10&progress=all&translateTypeList=%5B%5D&sortType=1&order=0&sourceLocales=en&targetLocales=he-IL&textKeys=';
-const CS_EXPECT = 31;   // must match content.js CS_VERSION
+const CS_EXPECT = 32;   // must match content.js CS_VERSION
 
 // Direct call surface — invokes the page's window.__wb.* via chrome.scripting.executeScript.
 // This bypasses chrome.runtime messaging entirely, so a stale/duplicate content-script

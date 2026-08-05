@@ -13,7 +13,7 @@
   // tab is running an older version, re-injects this file via chrome.scripting so stale tabs
   // self-heal (no page reload needed). Re-injection tears down the previous version's message
   // listener first (below) so there's never a double-listener race.
-  const CS_VERSION = 31;
+  const CS_VERSION = 32;
   if (window.__scVer === CS_VERSION) return;                         // this exact version already live here
   if (typeof window.__scCleanup === 'function') { try { window.__scCleanup(); } catch (e) {} }  // remove an older/stale one
   window.__scVer = CS_VERSION;
@@ -158,7 +158,7 @@
   async function harvest() {
     const map = new Map();
     const scroll = findScroll();
-    if (!scroll) { collectVisible(map); return finalize(map); }
+    if (!scroll) { collectVisible(map); return await enrichSegs(finalize(map)); }
     scroll.scrollTop = 0; await sleep(200);
     const step = Math.max(120, scroll.clientHeight * 0.7);
     let guard = 0, atBottom = 0, lastCount = -1, samePos = 0, prevTop = -1;
@@ -173,7 +173,7 @@
       if (map.size === lastCount) { /* no growth this pass */ } lastCount = map.size;
     }
     collectVisible(map);
-    return finalize(map);
+    return await enrichSegs(finalize(map));
   }
   function finalize(map) {
     const segs = [...map.values()].map((s) => ({
@@ -186,6 +186,30 @@
       tagged: !!s.tagEl || UNSAFE.test(s.src || '') || UNSAFE.test(s.tgt || '')
     }));
     segs.sort((a, b) => (parseInt(a.seg, 10) || 0) - (parseInt(b.seg, 10) || 0));
+    return segs;
+  }
+  // Enrich the DOM-harvested segments with per-segment metadata from the JSON API —
+  // key (role hint), context (the string owner's translator note = sourceText.textComment),
+  // fullSource (the complete string when this seg is a split fragment) and screenshots.
+  // The API RankNo is a contiguous integer that matches the editor's displayed segment
+  // number, so we join on seg === rank. Best-effort: if the API is unavailable (other
+  // editor, network), the segments are returned unchanged — GPT just falls back to
+  // src-only heuristics as before.
+  async function enrichSegs(segs) {
+    try {
+      const t = taskId(); if (!t) return segs;
+      const res = await apiTask(t);
+      if (!res || !res.ok || !res.rows) return segs;
+      const byRank = new Map(res.rows.map((r) => [String(r.rank), r]));
+      for (const seg of segs) {
+        const m = byRank.get(String(seg.seg));
+        if (!m) continue;
+        seg.key = m.key || '';
+        seg.context = m.comment || '';
+        seg.fullSrc = m.fullSource || '';
+        seg.shots = m.shots || [];
+      }
+    } catch (e) { /* keep the plain DOM segments */ }
     return segs;
   }
 
@@ -920,6 +944,15 @@
       flowSequence: t.flowSequence, modifiable: t.isModifiableByUser !== false,
       lock: t.editorLockStatus, hasComment: !!s.hasComment, comment: s.textComment || '',
       placeholders: (s.placeholders || []).length,
+      // fullSource = the COMPLETE original string when this row is only a split fragment
+      // of it (splitRankNo / originalContent differ from content); '' otherwise.
+      fullSource: (s.originalContent != null && s.originalContent !== s.content) ? s.originalContent : '',
+      // screenshots: [{uri, rect}] — the string owner's UI screenshot(s); rect is the
+      // highlighted crop {x,y,width,height} of THIS segment within the shot.
+      shots: (s.screenshots || []).map((sh) => {
+        let rect = null; try { rect = JSON.parse((sh.ScreenshotsInfos || [])[0] || 'null'); } catch (e) {}
+        return { uri: sh.Uri || '', rect };
+      }).filter((x) => x.uri),
       errs: ((t.errors || (r && r.errors) || []).length) || 0
     };
   }
