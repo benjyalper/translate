@@ -102,6 +102,8 @@ If a translation is already **approved**, don't change it — only comment on a 
 |-----------|------|--------|--------|
 | **LIVE** (standalone feature/badge/action) | Translate — do NOT keep in Latin | `שידור חי` (e.g. "Go LIVE" → `התחל/י שידור חי`) | Approved 2026-08-04 (Benjy) |
 | **TikTok LIVE** (product name) | Keep in Latin | `TikTok LIVE` | Approved 2026-08-04 (Benjy) |
+| **Snap** | Transliterate | `סנאפ` | Approved 2026-08-04 (Benjy) |
+| **Blink** | Transliterate | `בלינק` | Approved 2026-08-04 (Benjy) |
 | **TikTok Membership** | Translate ("TikTok" stays Latin, translate "Membership") | `מנוי TikTok` / `חברות TikTok` — *pending Benjy's submission* | Handoff 2026-08-04, DDL 8/6 BJT (Hannah Wang / gientech) |
 
 *(Source: TikTok's unified platform-wide paid membership — premium dramas + eligible paid

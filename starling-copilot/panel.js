@@ -328,7 +328,7 @@ const STYLE_GUIDE =
   '- SEMICOLONS: avoid — split into shorter sentences. COMMAS: follow Hebrew grammar, don\'t copy English commas that break it.\n' +
   '- ELLIPSIS "…": for an action in progress ("מתבצעת העלאה…").\n' +
   '- BRACKETS: translate text inside [square brackets]; NEVER translate or alter text inside {curly braces} (code placeholders).\n' +
-  '- GLOSSARY (approved terms — TRANSLATE these, do NOT keep them in Latin): "LIVE" as the live-streaming feature / badge / action when it stands alone ("Go LIVE", "LIVE now", a "LIVE" label, "watch LIVE") → "שידור חי" (e.g. "Go LIVE" → "התחל/י שידור חי", "LIVE now" → "עכשיו בשידור חי"). EXCEPTION: the product name "TikTok LIVE" stays in Latin exactly as "TikTok LIVE".\n';
+  '- GLOSSARY (approved terms — TRANSLATE / transliterate these, do NOT keep them in Latin): "LIVE" as the live-streaming feature / badge / action when it stands alone ("Go LIVE", "LIVE now", a "LIVE" label, "watch LIVE") → "שידור חי" (e.g. "Go LIVE" → "התחל/י שידור חי", "LIVE now" → "עכשיו בשידור חי"); "Snap" → "סנאפ"; "Blink" → "בלינק". EXCEPTION: the product name "TikTok LIVE" stays in Latin exactly as "TikTok LIVE".\n';
 
 // ---- GPT: system prompt (identical policy to the admin Copy Deck tool) ------
 // tiktok=true appends the TikTok Hebrew Style Guide (Starling / Feishu). Omit it for memoQ/Crowdin/YiCAT.
