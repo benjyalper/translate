@@ -47,6 +47,34 @@ the human-approved final wins.
 - **Error messages → neutral, helpful** tone. No blaming words like "failed"/`נכשל`; don't
   assign fault.
 
+### Deciding the role (gerund vs imperative — the "Save" dilemma)
+The same English verb maps to different Hebrew depending on where the string sits, and the
+**English text alone often can't tell you** — the role lives in the string's key/screenshot,
+which the model isn't given. The prompt decides from these source signals (and, in proofread,
+the existing target):
+
+| Signal in the source | Role | Hebrew | Example |
+|---|---|---|---|
+| Short Title-Case fragment naming an action/feature; no object, no "your", no sentence punctuation | title / button / label / menu / tab / setting | **gerund** | `Save` → `שמירה`; `Save new items` → `שמירת פריטים חדשים` |
+| Has a direct object (often "your…"), a "to…" purpose clause, or is a full imperative sentence | tooltip / inline instruction / CTA / body | **imperative slash** | `Save your changes` → `שמור/שמרי את השינויים` |
+| Bare verb, no other signal (`Save`, `Share`, `Follow` alone) | usually a button | **default to gerund** | `Save` → `שמירה` |
+
+- **Proofread mode never flips a *valid* register** just because the source is a bare verb — if
+  the existing target is defensible for a plausible role, keep it.
+- **When the role is genuinely unknowable**, GPT returns its best guess **and flags it** rather
+  than silently guessing (see "Adjudicating dilemmas" below).
+
+### Adjudicating dilemmas (the `flag` escape hatch)
+Because the model can't see the screenshot, real coin-flips are surfaced to the human instead of
+hidden:
+- **🐦 Starling** response schema carries an optional `"flag"` field. When set, the review card
+  shows a **`⚠ register`** chip whose tooltip is GPT's note (e.g. *"Save: gerund if a button,
+  imperative if a tooltip — assumed button"*). You adjudicate with the on-screen context, then
+  edit the card if the guess was wrong before writing back.
+- **⚖️ Feishu LQA** doesn't mark a defensible register choice invalid when the role is unknowable
+  (treats the flag as a false positive); when it *does* change register it writes the role reason
+  into the comment column via `ai_diff_reason`.
+
 ## Grammar & numbers
 - **Numerals, not spelled-out** numbers: `2`, not `שתיים`.
 - **Space** between a number and its unit: `512 KB`.
@@ -125,4 +153,7 @@ playlists; separate from individual Creator Subscriptions.)*
 - `panel.js` → `STYLE_GUIDE` constant, injected by `sysPrompt(mode, plural, tiktok)` (Starling
   proofread/translate + plural card, gated by `tiktok=true`) and `lqSys(plural)` (Feishu LQA).
 - Form of address: `plural` toggle → plural rule; default (off) → the singular-slash rule above.
+- Register dilemmas: the `STYLE_GUIDE` "REGISTER DEPENDS ON THE UI ROLE" block + the optional
+  `flag` field on the Starling schema (`gptBatch`) → `⚠ register` chip in `renderReview`; the LQA
+  guard line in `lqSys` routes the reason into the comment column via `ai_diff_reason`.
 - Not injected for memoQ / Crowdin / YiCAT (`tiktok` omitted).
