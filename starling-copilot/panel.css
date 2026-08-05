@@ -199,6 +199,11 @@ textarea { font-family: ui-monospace, Menlo, Consolas, monospace; resize: vertic
 .mode-switch { flex-wrap: wrap; }
 .mode-btn { font-size: 10.5px; padding: 7px 5px; }
 .wbc .lqc-new { border: 1px dashed var(--border); border-radius: 7px; padding: 5px 7px; }
+.lqc-edited { font-size: 9px; font-weight: 700; color: #fbbf24; background: rgba(217,119,6,.18); padding: 1px 6px; border-radius: 5px; margin-left: 5px; }
+.wb-edit { margin: 6px 0; padding: 7px 8px; border: 1px solid var(--acc); border-radius: 7px; background: var(--bg); }
+.wb-edit textarea { width: 100%; box-sizing: border-box; font: inherit; font-size: 12.5px; background: var(--card2); color: var(--ink); border: 1px solid var(--border); border-radius: 6px; padding: 5px 7px; resize: vertical; }
+.wb-edit textarea.wb-edit-final { direction: rtl; text-align: right; }
+.wb-edit-hint { font-size: 9.5px; color: var(--dim2); margin-top: 5px; }
 .wbc[data-verdict="done"] { opacity: .68; }
 .wbc[data-verdict="checked"] { border-color: var(--acc); }
 .wbc[data-verdict="conflict"] { border-color: #ef4444; }

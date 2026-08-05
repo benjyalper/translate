@@ -1270,22 +1270,32 @@ function wbBuild() {
 // your decisions; never clobbers a comment you typed yourself. Returns the number of cells set.
 // (Browsers can't silently overwrite the file on disk — the actual .xlsx download is the Export
 // button. Because this keeps the workbook current, Export always reflects everything written.)
-function wbStampAgreeForKey(key) {
+// Generalized: stamp `note` (defaults to "agree") into Column I for every row with this key.
+// `overwrite` replaces an existing value (used when you type an explicit note — your note should
+// win over an earlier "agree"); without it, only empty cells are filled (never clobbers a comment).
+function wbStampForKey(key, note, overwrite) {
   if (typeof XLSX === 'undefined' || !WB.workbook || !WB.sheetName) return 0;
   const ws = WB.workbook.Sheets[WB.sheetName];
   const colI = WB.map.valid, colKey = WB.map.key;
   if (!ws || !ws['!ref'] || colI == null || colI < 0 || colKey == null || colKey < 0) return 0;
   const range = XLSX.utils.decode_range(ws['!ref']);
   const want = String(key == null ? '' : key).trim();
+  const val = (note != null && String(note).trim() !== '') ? String(note).trim() : 'agree';
   let n = 0;
   for (let R = range.s.r; R <= range.e.r; R++) {
     const kc = ws[XLSX.utils.encode_cell({ r: R, c: colKey })];
     if (!kc || String(kc.v == null ? '' : kc.v).trim() !== want) continue;
     const addr = XLSX.utils.encode_cell({ r: R, c: colI });
     const cur = ws[addr] && ws[addr].v;
-    if (cur == null || String(cur).trim() === '') { ws[addr] = { t: 's', v: 'agree' }; n++; }
+    if (overwrite || cur == null || String(cur).trim() === '') { ws[addr] = { t: 's', v: val }; n++; }
   }
   return n;
+}
+function wbStampAgreeForKey(key) { return wbStampForKey(key, 'agree', false); }
+// The Column-I value for a card: an explicit note wins, else "agree". Returns { note, overwrite }.
+function wbColIFor(q) {
+  const note = q && q.noteText && String(q.noteText).trim();
+  return note ? { note, overwrite: true } : { note: 'agree', overwrite: false };
 }
 // ---- progress persistence (survives panel close / re-load of the SAME report) ----------
 // The in-memory workbook (and its "agree" stamps) dies when the side panel closes. So persist
@@ -1308,12 +1318,14 @@ function wbFileSigLegacy() { return (WB.fileName || '') + '|' + (WB.sheetName ||
 //   wbProgress[fileSig] = { done: { key: [taskIds] }, skipped: [keys] }
 async function wbPersistProgress() {
   if (!WB.lqa || !WB.fileName) return;
-  const done = {}, skipped = [];
+  const done = {}, skipped = [], notes = {}, edits = {};
   for (const q of WB.queue) {
     if (q.doneTasks && q.doneTasks.length) done[q.key] = q.doneTasks.slice();
     else if (q.status === 'done') skipped.push(q.key);   // marked done without a write = skipped
+    if (q.noteText && q.noteText.trim()) notes[q.key] = q.noteText;   // your Column-I note (survives reopen)
+    if (q.editText && q.editText.trim()) edits[q.key] = q.editText;   // your edited correction
   }
-  try { const all = await store.get('wbProgress', {}); all[wbFileSig()] = { done, skipped }; await store.set({ wbProgress: all }); } catch (e) {}
+  try { const all = await store.get('wbProgress', {}); all[wbFileSig()] = { done, skipped, notes, edits }; await store.set({ wbProgress: all }); } catch (e) {}
 }
 // Does the LOADED sheet already carry a non-empty Column I for this key? Lets progress ride
 // along INSIDE the .xlsx: re-loading an exported/with-agrees file restores done-state with no
@@ -1339,17 +1351,21 @@ async function wbRestoreProgress() {
   // Read BOTH the content key and the legacy filename key, merging — so skips saved under an
   // older filename-based record still come back and get migrated to the content key below.
   const recs = [all && all[wbFileSig()], all && all[wbFileSigLegacy()]].filter(Boolean);
-  let doneMap = {}; const skipSet = new Set();
+  let doneMap = {}, notesMap = {}, editsMap = {}; const skipSet = new Set();
   for (const rec of recs) {
-    if (rec.done || rec.skipped) { Object.assign(doneMap, rec.done || {}); (rec.skipped || []).forEach((k) => skipSet.add(k)); }
-    else Object.assign(doneMap, rec);   // old flat {key:[tasks]} = all-done
+    if (rec.done || rec.skipped || rec.notes || rec.edits) {
+      Object.assign(doneMap, rec.done || {}); (rec.skipped || []).forEach((k) => skipSet.add(k));
+      Object.assign(notesMap, rec.notes || {}); Object.assign(editsMap, rec.edits || {});
+    } else Object.assign(doneMap, rec);   // old flat {key:[tasks]} = all-done
   }
   let nDone = 0, nSkip = 0, nFile = 0;
   for (const q of WB.queue) {
     if (q.status === 'conflict') continue;
+    if (notesMap[q.key] != null) q.noteText = notesMap[q.key];   // restore your Column-I note / edit
+    if (editsMap[q.key] != null) q.editText = editsMap[q.key];
     const tasks = doneMap[q.key];
     if (tasks && tasks.length) {
-      q.doneTasks = tasks.slice(); q.status = 'done'; q.agreed = true; wbStampAgreeForKey(q.key); nDone++;
+      q.doneTasks = tasks.slice(); q.status = 'done'; q.agreed = true; const ci = wbColIFor(q); wbStampForKey(q.key, ci.note, ci.overwrite); nDone++;
     } else if (skipSet.has(q.key)) {
       q.status = 'done'; q.note = 'Skipped last session (not written).'; nSkip++;
     } else if (wbColIFilledForKey(q.key)) {
@@ -1620,7 +1636,8 @@ async function wbWriteDom(i) {
   const confirm = $('wb-autoconfirm').checked;
   wbSetStatus(i, 'writing', 'Writing the Final Translation…');
   try {
-    const r = await wbCall('WB_WRITE', { edit: { key: q.key, text: q.final, confirm, expectSource: q.src } });
+    const text = (q.editText && q.editText.trim()) ? q.editText.trim() : q.final;
+    const r = await wbCall('WB_WRITE', { edit: { key: q.key, text, confirm, expectSource: q.src } });
     if (!r || !r.ok) { wbSetStatus(i, 'checked', '⚠ ' + (r && r.reason || 'write failed')); return; }
     const tid = (q.live && q.live.taskId) || r.taskId || '?';
     q.doneTasks = q.doneTasks || [];
@@ -1630,7 +1647,7 @@ async function wbWriteDom(i) {
     // Clear the live read so the next task must be Checked, and keep the buttons live so
     // you can Search → open another 👁 → Check → Write again. "Done" ends the card.
     q.live = null; q.decision = null; q.status = 'written';
-    if (WB.lqa && WB.workbook) { q.agreed = true; const st = wbStampAgreeForKey(q.key); if (st) wbLog(`📋 Column I → "agree" for ${q.key} (${st} row) — Export form to download`); wbPersistProgress(); }
+    if (WB.lqa && WB.workbook) { q.agreed = true; const ci = wbColIFor(q); const st = wbStampForKey(q.key, ci.note, ci.overwrite); if (st) wbLog(`📋 Column I → "${ci.note}" for ${q.key} (${st} row) — Export form to download`); wbPersistProgress(); }
     q.note = `Wrote${r.confirmed ? ' + proofread-confirmed ✓' : ' (auto-confirm off / not found — confirm by hand)'} to task ${tid}. Same key in another task? Search again, open it with 👁, Check, Write. Click “Done” when every task is fixed. You resubmit each task.`;
     wbRenderQueue();
   } catch (e) { wbSetStatus(i, 'checked', e.message); }
@@ -1825,7 +1842,9 @@ async function wbCheckApi(i) {
 async function wbWriteApi(i) {
   const q = WB.queue[i]; const a = q && q.api;
   if (!a) { wbSetStatus(i, q && q.status, 'Run Check first.'); return; }
-  if (a.verdict !== 'ready') { wbSetStatus(i, 'checked', `Nothing to write here (${a.verdict}). Skip this task.`); return; }
+  const editedTxt = (q.editText && q.editText.trim()) ? q.editText.trim() : null;
+  const editedDiffers = editedTxt && (!a.final || wbFold(editedTxt) !== wbFold(a.final));
+  if (a.verdict !== 'ready' && !(a.verdict === 'already' && editedDiffers)) { wbSetStatus(i, 'checked', `Nothing to write here (${a.verdict}). Skip this task.`); return; }
   if (a.blocked) { wbSetStatus(i, 'checked', '🔒 This segment is locked / not modifiable — do it by hand.'); return; }
   if (!(await wbEnsureFresh(i))) return;
   // The DOM write types into the task that's OPEN. If the API resolved this segment in a
@@ -1845,10 +1864,11 @@ async function wbWriteApi(i) {
   // auto-QA flags it (e.g. a period the proofreader deliberately kept).
   const apiWrite = async (why) => {
     if (!a.sourceTextId) { wbSetStatus(i, 'checked', '⚠ No sourceTextId on this row — write it by hand.'); return false; }
+    const text = (q.editText && q.editText.trim()) ? q.editText.trim() : a.final;
     wbSetStatus(i, 'writing', 'Writing the Final via the Starling API…');
     const ar = await wbCall('API_CONFIRM', {
       taskId: a.taskId, key: q.key, sourceTextId: a.sourceTextId,
-      flowSequence: a.flowSequence, text: a.final, ignoreQa: WB.lqa === true && doConfirm
+      flowSequence: a.flowSequence, text, ignoreQa: WB.lqa === true && doConfirm
     });
     if (!(ar && ar.ok)) {
       const msg = (ar && (ar.msg || (ar.status_code != null && 'status_code ' + ar.status_code) || (ar.http != null && 'HTTP ' + ar.http) || ar.error)) || 'unknown';
@@ -1859,11 +1879,11 @@ async function wbWriteApi(i) {
     await wbSleep(350);
     const v2 = await wbCall('API_TASK', { taskId: a.taskId });
     const seg2 = v2 && v2.ok && v2.rows.find((x) => x.sourceTextId === a.sourceTextId);
-    const ok2 = seg2 && wbFold(seg2.target) === wbFold(a.final);
+    const ok2 = seg2 && wbFold(seg2.target) === wbFold(text);
     wbLog(`API-wrote ${q.key} @task ${a.taskId} id=${a.sourceTextId} (${why}) — server=${ok2 ? 'matches ✓' : (seg2 ? 'not-yet(status ' + seg2.status + ')' : 're-read failed')}`);
     q.doneTasks = q.doneTasks || []; if (!q.doneTasks.includes(a.taskId)) q.doneTasks.push(a.taskId);
     q.live = null; q.decision = null; q.api = null; q.status = 'written';
-    if (WB.lqa && WB.workbook) { q.agreed = true; const st = wbStampAgreeForKey(q.key); if (st) wbLog(`📋 Column I → "agree" for ${q.key} (${st} row) — Export form to download`); wbPersistProgress(); }
+    if (WB.lqa && WB.workbook) { q.agreed = true; const ci = wbColIFor(q); const st = wbStampForKey(q.key, ci.note, ci.overwrite); if (st) wbLog(`📋 Column I → "${ci.note}" for ${q.key} (${st} row) — Export form to download`); wbPersistProgress(); }
     q.note = `✅ Written + confirmed via the API · task ${a.taskId}${ok2 ? ' · server confirms it saved' : ' · sent'} · refreshing the task so the fix shows in the editor… Same key elsewhere? Search → 👁 → Check → Write. You resubmit each task.`;
     wbRenderQueue();
     // The API write saves server-side but doesn't repaint the on-screen editor — reload the
@@ -1907,7 +1927,7 @@ async function wbWriteApi(i) {
     q.doneTasks = q.doneTasks || [];
     if (!q.doneTasks.includes(a.taskId)) q.doneTasks.push(a.taskId);
     q.live = null; q.decision = null; q.api = null; q.status = 'written';
-    if (WB.lqa && WB.workbook) { q.agreed = true; const st = wbStampAgreeForKey(q.key); if (st) wbLog(`📋 Column I → "agree" for ${q.key} (${st} row) — Export form to download`); wbPersistProgress(); }
+    if (WB.lqa && WB.workbook) { q.agreed = true; const ci = wbColIFor(q); const st = wbStampForKey(q.key, ci.note, ci.overwrite); if (st) wbLog(`📋 Column I → "${ci.note}" for ${q.key} (${st} row) — Export form to download`); wbPersistProgress(); }
     const serverNote = persisted ? 'server confirms it saved' : 'typed into the editor — it will save on confirm/resubmit';
     q.note = `✅ Typed into the editor + ${r.confirmed ? 'proofread-confirmed' : 'written (not confirmed — confirm by hand)'} · task ${a.taskId} (seg #${a.rank}) · ${serverNote}. The editor now shows the fix. Same key in another task? Search again, open it with 👁, Check, Write. Click “Done” when every task is fixed. You resubmit each task.`;
     wbRenderQueue();
@@ -1926,24 +1946,39 @@ function wbRenderQueue() {
     else if (act === 'skip') { WB.queue[i].status = 'done'; WB.queue[i].note = 'Skipped by you (not written).'; wbRenderQueue(); wbPersistProgress(); }
     else if (act === 'done') { WB.queue[i].status = 'done'; WB.queue[i].note = 'Marked done for all tasks.' + (WB.queue[i].doneTasks && WB.queue[i].doneTasks.length ? ' Wrote to: ' + WB.queue[i].doneTasks.join(', ') : ''); wbRenderQueue(); wbPersistProgress(); }
     else if (act === 'copy-final') panelCopy(WB.queue[i].final, b);
+    else if (act === 'edit') { WB.queue[i].editing = !WB.queue[i].editing; wbRenderQueue(); }
+    else if (act === 'edit-reset') { WB.queue[i].editText = null; wbRenderQueue(); wbPersistProgress(); }
   }));
+  // Live-bind the edit textareas WITHOUT re-rendering on each keystroke (would drop focus).
+  box.querySelectorAll('textarea.wb-edit-final').forEach((t) => {
+    t.addEventListener('input', () => { const q = WB.queue[+t.dataset.i]; if (q) q.editText = t.value; });
+    t.addEventListener('change', () => wbPersistProgress());
+  });
+  box.querySelectorAll('textarea.wb-edit-note').forEach((t) => {
+    t.addEventListener('input', () => { const q = WB.queue[+t.dataset.i]; if (q) q.noteText = t.value; });
+    t.addEventListener('change', () => wbPersistProgress());
+  });
   const done = WB.queue.filter((q) => q.status === 'done').length;
   if ($('wb-qcount')) $('wb-qcount').textContent = `${done}/${WB.queue.length} done`;
 }
 function wbCardHtml(q, i) {
   const live = q.live, dec = q.decision;
+  const edited = (q.editText != null && String(q.editText).trim() !== '') ? String(q.editText) : null;
+  const effFinal = edited != null ? edited : q.final;   // what Write actually sends
   const decBadge = dec === 'already' ? '<span class="lqc-badge b-invalid" title="Live target already equals the Final Translation">already correct</span>'
     : dec === 'mismatch' ? '<span class="lqc-warn" title="Live task source differs from the sheet source — the sheet fix may not apply here (line 121).">⚠ source mismatch</span>'
       : dec === 'ready' ? '<span class="lqc-badge b-valid">ready</span>' : '';
   const liveBlock = live && live.found ? `
     <div class="lqc-lbl">Live source</div><div class="lqc-src" dir="ltr">${hl(esc(live.source))}</div>
-    <div class="lqc-lbl">Current target</div><div class="lqc-tgt${wbNorm(live.target) !== wbNorm(q.final) ? ' old' : ''}" dir="rtl">${hl(esc(live.target))}</div>`
+    <div class="lqc-lbl">Current target</div><div class="lqc-tgt${wbNorm(live.target) !== wbNorm(effFinal) ? ' old' : ''}" dir="rtl">${hl(esc(live.target))}</div>`
     : (live && !live.found ? `<div class="info err">${live.noSourceMatch
       ? `Key found here (${live.visible} segment${live.visible === 1 ? '' : 's'}), but its source doesn’t match the sheet — nothing written.`
       : live.ambiguous
         ? `Key matched ${live.visible} segments — too ambiguous to pick one safely.`
         : 'Segment not found in the open task.'}</div>` : '');
-  const canWrite = !!(live && live.found) && dec !== 'already';
+  // Normally can't write when the live target already matches the final; but if you've EDITED to
+  // something different from the live target, writing that edit is exactly the point — allow it.
+  const canWrite = !!(live && live.found) && (dec !== 'already' || (edited != null && wbNorm(edited) !== wbNorm(live.target)));
   const done = q.status === 'done';
   const written = q.status === 'written';
   const acts = q.conflict
@@ -1953,6 +1988,7 @@ function wbCardHtml(q, i) {
       : `<button class="lqc-copy" data-act="search" data-i="${i}">1 · Search</button>
          <button class="lqc-copy ghost" data-act="check" data-i="${i}">2 · Check</button>
          <button class="lqc-copy${canWrite ? '' : ' ghost'}" data-act="write" data-i="${i}">3 · Write + confirm</button>
+         <button class="lqc-copy ghost" data-act="edit" data-i="${i}" title="Edit the correction before writing, and add a Column I note">${q.editing ? '✕ Close edit' : (edited != null || (q.noteText && q.noteText.trim()) ? '✏ Edit •' : '✏ Edit')}</button>
          ${written
         ? `<button class="lqc-copy" data-act="done" data-i="${i}">✓ Done (all tasks)</button>`
         : `<button class="lqc-copy ghost" data-act="skip" data-i="${i}">Skip</button>`}`;
@@ -1963,7 +1999,17 @@ function wbCardHtml(q, i) {
       <span class="lqc-key" title="Key">${esc(q.key)}</span>
       ${q.conflict ? '<span class="lqc-warn">⚠ conflict</span>' : ''}${decBadge}
       ${q.rows.length > 1 ? `<span class="lqc-lvl" title="Sheet rows sharing this key">rows ${esc(q.rows.join(','))}</span>` : ''}</div>
-    <div class="lqc-lbl">Final translation (from sheet)</div><div class="lqc-new" dir="rtl">${hl(esc(q.final))}</div>
+    <div class="lqc-lbl">Final translation (from sheet)${edited != null ? '<span class="lqc-edited" title="You edited this — Write sends the edited text">edited</span>' : ''}</div>
+    <div class="lqc-new" dir="rtl">${hl(esc(effFinal))}</div>
+    ${q.editing ? `
+      <div class="wb-edit">
+        <div class="lqc-lbl">Edit correction (this text is written to Starling)</div>
+        <textarea class="wb-edit-final" data-i="${i}" dir="rtl" rows="2" placeholder="Edited Hebrew correction…">${esc(effFinal)}</textarea>
+        ${WB.lqa ? `<div class="lqc-lbl">Note → Column I (sheet)</div>
+        <textarea class="wb-edit-note" data-i="${i}" dir="auto" rows="2" placeholder="Note for Column I — e.g. why you changed it. Blank = &quot;agree&quot;.">${esc(q.noteText || '')}</textarea>` : ''}
+        <div class="wb-edit-hint">Then hit <b>3 · Write + confirm</b>: it sends the edited text to Starling${WB.lqa ? ' and writes this note into Column I (blank ⇒ “agree”)' : ''}. <b>Reset</b> restores the sheet’s original.</div>
+        <div class="lqc-acts"><button class="lqc-copy ghost" data-act="edit-reset" data-i="${i}">Reset to sheet</button></div>
+      </div>` : ''}
     ${q.src ? `<div class="lqc-lbl">Sheet source</div><div class="lqc-src" dir="ltr">${hl(esc(q.src))}</div>` : ''}
     ${liveBlock}
     ${wroteTally}
