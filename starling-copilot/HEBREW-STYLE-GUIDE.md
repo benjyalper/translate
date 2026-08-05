@@ -109,6 +109,11 @@ If a translation is already **approved**, don't change it — only comment on a 
 *(Source: TikTok's unified platform-wide paid membership — premium dramas + eligible paid
 playlists; separate from individual Creator Subscriptions.)*
 
+### Approved phrasings (whole strings — reproduce exactly, keep the `{placeholder}` in place)
+| Source (EN) | Hebrew | Note |
+|-------------|--------|------|
+| `Commented on {s_user}'s post.` | `הגיב/ה על הפוסט של {s_user}.` | Possessive "X's post" → "הפוסט של X"; the `{s_user}` moves to the **end** (before the period), not the front — the RTL display just makes it look like it's leading. |
+
 ## Normative references (when the guide is silent)
 - Academy of the Hebrew Language punctuation rules; Hebrew grammar terms; the TikTok
   Multilingual Glossary; TikTok/LIVE Knowledge Base.
