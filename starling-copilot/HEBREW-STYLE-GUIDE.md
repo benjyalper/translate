@@ -48,10 +48,13 @@ the human-approved final wins.
   assign fault.
 
 ### Deciding the role (gerund vs imperative — the "Save" dilemma)
-The same English verb maps to different Hebrew depending on where the string sits, and the
-**English text alone often can't tell you** — the role lives in the string's key/screenshot,
-which the model isn't given. The prompt decides from these source signals (and, in proofread,
-the existing target):
+The same English verb maps to different Hebrew depending on where the string sits. The prompt now
+decides in a **priority order**:
+
+1. **Key + Context (🐦 Starling only, when harvested — see "Segment context" below).** A key suffix
+   like `_title`/`_desc`/`_btn`/`_toast` or a translator note usually settles the role outright,
+   and GPT does **not** flag when it does.
+2. **Source signals** (the fallback, and the *only* path for ⚖️ Feishu LQA, which has no key/context):
 
 | Signal in the source | Role | Hebrew | Example |
 |---|---|---|---|
@@ -61,19 +64,37 @@ the existing target):
 
 - **Proofread mode never flips a *valid* register** just because the source is a bare verb — if
   the existing target is defensible for a plausible role, keep it.
-- **When the role is genuinely unknowable**, GPT returns its best guess **and flags it** rather
-  than silently guessing (see "Adjudicating dilemmas" below).
+- **When neither key/context nor source signals settle it**, GPT returns its best guess **and flags
+  it** rather than silently guessing (see "Adjudicating dilemmas" below).
+
+### Segment context (🐦 Starling — harvested from the "Translation Information" panel)
+The harvest joins each segment to the `getSourceTextListWithTargetText` API row (`seg` === `RankNo`)
+and passes three extra fields into the GPT payload — so the model decides with the same context a
+human sees, not just the English string:
+- **`key`** — the resource key; its suffix hints at the UI role (`_title`/`_desc`→gerund,
+  `_btn`/`_cta`→gerund button, `_toast`/`_tooltip`→imperative, an enum namespace like
+  `reasonForDispute`→short noun option).
+- **`context`** — the string owner's translator note (`sourceText.textComment`); treated as
+  **authoritative** guidance (meaning, intent, what a term does/doesn't mean, which tokens are vars).
+- **`fullSource`** — the complete original string when `src` is only a split fragment; GPT reads it
+  for context but translates **only** the fragment.
+- **Screenshot** — also harvested (byteimg CDN URL + crop rect) but shown to the *human* on the card
+  (📷 link), not sent to GPT.
+
+These are omitted when empty, and absent entirely for XLIFF/YiCAT/Crowdin and ⚖️ Feishu LQA, which
+fall back to the source-signal path above.
 
 ### Adjudicating dilemmas (the `flag` escape hatch)
-Because the model can't see the screenshot, real coin-flips are surfaced to the human instead of
-hidden:
+When the role can't be resolved (no key/context and the English is ambiguous), real coin-flips are
+surfaced to the human instead of hidden:
 - **🐦 Starling** response schema carries an optional `"flag"` field. When set, the review card
   shows a **`⚠ register`** chip whose tooltip is GPT's note (e.g. *"Save: gerund if a button,
   imperative if a tooltip — assumed button"*). You adjudicate with the on-screen context, then
-  edit the card if the guess was wrong before writing back.
-- **⚖️ Feishu LQA** doesn't mark a defensible register choice invalid when the role is unknowable
-  (treats the flag as a false positive); when it *does* change register it writes the role reason
-  into the comment column via `ai_diff_reason`.
+  edit the card if the guess was wrong before writing back. With key/context now harvested, flags
+  should be rare.
+- **⚖️ Feishu LQA** (no key/context) doesn't mark a defensible register choice invalid when the role
+  is unknowable (treats the flag as a false positive); when it *does* change register it writes the
+  role reason into the comment column via `ai_diff_reason`.
 
 ## Grammar & numbers
 - **Numerals, not spelled-out** numbers: `2`, not `שתיים`.
