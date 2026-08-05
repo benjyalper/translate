@@ -342,6 +342,27 @@ const STYLE_GUIDE =
   '  • BARE VERB with no other signal ("Save" / "Share" / "Follow" alone) → default to the GERUND (it is usually a button/label). BUT in PROOFREAD mode, if the existing target already uses a register that is valid for a plausible role, KEEP it — do NOT flip שמירה↔שמור/שמרי just because the source is a bare verb.\n' +
   '  • FLAG ONLY AS A LAST RESORT: if the item has a "key" or "context", they resolve the role — use them and do NOT set "flag". Only when NO "key" and NO "context" are provided AND the English is genuinely ambiguous AND the existing target does not settle it, return your best-guess Hebrew and set "flag" to a short note of the dilemma so a human can check the real context — e.g. "Save: gerund (שמירה) if a button, imperative (שמור/שמרי) if a tooltip — assumed button". Leave "flag" empty otherwise.\n';
 
+// ---- STYLE BRAIN: user-fed style docs distilled into extra rules + glossary --
+// Kept in chrome.storage as { rules:[{id,cat,text,source,ts}], glossary:[{id,en,he,note,source,ts}], updatedAt }.
+// ADDITIVE to STYLE_GUIDE above (the hand-crafted core stays authoritative); brainText()
+// appends the ingested rules/terms so every 🐦 Starling + ⚖️ Feishu LQA call sees them.
+let BRAIN = { rules: [], glossary: [], updatedAt: 0 };
+async function brainLoad() { try { BRAIN = await store.get('styleBrain', { rules: [], glossary: [], updatedAt: 0 }); } catch (e) {} if (!BRAIN.rules) BRAIN.rules = []; if (!BRAIN.glossary) BRAIN.glossary = []; return BRAIN; }
+async function brainSave() { BRAIN.updatedAt = Date.now(); try { await store.set({ styleBrain: BRAIN }); } catch (e) {} }
+function brainText() {
+  let s = STYLE_GUIDE;
+  const rules = (BRAIN && BRAIN.rules) || [], gloss = (BRAIN && BRAIN.glossary) || [];
+  if (rules.length) {
+    s += '- ADDITIONAL HOUSE RULES (distilled from official style docs — follow these too; if one contradicts a rule above, the more specific / more recent one wins):\n';
+    for (const r of rules) s += '  • ' + (r.cat ? '[' + r.cat + '] ' : '') + r.text.trim() + '\n';
+  }
+  if (gloss.length) {
+    s += '- ADDITIONAL GLOSSARY (approved EN→HE from official docs — render these consistently; a brand kept inside a translated term still stays Latin):\n';
+    for (const g of gloss) s += '  • "' + g.en + '" → "' + g.he + '"' + (g.note ? ' — ' + g.note : '') + '\n';
+  }
+  return s;
+}
+
 // ---- GPT: system prompt (identical policy to the admin Copy Deck tool) ------
 // tiktok=true appends the TikTok Hebrew Style Guide (Starling / Feishu). Omit it for memoQ/Crowdin/YiCAT.
 function sysPrompt(mode, plural, tiktok) {
@@ -364,7 +385,7 @@ function sysPrompt(mode, plural, tiktok) {
     (plural
       ? '- FORM OF ADDRESS: Hebrew MUST be in לשון רבים — plural, gender-neutral forms (e.g. הצטרפו, שלמו, לחצו, קראו ואשרו) — never masculine singular and never slash forms like שלם/י.\n'
       : '- FORM OF ADDRESS: use the SINGULAR, gender-neutral second person with a slash for both genders (לחץ/י, את/ה, בחר/י). Put the final letter (אות סופית) BEFORE the slash. If the masculine and feminine suffixes differ, write BOTH words in full to avoid a malformed feminine (התחל/התחילי, not התחל/י). Use the imperative when the source is imperative. Do NOT use the plural form of address and do NOT use masculine-singular alone.\n') +
-    (tiktok ? STYLE_GUIDE : '') +
+    (tiktok ? brainText() : '') +
     '- Return ONLY the JSON object requested. No commentary, no markdown, no code fences.';
   if (mode === 'translate') return base + '\nTASK: Translate each item\'s English "src" into natural, idiomatic Hebrew.';
   return base + '\nTASK: Proofread and correct each item\'s Hebrew "tgt" (use "src" as the reference meaning): fix grammar, spelling, terminology, and punctuation' +
@@ -841,7 +862,7 @@ function lqSys(plural) {
     'For each item an automated checker flagged a POSSIBLE error in the Hebrew "tgt", described by "error_type" / "error_comment", with a machine "ai_suggested" rewrite. Judge whether the flagged error is a REAL error.\n' +
     'HOUSE STYLE for any Hebrew you output (FORM OF ADDRESS): ' + (plural ? 'plural, gender-neutral (לשון רבים — e.g. הצטרפו, לחצו, קראו) — never masculine-singular, never שלם/י slash forms. ' : 'singular, gender-neutral with a slash for both genders (לחץ/י, את/ה, בחר/י) — final letter before the slash; write both words in full when the suffixes differ (התחל/התחילי, not התחל/י); NOT the plural form and NOT masculine-singular alone. ') +
     'Keep "TikTok" and brand / product / feature names in Latin script, EXACTLY as in "src" including internal spaces/capitalization ("TikTok Lite" stays "TikTok Lite", never "TikTok-Lite"/"TikTokLite"; a Hebrew prefix takes a maqaf before the name: ב-TikTok Lite). Keep EVERY placeholder / tag byte-for-byte and in order: {x}, {{x}}, %s, %1$s, <b>…</b>, <g id="1">…</g>, ①②③.\n' +
-    STYLE_GUIDE + '\n' +
+    brainText() + '\n' +
     'PUNCTUATION: MIRROR the English "src" sentence-final full stop (.). If "src" ends with "." then "corrected" MUST end with "."; if "src" does NOT end with "." then "corrected" must NOT end with ".". Never add or drop it independently. Keep "?", "!", "…" as the meaning requires.\n' +
     'NUMBERS & CURRENCY (do-not-translate): "corrected" must copy every number, amount and currency symbol from "src" VERBATIM ("MX$67,000" stays "MX$67,000") — never translate/convert/reformat, never keep a different (stale TM) figure from "tgt". A differing figure IS a valid error → verdict "valid" and fix it.\n' +
     'ADDITIONS: if "tgt" contains a name, word or clause NOT present or implied in "src" (e.g. a player name like "ראמי רביע" the source omits), the Addition flag is VALID → verdict "valid" and "corrected" must REMOVE the added content. Never introduce content not in "src".\n' +
@@ -2629,6 +2650,139 @@ async function plWrite() {
 }
 
 // ---- wire up ---------------------------------------------------------------
+// ---- Style Brain: ingest UI (paste / grab) → distill → review → merge ------
+const BRAIN_CATS = ['register', 'address', 'punctuation', 'tone', 'numbers', 'format', 'placeholders', 'glossary', 'misc'];
+let brainProposal = null;   // { rules:[{cat,text,accept}], glossary:[{en,he,note,accept}], conflicts:[{cat,text,conflictsWith,accept}] }
+const brainUid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+function brainInfo(msg, kind) { info('brain-info', msg, kind || ''); }
+
+function brainRefresh() {
+  const rn = (BRAIN.rules || []).length, gn = (BRAIN.glossary || []).length;
+  const badge = $('brain-badge'); if (badge) badge.textContent = (rn || gn) ? `· ${rn} rules · ${gn} terms` : '· empty (built-in guide only)';
+  if ($('brain-rules-n')) $('brain-rules-n').textContent = rn;
+  if ($('brain-gloss-n')) $('brain-gloss-n').textContent = gn;
+  const list = $('brain-list'); if (!list) return;
+  const rowsR = (BRAIN.rules || []).map((r) => `<div class="bl-row"><button class="bl-del" data-kind="rule" data-id="${esc(r.id)}" title="Delete this rule">✕</button><span class="bi-cat">${esc(r.cat || 'misc')}</span><span class="bi-text" dir="auto">${esc(r.text)}</span></div>`).join('');
+  const rowsG = (BRAIN.glossary || []).map((g) => `<div class="bl-row"><button class="bl-del" data-kind="gloss" data-id="${esc(g.id)}" title="Delete this term">✕</button><span class="bi-text"><span dir="ltr">${esc(g.en)}</span> → <span dir="rtl">${esc(g.he)}</span>${g.note ? ` <span class="hint">(${esc(g.note)})</span>` : ''}</span></div>`).join('');
+  list.innerHTML = (rowsR || rowsG)
+    ? `${rowsR ? `<div class="brain-sec">Rules</div>${rowsR}` : ''}${rowsG ? `<div class="brain-sec">Glossary</div>${rowsG}` : ''}`
+    : '<div class="hint">No ingested rules yet — the built-in guide is still fully in effect.</div>';
+  list.querySelectorAll('.bl-del').forEach((b) => b.addEventListener('click', async () => {
+    const id = b.getAttribute('data-id'), kind = b.getAttribute('data-kind');
+    if (kind === 'rule') BRAIN.rules = BRAIN.rules.filter((r) => String(r.id) !== id);
+    else BRAIN.glossary = BRAIN.glossary.filter((g) => String(g.id) !== id);
+    await brainSave(); brainRefresh();
+  }));
+}
+
+async function brainDistill() {
+  const key = await store.get('key', '');
+  if (!key) { brainInfo('Add your OpenAI key in Settings first.', 'err'); $('settings').open = true; return; }
+  const doc = $('brain-input').value.trim();
+  if (doc.length < 40) { brainInfo('Paste a style-guide document first (or use ⬇ Grab from the active tab).', 'err'); return; }
+  const model = $('model').value;
+  $('brain-distill').disabled = true; brainInfo('Distilling… (one GPT call)');
+  try {
+    const existing = ((BRAIN.rules || []).map((r) => '- [' + r.cat + '] ' + r.text).join('\n') + '\n' + (BRAIN.glossary || []).map((g) => '- "' + g.en + '" → "' + g.he + '"').join('\n')).trim();
+    const sys = 'You distill a TikTok Hebrew (he-IL) localization STYLE GUIDE document into a COMPACT, deduplicated ruleset for a translator/proofreader. Extract ONLY concrete, actionable rules and approved term mappings — no history, no rationale-only prose, no examples-only fluff, no generic localization common sense. Each rule ≤ ~30 words, imperative and specific. Categorize each rule as one of: ' + BRAIN_CATS.join(' | ') + '. Put exact EN→HE term equivalences in "glossary" (not "rules"). CRITICAL: do NOT repeat anything already covered by the EXISTING RULES the user provides. If a new rule CONTRADICTS an existing one, put it in "conflicts" (not "rules") with a short "conflictsWith" note naming what it clashes with. Return ONLY JSON: {"rules":[{"cat":"…","text":"…"}],"glossary":[{"en":"…","he":"…","note":"…"}],"conflicts":[{"cat":"…","text":"…","conflictsWith":"…"}]}. Keep Hebrew in Hebrew; never translate the rule text itself.';
+    const user = 'EXISTING RULES (already enforced — do NOT repeat any of these):\n' + (existing || '(none ingested yet — but a built-in guide already covers voice, register, singular-slash address form, punctuation, numbers/dual, placeholders, and a base glossary; skip anything those cover)') + '\n\nSTYLE-GUIDE DOCUMENT TO DISTILL:\n' + doc.slice(0, 24000);
+    const r = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST', headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, temperature: 0.1, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: sys }, { role: 'user', content: user }] })
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error((data && data.error && data.error.message) || ('HTTP ' + r.status));
+    let o = {}; try { o = JSON.parse(data.choices[0].message.content); } catch (e) { throw new Error('the model returned unparseable JSON.'); }
+    brainProposal = {
+      rules: (o.rules || []).map((x) => ({ cat: x.cat || 'misc', text: String(x.text || '').trim(), accept: true })).filter((x) => x.text),
+      glossary: (o.glossary || []).map((x) => ({ en: String(x.en || '').trim(), he: String(x.he || '').trim(), note: String(x.note || '').trim(), accept: true })).filter((x) => x.en && x.he),
+      conflicts: (o.conflicts || []).map((x) => ({ cat: x.cat || 'misc', text: String(x.text || '').trim(), conflictsWith: String(x.conflictsWith || '').trim(), accept: false })).filter((x) => x.text)
+    };
+    const total = brainProposal.rules.length + brainProposal.glossary.length + brainProposal.conflicts.length;
+    brainInfo(`Distilled ${brainProposal.rules.length} rules · ${brainProposal.glossary.length} terms${brainProposal.conflicts.length ? ` · ⚠ ${brainProposal.conflicts.length} conflict(s)` : ''} — review and merge below.`, total ? 'good' : '');
+    brainRenderReview();
+  } catch (e) { brainInfo('Distill failed: ' + e.message, 'err'); }
+  finally { $('brain-distill').disabled = false; }
+}
+
+function brainRenderReview() {
+  const box = $('brain-review'); if (!box) return;
+  if (!brainProposal) { box.hidden = true; return; }
+  const P = brainProposal;
+  const rowsR = P.rules.map((x, i) => `<label class="brain-item"><input type="checkbox" data-t="rule" data-i="${i}" ${x.accept ? 'checked' : ''}/><span class="bi-cat">${esc(x.cat)}</span><span class="bi-text" dir="auto">${esc(x.text)}</span></label>`).join('');
+  const rowsG = P.glossary.map((x, i) => `<label class="brain-item gloss"><input type="checkbox" data-t="gloss" data-i="${i}" ${x.accept ? 'checked' : ''}/><span class="bi-cat">term</span><span class="bi-text"><span dir="ltr">${esc(x.en)}</span> → ${esc(x.he)}${x.note ? ` <span class="hint">(${esc(x.note)})</span>` : ''}</span></label>`).join('');
+  const rowsC = P.conflicts.map((x, i) => `<label class="brain-item conflict"><input type="checkbox" data-t="conflict" data-i="${i}" ${x.accept ? 'checked' : ''}/><span class="bi-cat">${esc(x.cat)}</span><span class="bi-text" dir="auto">${esc(x.text)} <span class="hint">— conflicts with: ${esc(x.conflictsWith)}</span></span></label>`).join('');
+  box.innerHTML =
+    (rowsR ? `<div class="brain-sec">New rules</div>${rowsR}` : '') +
+    (rowsG ? `<div class="brain-sec">New glossary terms</div>${rowsG}` : '') +
+    (rowsC ? `<div class="brain-sec">⚠ Conflicts — review carefully (unchecked by default)</div>${rowsC}` : '') +
+    ((rowsR || rowsG || rowsC) ? `<div class="row"><button id="brain-merge" class="btn sm">Merge selected into brain</button><button id="brain-discard" class="btn sm ghost">Discard</button></div>` : '<div class="hint">Nothing new — everything in this doc is already covered.</div>');
+  box.hidden = false;
+  box.querySelectorAll('input[type=checkbox]').forEach((cb) => cb.addEventListener('change', () => {
+    const t = cb.getAttribute('data-t'), i = +cb.getAttribute('data-i');
+    (t === 'rule' ? P.rules : t === 'gloss' ? P.glossary : P.conflicts)[i].accept = cb.checked;
+  }));
+  if ($('brain-merge')) $('brain-merge').addEventListener('click', brainMerge);
+  if ($('brain-discard')) $('brain-discard').addEventListener('click', () => { brainProposal = null; box.hidden = true; brainInfo('Discarded — nothing was added.', ''); });
+}
+
+async function brainMerge() {
+  if (!brainProposal) return;
+  const src = ($('brain-input').value.trim().slice(0, 48) || 'pasted doc').replace(/\s+/g, ' ');
+  const now = Date.now();
+  const addR = brainProposal.rules.filter((x) => x.accept).concat(brainProposal.conflicts.filter((x) => x.accept));
+  for (const x of addR) BRAIN.rules.push({ id: brainUid(), cat: x.cat || 'misc', text: x.text, source: src, ts: now });
+  const addG = brainProposal.glossary.filter((x) => x.accept);
+  for (const x of addG) {
+    BRAIN.glossary = BRAIN.glossary.filter((g) => g.en.toLowerCase() !== x.en.toLowerCase());   // newest wins
+    BRAIN.glossary.push({ id: brainUid(), en: x.en, he: x.he, note: x.note, source: src, ts: now });
+  }
+  await brainSave();
+  const n = addR.length + addG.length;
+  brainProposal = null; $('brain-review').hidden = true; $('brain-input').value = ''; brainRefresh();
+  brainInfo(`Merged ${n} item(s). Brain now has ${BRAIN.rules.length} rules · ${BRAIN.glossary.length} terms — active on the next Run.`, 'good');
+}
+
+async function brainGrab() {
+  brainInfo('Reading the active tab…');
+  try {
+    const t = await activeTab();
+    if (!t || !/^https:\/\/[^/]*\.(larkoffice\.com|feishu\.(cn|net))\//.test(t.url || '')) {
+      brainInfo('Open the Lark/Feishu style-guide doc in the active tab, then click ⬇ Grab (or just paste the text).', 'err'); return;
+    }
+    const [res] = await chrome.scripting.executeScript({
+      target: { tabId: t.id },
+      func: () => {
+        const pick = document.querySelector('.docx-page, .doc-render, .doc-content, [class*="docx-"] [class*="content"], main, article') || document.body;
+        return (pick.innerText || '').replace(/\n{3,}/g, '\n\n').trim();
+      }
+    });
+    const txt = (res && res.result) || '';
+    if (txt.length < 40) { brainInfo('Could not read enough text from that tab — try select-all (Ctrl+A) + paste instead.', 'err'); return; }
+    $('brain-input').value = txt;
+    brainInfo(`Grabbed ${txt.length.toLocaleString()} characters. Skim it, then Distill.`, 'good');
+  } catch (e) { brainInfo('Grab failed: ' + e.message + ' — paste the text instead.', 'err'); }
+}
+
+function brainExport() {
+  const blob = new Blob([JSON.stringify(BRAIN, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'style-brain-' + new Date().toISOString().slice(0, 10) + '.json'; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+async function brainImport(file) {
+  try {
+    const o = JSON.parse(await file.text());
+    if (!o || !Array.isArray(o.rules) || !Array.isArray(o.glossary)) throw new Error('not a Style Brain JSON.');
+    const haveR = new Set(BRAIN.rules.map((r) => r.text.toLowerCase()));
+    o.rules.forEach((r) => { if (r && r.text && !haveR.has(String(r.text).toLowerCase())) BRAIN.rules.push({ id: brainUid(), cat: r.cat || 'misc', text: String(r.text), source: r.source || 'import', ts: r.ts || Date.now() }); });
+    o.glossary.forEach((g) => { if (g && g.en && g.he) { BRAIN.glossary = BRAIN.glossary.filter((x) => x.en.toLowerCase() !== String(g.en).toLowerCase()); BRAIN.glossary.push({ id: brainUid(), en: String(g.en), he: String(g.he), note: g.note || '', source: g.source || 'import', ts: g.ts || Date.now() }); } });
+    await brainSave(); brainRefresh();
+    brainInfo(`Imported — brain now has ${BRAIN.rules.length} rules · ${BRAIN.glossary.length} terms.`, 'good');
+  } catch (e) { brainInfo('Import failed: ' + e.message, 'err'); }
+}
+
 async function init() {
   $('key').value = await store.get('key', '');
   $('model').value = await store.get('model', 'gpt-5.4');
@@ -2660,6 +2814,17 @@ async function init() {
     try { const r = await send({ type: 'SET_SELECTORS', selectors: sel }); $('diag-out').textContent = 'Applied:\n' + JSON.stringify(r.cfg, null, 2); } catch (e) { $('diag-out').textContent = e.message; }
   });
   $('diag').addEventListener('click', doDiag);
+
+  // Style Brain
+  await brainLoad(); brainRefresh();
+  $('brain-distill').addEventListener('click', brainDistill);
+  $('brain-grab').addEventListener('click', brainGrab);
+  $('brain-export').addEventListener('click', brainExport);
+  $('brain-import').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) brainImport(f); e.target.value = ''; });
+  $('brain-clear').addEventListener('click', async () => {
+    if (!confirm('Remove all ingested rules and glossary terms? The built-in guide stays in effect.')) return;
+    BRAIN.rules = []; BRAIN.glossary = []; await brainSave(); brainRefresh(); brainInfo('Cleared — back to the built-in guide only.', '');
+  });
 
   $('harvest').addEventListener('click', doHarvest);
   $('xliff-file').addEventListener('change', (e) => onXliffFile(e.target));

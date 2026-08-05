@@ -9,7 +9,10 @@
     "https://*.crowdin.com/*",
     "https://memoq.terratranslations.com/*",
     "http://129.226.170.49/*",
-    "https://api.openai.com/*"
+    "https://api.openai.com/*",
+    "https://*.larkoffice.com/*",
+    "https://*.feishu.cn/*",
+    "https://*.feishu.net/*"
   ],
   "background": { "service_worker": "background.js" },
   "action": { "default_title": "Starling Copilot" },

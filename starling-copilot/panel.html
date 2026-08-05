@@ -62,6 +62,26 @@
       </details>
     </details>
 
+    <!-- STYLE BRAIN -->
+    <details class="card" id="brain-card">
+      <summary>🧠 Style Brain <span id="brain-badge" class="hint"></span></summary>
+      <p class="hint">Feed official style-guide docs (Lark, PDFs, pages). The copilot distills each into compact rules + glossary terms, merges them into one curated brain, and applies it in <b>🐦 Starling</b> and <b>⚖️ Feishu LQA</b> — on top of the built-in guide. Its content is sent to OpenAI (distillation + each suggestion), like your translations.</p>
+      <textarea id="brain-input" rows="6" placeholder="Paste a style-guide document here (in Lark: Ctrl+A → Ctrl+C, then paste)…"></textarea>
+      <div class="row">
+        <button id="brain-distill" class="btn sm">Distill &amp; review</button>
+        <button id="brain-grab" class="btn sm ghost" title="Read the text of the Lark/Feishu doc open in the active tab">⬇ Grab from active tab</button>
+        <button id="brain-export" class="btn sm ghost" title="Download the whole brain as JSON (back up / commit to git)">Export</button>
+        <label class="btn sm ghost" style="cursor:pointer">Import<input id="brain-import" type="file" accept="application/json" hidden /></label>
+      </div>
+      <div id="brain-info" class="info"></div>
+      <div id="brain-review" class="brain-review" hidden></div>
+      <details class="sub" id="brain-current">
+        <summary>Current brain — <span id="brain-rules-n">0</span> rules · <span id="brain-gloss-n">0</span> terms</summary>
+        <div id="brain-list" class="brain-list"></div>
+        <button id="brain-clear" class="btn sm ghost danger" title="Remove all ingested rules/terms (the built-in guide stays)">Clear ingested brain</button>
+      </details>
+    </details>
+
     <div id="view-starling">
     <!-- STEP 1 · HARVEST -->
     <section class="card">
