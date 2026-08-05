@@ -819,7 +819,8 @@ function lqSys(plural) {
     'ADDITIONS: if "tgt" contains a name, word or clause NOT present or implied in "src" (e.g. a player name like "ראמי רביע" the source omits), the Addition flag is VALID → verdict "valid" and "corrected" must REMOVE the added content. Never introduce content not in "src".\n' +
     'SPACING: "corrected" must have no space before "." "," ":" ";" "!" "?", no double spaces, and no leading/trailing spaces.\n' +
     'TERMINOLOGY SKEPTICISM: you do NOT have the project glossary / terminology reference. When the checker justifies an error ONLY by citing a "terminology reference", "approved target string", "terminology list" or "should remain in English" that you cannot see, do NOT assume it is correct — treat such unverifiable claims skeptically and lean "invalid" unless the Hebrew is independently wrong. Common English words/phrases ("for you", "tips", "settings", "learn more") are NOT brand names and are normally translated to Hebrew; only unmistakable product/feature proper nouns (e.g. TikTok, LIVE) must stay in Latin script.\n' +
-    'Return ONLY JSON: {"out":[{"i":<n>,"verdict":"valid|invalid|partial","category":"<exactly one of: Typo | Punctuation/Space/Tag/Formatting | Grammar and syntax | Mistranslation | Preferential change | Term mismatch | Semantic addition | Semantic omission | Inconsistency>","corrected":"<hebrew, the corrected target>","reason":"<short invalid reason, ONLY when verdict is invalid, else empty>","rationale":"<one short line for the human reviewer>","confidence":<0..1>}]}.\n' +
+    'DIFFERENCE FROM THE AI SUGGESTION: each item includes the automated checker\'s own rewrite as "ai_suggested". When your verdict is "valid" or "partial" AND your "corrected" DIFFERS from "ai_suggested" (ignore whitespace-only differences), set "ai_diff_reason" to a SHORT English phrase (a few words) naming WHY yours differs — e.g. "singular imperative (הקש/י) instead of plural (הקישו)", "removed trailing period to match source", "kept placeholder {s_ota}", "fixed brand spacing (TikTok Lite)". Leave "ai_diff_reason" EMPTY when there is no "ai_suggested", when your "corrected" equals it (ignoring whitespace), or when the verdict is invalid.\n' +
+    'Return ONLY JSON: {"out":[{"i":<n>,"verdict":"valid|invalid|partial","category":"<exactly one of: Typo | Punctuation/Space/Tag/Formatting | Grammar and syntax | Mistranslation | Preferential change | Term mismatch | Semantic addition | Semantic omission | Inconsistency>","corrected":"<hebrew, the corrected target>","reason":"<short invalid reason, ONLY when verdict is invalid, else empty>","ai_diff_reason":"<short English reason your corrected differs from ai_suggested on a valid/partial row; see rule above; else empty>","rationale":"<one short line for the human reviewer>","confidence":<0..1>}]}.\n' +
     'verdict "valid" = the flagged error is real and the target MUST be fixed; "invalid" = false positive, the current target is fine; "partial" = only part of the flag is right. Always classify "category" (the best-fit class of the issue being discussed) — even for invalid, so spelling/grammar false-positives can be identified. "corrected" = the corrected Hebrew target for valid/partial; for invalid return the original "tgt" unchanged. Be conservative — do not invent errors the checker did not raise.';
 }
 async function lqRun() {
@@ -849,7 +850,7 @@ async function lqRun() {
         arr.forEach((o) => {
           const idx = (o.i | 0) - 1; if (idx < 0 || idx >= slice.length) return; const n = slice[idx]; const row = byN[n];
           const corrected = o.corrected != null ? polish(row ? row.src : '', o.corrected) : '';  // fix spacing + mirror the source's full stop
-          LQ.results[n] = { verdict: String(o.verdict || '').toLowerCase().trim(), category: String(o.category || '').trim(), corrected: corrected, reason: o.reason ? String(o.reason) : '', rationale: o.rationale ? String(o.rationale) : '', confidence: (typeof o.confidence === 'number' ? o.confidence : null) };
+          LQ.results[n] = { verdict: String(o.verdict || '').toLowerCase().trim(), category: String(o.category || '').trim(), corrected: corrected, reason: o.reason ? String(o.reason) : '', aiDiff: o.ai_diff_reason ? String(o.ai_diff_reason) : '', rationale: o.rationale ? String(o.rationale) : '', confidence: (typeof o.confidence === 'number' ? o.confidence : null) };
           done++;
         });
       } catch (e) { failed += slice.length; log('lq batch @' + i + ' failed: ' + e.message); }
@@ -875,8 +876,14 @@ function lqDedupeReasons() {
   const seen = new Set();
   LQ.sel.forEach((n) => {
     const r = LQ.results[n]; if (!r) return;
-    if (!lqReal(r) && lqSpellingGrammar(r)) { const t = (r.category || 'other').toLowerCase(); if (seen.has(t)) r.comment = ''; else { seen.add(t); r.comment = r.reason || ''; } }
-    else r.comment = '';
+    const row = LQ.rows.find((x) => x.n === n);
+    if (!lqReal(r) && lqSpellingGrammar(r)) {
+      const t = (r.category || 'other').toLowerCase(); if (seen.has(t)) r.comment = ''; else { seen.add(t); r.comment = r.reason || ''; }
+    } else if (lqReal(r) && row && row.ai && r.corrected && wbNorm(r.corrected) !== wbNorm(row.ai)) {
+      // Valid, but our Final Translation differs from the AI's suggested target → comment WHY
+      // (e.g. "singular imperative (הקש/י) instead of plural"). Per-row, not deduped.
+      r.comment = r.aiDiff || '';
+    } else r.comment = '';
   });
 }
 // Flip a verdict on the card; clears the override when set back to GPT's own call.
@@ -911,7 +918,7 @@ function lqCardHtml(n) {
   const changed = (real && res.corrected && res.corrected !== r.tgt);
   const cat = c.category ? `<div class="lqc-lbl">Category</div><span class="lqc-cat">${esc(c.category)}</span>` : '';
   const finalT = real ? `<div class="lqc-lbl">Final translation</div><div class="lqc-new" dir="rtl">${hl(esc(c.final || r.tgt))}</div>` : '';
-  const comment = c.comments ? `<div class="lqc-lbl">Comment (invalid reason)</div><div class="lqc-reason" dir="auto">${esc(c.comments)}</div>` : '';
+  const comment = c.comments ? `<div class="lqc-lbl">Comment${real ? ' (differs from AI suggestion)' : ' (invalid reason)'}</div><div class="lqc-reason" dir="auto">${esc(c.comments)}</div>` : '';
   const rat = res.rationale ? `<div class="lqc-rat">${esc(res.rationale)}${res.confidence != null ? ` · conf ${Math.round(res.confidence * 100)}%` : ''}</div>` : '';
   const acts = [];
   if (c.final) acts.push(`<button class="lqc-copy" type="button" data-copy="${esc(c.final)}">Copy final</button>`);
