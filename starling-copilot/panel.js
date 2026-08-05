@@ -329,7 +329,8 @@ const STYLE_GUIDE =
   '- ELLIPSIS "…": for an action in progress ("מתבצעת העלאה…").\n' +
   '- BRACKETS: translate text inside [square brackets]; NEVER translate or alter text inside {curly braces} (code placeholders).\n' +
   '- GLOSSARY (approved terms — TRANSLATE / transliterate these, do NOT keep them in Latin): "LIVE" as the live-streaming feature / badge / action when it stands alone ("Go LIVE", "LIVE now", a "LIVE" label, "watch LIVE") → "שידור חי" (e.g. "Go LIVE" → "התחל/י שידור חי", "LIVE now" → "עכשיו בשידור חי"); "Snap" → "סנאפ"; "Blink" → "בלינק". EXCEPTION: the product name "TikTok LIVE" stays in Latin exactly as "TikTok LIVE".\n' +
-  '- APPROVED PHRASINGS (render these source strings with EXACTLY this Hebrew, keeping the {placeholder} in the position shown): "Commented on {s_user}\'s post." → "הגיב/ה על הפוסט של {s_user}." — a possessive "X\'s post" becomes "הפוסט של X", so the {placeholder} moves to the END (right before the final period), NOT the front.\n';
+  '- APPROVED PHRASINGS (render these source strings with EXACTLY this Hebrew, keeping the {placeholder} in the position shown): "Commented on {s_user}\'s post." → "הגיב/ה על הפוסט של {s_user}." — a possessive "X\'s post" becomes "הפוסט של X", so the {placeholder} moves to the END (right before the final period), NOT the front.\n' +
+  '  • "Get funds in 3 simple steps" → "קבל/י מימון ב-3 צעדים פשוטים" — for an ACTION CTA / promo headline led by an imperative verb ("Get…", "Start…", "Claim…"), prefer the IMPERATIVE slash (קבל/י) over the gerund (קבלת מימון). The "titles → gerund" rule is for functional button / menu labels, NOT action headlines urging the user to act.\n';
 
 // ---- GPT: system prompt (identical policy to the admin Copy Deck tool) ------
 // tiktok=true appends the TikTok Hebrew Style Guide (Starling / Feishu). Omit it for memoQ/Crowdin/YiCAT.

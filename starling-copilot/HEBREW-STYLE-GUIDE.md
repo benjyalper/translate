@@ -113,6 +113,7 @@ playlists; separate from individual Creator Subscriptions.)*
 | Source (EN) | Hebrew | Note |
 |-------------|--------|------|
 | `Commented on {s_user}'s post.` | `הגיב/ה על הפוסט של {s_user}.` | Possessive "X's post" → "הפוסט של X"; the `{s_user}` moves to the **end** (before the period), not the front — the RTL display just makes it look like it's leading. |
+| `Get funds in 3 simple steps` | `קבל/י מימון ב-3 צעדים פשוטים` | Action CTA / promo headline led by an imperative verb → use the **imperative slash** (`קבל/י`), not the gerund (`קבלת מימון`). The gerund rule is for functional button/menu labels, not action headlines. |
 
 ## Normative references (when the guide is silent)
 - Academy of the Hebrew Language punctuation rules; Hebrew grammar terms; the TikTok
