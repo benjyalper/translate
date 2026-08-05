@@ -282,7 +282,7 @@
       <!-- STEP 4 · WORK THE QUEUE -->
       <section class="card" id="wb-queue-card" hidden>
         <div class="step"><span class="num">4</span> Apply — one key at a time</div>
-        <div class="hint">Per key: <b>Search</b> filters All tasks to the key and <b>auto-opens</b> the task (the top one if several match), then <b>Check</b> reads the live segment, and <b>Write + confirm</b> applies the fix and proofread-confirms that row. <b>Never submits.</b></div>
+        <div class="hint">Per key: <b>Search</b> filters All tasks to the key and <b>auto-opens</b> it when exactly one task matches (if several match, it reports the count — open the right one with 👁), then <b>Check</b> reads the live segment, and <b>Write + confirm</b> applies the fix and proofread-confirms that row. <b>Never submits.</b></div>
         <label class="ck" style="margin-top:6px"><input type="checkbox" id="wb-autoconfirm" checked /> Proofread-confirm the row after writing (you still resubmit)</label>
         <div class="rev-bar" style="margin-top:8px">
           <button id="wb-resolve-all" class="btn sm">⚡ Resolve all</button>
@@ -305,7 +305,7 @@
           <p>This drives the manual write-back: for each valid fix it filters Starling's <b>All tasks</b> by <b>Key</b> (en→he), you open the task, and it reads the live segment, writes the <b>Final Translation</b>, and proofread-confirms that one row.</p>
           <p><b>It never blind-pastes.</b> A key can live in several tasks, a task's source can differ from the sheet's, and a task comment can overrule the sheet — so it always shows you <b>live source vs. sheet source</b> and <b>current target vs. final</b> before you approve each write. It <b>guards on source-match</b> and skips rows that already match.</p>
           <ol>
-            <li><b>Search</b> — filters All tasks to the key (hard reload) and auto-opens the task (the top row if several match).</li>
+            <li><b>Search</b> — filters All tasks to the key (hard reload) and auto-opens it when exactly one task matches; if several match, it reports the count and you open the right one with 👁.</li>
             <li><b>Check</b> — reads the live segment; flags source mismatch / already-correct.</li>
             <li><b>Write + confirm</b> — types the Final Translation and ticks proofread ✓✓.</li>
           </ol>

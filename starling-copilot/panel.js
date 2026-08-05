@@ -1546,8 +1546,8 @@ async function wbSearch(i) {
     let ctx = {}; try { ctx = await wbCall('WB_CTX'); } catch (e) {}
     const n = (ctx && ctx.matchCount) ? ` (~${ctx.matchCount} hit)` : '';
     // Auto-open the task by clicking its 👁 and navigating the same tab into the editor, so the
-    // next step is just Check. If several tasks match the key, open the TOP one (Check verifies
-    // the source; if it's the wrong revision, Skip / open another by hand). Retry a few times —
+    // next step is just Check — but ONLY when exactly one task matches the key. If several match,
+    // don't guess: just report the count and let the human pick the right 👁. Retry a few times —
     // right after the reload the React table may not have painted the eye rows yet.
     let op = null;
     for (let a = 0; a < 8; a++) {
@@ -1555,11 +1555,14 @@ async function wbSearch(i) {
       if (op && (op.ok || !/still loading|no task rows/i.test(op.error || ''))) break;
       await wbSleep(400);
     }
-    if (op && op.ok && op.url) {
+    if (op && op.ok && op.count > 1) {                       // several tasks — don't auto-open
+      wbSetStatus(i, 'searched', `${op.count} tasks match this key — open the right one with 👁, then Check.`);
+      return;
+    }
+    if (op && op.ok && op.url) {                             // exactly one — open it (unchanged path)
       wbSetStatus(i, 'searching', `Opening task ${op.taskId}…`);
       try { await wbNav(op.url); } catch (e) {}
-      const more = op.count > 1 ? ` (top of ${op.count} matches)` : '';
-      wbSetStatus(i, 'searched', `Opened task ${op.taskId}${more} — run Check to read the live segment.`);
+      wbSetStatus(i, 'searched', `Opened task ${op.taskId} — run Check to read the live segment.`);
       return;
     }
     wbSetStatus(i, 'searched', `Filtered All tasks by key${n}. ${op && op.error ? op.error + ' — ' : ''}Open the matching task with 👁, then Check.`);
