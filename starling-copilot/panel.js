@@ -957,7 +957,10 @@ function lqCells(res) {
 // Escape a cell for pasting into a sheet: if it holds a tab / newline / quote, wrap it in
 // double quotes (doubling any inner quote) — RFC4180. Without this, a multi-line Final
 // Translation spills onto extra rows and shifts every row below it out of alignment.
-function lqTsvCell(v) { v = String(v == null ? '' : v); return /[\t\n\r"]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+// A raw TAB inside a cell is what pushes its text into the NEXT column on paste, so replace
+// tabs with a space (never meaningful mid-cell). Newlines are still RFC4180-quoted so a
+// multi-line Final Translation stays in one cell (doesn't spill onto extra rows).
+function lqTsvCell(v) { v = String(v == null ? '' : v).replace(/\t/g, ' '); return /[\n\r"]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
 function lqColumn(kind) {
   return LQ.sel.map((n) => { const res = LQ.results[n]; return lqTsvCell(res ? (lqCells(res)[kind] || '') : ''); }).join('\n');
 }
