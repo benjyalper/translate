@@ -13,7 +13,7 @@
   // tab is running an older version, re-injects this file via chrome.scripting so stale tabs
   // self-heal (no page reload needed). Re-injection tears down the previous version's message
   // listener first (below) so there's never a double-listener race.
-  const CS_VERSION = 34;
+  const CS_VERSION = 35;
   if (window.__scVer === CS_VERSION) return;                         // this exact version already live here
   if (typeof window.__scCleanup === 'function') { try { window.__scCleanup(); } catch (e) {} }  // remove an older/stale one
   window.__scVer = CS_VERSION;
@@ -1111,16 +1111,25 @@
   // "Submit task" (Cancel is the other). We scope the confirm to the modal so we don't
   // re-hit the toolbar trigger, and verify by watching the trigger flip to "Task submitted".
   function submitTrigger() {
-    const rx = /^\s*(submit task|task submitted|提交任务|已提交)\s*$/i;
+    // Tolerate a trailing dropdown caret / whitespace on the label (▾▼▽⌄∨ …),
+    // so "Submit task ▾" still matches as well as a bare "Submit task".
+    const clean = (s) => (s || '').replace(/[▲▼▴▾▸◂∨⌄﹀˅ˇ]/g, '').replace(/\s+/g, ' ').trim();
+    const rx = /^(submit task|task submitted|提交任务|已提交)$/i;
     const scope = document.querySelector('.text-editor-header-right') || document;
-    return [...scope.querySelectorAll('button,.semi-button')].find((b) => b.offsetParent !== null && rx.test((b.textContent || '').trim()))
-      || [...document.querySelectorAll('button,.semi-button')].find((b) => b.offsetParent !== null && rx.test((b.textContent || '').trim())) || null;
+    return [...scope.querySelectorAll('button,.semi-button')].find((b) => b.offsetParent !== null && rx.test(clean(b.textContent)))
+      || [...document.querySelectorAll('button,.semi-button')].find((b) => b.offsetParent !== null && rx.test(clean(b.textContent))) || null;
   }
   async function domSubmit() {
     try {
-      const trigger = submitTrigger();
-      if (!trigger) return { ok: false, error: 'Submit-task button not found in the header.' };
+      // After a page reload the content script pings ready BEFORE the SPA has
+      // re-rendered the header, so the button often isn't there for the first
+      // second or two. Poll for it instead of failing on the first miss.
+      let trigger = null;
+      for (let i = 0; i < 30; i++) { trigger = submitTrigger(); if (trigger) break; await sleep(300); }
+      if (!trigger) return { ok: false, error: 'Submit-task button not found in the header (page may still be loading — try ➤ Submit task again).' };
       const before = (trigger.textContent || '').trim();
+      // Already submitted (button reads "Task submitted") → nothing to do, report success.
+      if (/task submitted|已提交/i.test(before)) return { ok: true, submitted: true, already: true, before };
       trigger.click(); await sleep(400);
       const itemRx = /submit all translations|提交全部翻译|提交所有/i;
       let item = [...document.querySelectorAll('.semi-dropdown-item')].find((e) => e.offsetParent !== null && itemRx.test(e.textContent || ''));
