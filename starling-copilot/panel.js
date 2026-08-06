@@ -1121,11 +1121,17 @@ const WB = { header: [], records: [], map: {}, rows: [], queue: [], filter: 'tod
 // trailing spaces — both visually identical to their ASCII/absent counterparts. Fold
 // fullwidth→ASCII, unify quotes/dashes, collapse whitespace, trim.
 const wbFold = (s) => String(s == null ? '' : s)
-  .replace(/[！-～]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
-  .replace(/[　 ]/g, ' ')
-  .replace(/[‘’ʼ′]/g, "'")
-  .replace(/[“”″]/g, '"')
-  .replace(/[‐-―−]/g, '-')
+  // Unify EVERY apostrophe / prime / quote / dash variant a "smart" editor or paste can
+  // produce (Excel autocorrect, Win-1252 mojibake, acute, backtick, Hebrew geresh,
+  // fullwidth via NFKC) so a source that LOOKS identical is not flagged "source
+  // mismatch" over an invisible punctuation swap or a zero-width / bidi character.
+  .replace(/[\u2018\u2019\u201A\u201B\u2032\u02B9\u02BB\u02BC\u02BD\u02C8\u0060\u00B4\u05F3\uA78B\uA78C\u0091\u0092]/g, "'")
+  .replace(/[\u201C\u201D\u201E\u201F\u2033\u3003\u05F4\u00AB\u00BB\u0093\u0094]/g, '"')
+  .replace(/[\u2010-\u2015\u2212\u2043\uFF0D]/g, '-')
+  .normalize('NFKC')                                                      // fullwidth->ASCII, compatibility forms
+  .replace(/[\u0300-\u036F]/g, '')                                       // strip Latin combining accents (match only)
+  .replace(/[\u00AD\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]/g, '') // soft hyphen, zero-width, bidi marks
+  .replace(/[\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]/g, ' ')    // any Unicode space -> ASCII space
   .replace(/\s+/g, ' ')
   .trim();
 
@@ -2120,8 +2126,14 @@ function wbCardHtml(q, i) {
   const live = q.live, dec = q.decision;
   const edited = (q.editText != null && String(q.editText).trim() !== '') ? String(q.editText) : null;
   const effFinal = edited != null ? edited : q.final;   // what Write actually sends
+  const verd = (q.api && q.api.verdict) || null;   // 'norev' | 'invalid' | … when resolved by the API engine
+  const mismatchBadge = verd === 'invalid'
+    ? '<span class="lqc-warn" title="A sheet row DID match this source, but that revision is marked Valid = No (or has no Final Translation) — nothing to fix in this task.">⚠ Valid = No here</span>'
+    : verd === 'norev'
+      ? '<span class="lqc-warn" title="No sheet row’s source matches this task’s source for this key — this is a different revision, so nothing is written. (Punctuation/invisible-character differences are already normalised, so this is a real wording difference.)">⚠ no source match</span>'
+      : '<span class="lqc-warn" title="Live task source differs from the sheet source — the sheet fix may not apply here.">⚠ source mismatch</span>';
   const decBadge = dec === 'already' ? '<span class="lqc-badge b-invalid" title="Live target already equals the Final Translation">already correct</span>'
-    : dec === 'mismatch' ? '<span class="lqc-warn" title="Live task source differs from the sheet source — the sheet fix may not apply here (line 121).">⚠ source mismatch</span>'
+    : dec === 'mismatch' ? mismatchBadge
       : dec === 'ready' ? '<span class="lqc-badge b-valid">ready</span>' : '';
   const liveBlock = live && live.found ? `
     <div class="lqc-lbl">Live source</div><div class="lqc-src" dir="ltr">${hl(esc(live.source))}</div>
