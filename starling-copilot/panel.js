@@ -15,6 +15,20 @@ async function activeTab() {
   const [t] = await chrome.tabs.query({ active: true, currentWindow: true });
   return t;
 }
+// Try to make the content script answer on this tab. Returns true if a PING
+// succeeds (already there, or after a re-inject). Only injects when NOTHING
+// responds — a wrong-version reply is left alone (the caller shows Ctrl+R),
+// so we never stack a second listener over a live one.
+async function ensureContentScript(tabId) {
+  try { const r = await chrome.tabs.sendMessage(tabId, { type: 'PING' }); if (r && r.ok) return true; } catch (e) { /* no receiving end */ }
+  try { await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] }); }
+  catch (e) { return false; }
+  for (let i = 0; i < 12; i++) {
+    try { const r = await chrome.tabs.sendMessage(tabId, { type: 'PING' }); if (r && r.ok) return true; } catch (e) {}
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  return false;
+}
 async function send(msg) {
   const t = await activeTab();
   if (!t || !/^https:\/\/starling\.bytedance\.com\//.test(t.url || '')) {
@@ -23,7 +37,13 @@ async function send(msg) {
   try {
     return await chrome.tabs.sendMessage(t.id, msg);
   } catch (e) {
-    throw new Error('Content script not loaded on this tab — reload the Starling page.');
+    // Transient "no receiving end" — happens after an extension reload or an
+    // SPA task-switch that swapped the document. Re-inject the content script
+    // once and retry before giving up, so the user doesn't have to Ctrl+R.
+    if (await ensureContentScript(t.id)) {
+      try { return await chrome.tabs.sendMessage(t.id, msg); } catch (e2) {}
+    }
+    throw new Error('Content script not loaded on this tab — reload the Starling page (Ctrl+R).');
   }
 }
 // ---- messaging to the memoQ tab --------------------------------------------
