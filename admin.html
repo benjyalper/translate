@@ -653,7 +653,7 @@
         <button class="toolmap-btn" onclick="scrollToTool('tool-document-proofreader')">
           <span class="tm-label">📄 Document Proofreader</span>
           <span class="tm-info" tabindex="0">i</span>
-          <span class="tm-tip"><span class="tm-tip-title">Document Proofreader (Hebrew)</span>Upload a Hebrew .pdf or .docx → GPT reviews each paragraph → preview issues by severity → approve fixes → download .docx with native Word track changes (red strikethrough + blue insert).</span>
+          <span class="tm-tip"><span class="tm-tip-title">Document Proofreader (Hebrew)</span>Upload a Hebrew .pdf / .docx / .xlsx → GPT reviews each paragraph (or sheet cell, with optional source column for bilingual review) → preview issues by severity → approve fixes → download .docx with Word track changes, or .xlsx with changed words in red (all other columns, styles &amp; the embedded layout preserved).</span>
         </button>
 
         <button class="toolmap-btn" onclick="scrollToTool('tool-text-checker')">
@@ -1923,18 +1923,21 @@
           <div class="tool-icon">📄</div>
           <div>
             <div class="tool-title" data-tool-anchor="tool-document-proofreader">Document Proofreader (Hebrew)</div>
-            <div class="tool-sub">Upload Hebrew .pdf or .docx → GPT-5.4 reviews each paragraph → preview issues by severity → approve fixes → download .docx with native Word track changes (red strikethrough + blue insert)</div>
+            <div class="tool-sub">Upload Hebrew .pdf / .docx / .xlsx → GPT-5.4 reviews each paragraph (or sheet cell) → preview issues by severity → approve fixes → download .docx with Word track changes, or .xlsx with changed words in red (styling preserved)</div>
           </div>
         </div>
         <div class="tool-divider"></div>
 
         <!-- File upload -->
         <div class="tdrop" id="dp-drop">
-          <input type="file" id="dp-file" accept=".pdf,.docx" onchange="dpOnFile(this)"/>
+          <input type="file" id="dp-file" accept=".pdf,.docx,.xlsx" onchange="dpOnFile(this)"/>
           <div class="tdrop-icon">📄</div>
-          <div class="tdrop-text">Drop a Hebrew .pdf or .docx<br><small>monolingual Hebrew review · up to 50 MB</small></div>
+          <div class="tdrop-text">Drop a Hebrew .pdf / .docx / .xlsx<br><small>monolingual (or bilingual for sheets) Hebrew review · up to 50 MB</small></div>
         </div>
         <div class="tdrop-sel" id="dp-file-label"></div>
+
+        <!-- Structured-xlsx plan (populated by dpXlsxOnFile when a spreadsheet is uploaded) -->
+        <div id="dp-xlsx-plan" style="display:none;margin-top:.6rem;padding:.6rem .8rem;background:rgba(34,197,94,.06);border:1px solid rgba(34,197,94,.28);border-radius:8px;font-size:.78rem;color:#cbd5e1"></div>
 
         <!-- Settings row -->
         <div class="tlang-row" style="margin-top:.5rem;align-items:center;flex-wrap:wrap;gap:.5rem">
@@ -8204,20 +8207,29 @@ async function prDownloadRawSdlxliff() {
 //      Output opens in Word → Review ribbon shows Accept/Reject.
 
 let dpFile = null;
-let dpParagraphs = [];   // [{ idx, text, reviewable }] — every paragraph from the source, in order
-let dpAllIssues  = [];   // [{ id, paraIdx, text, issues:[...], approved }]
+let dpParagraphs = [];   // [{ idx, text, reviewable, cell?, src? }] — every reviewable unit, in order
+let dpAllIssues  = [];   // [{ id, paraIdx, text, issues:[...], approved, cell?, src? }]
 let dpActiveFilter = 'all';
 let dpTotalWords = 0;    // reviewable text word count (drives the cost estimate)
+let dpFileKind = '';     // 'pdf' | 'docx' | 'xlsx'
+let dpXlsxRows = [];     // cached dtLocTestReadXlsxRows output (0-based; index = rowNum-1)
+let dpXlsxPlan = null;   // { headerIdx, dataRows, columns:[{idx,letter,name,role,filled,heShare,proofread}], sourceIdx }
 
 async function dpOnFile(input) {
   dpFile = input.files?.[0] || null;
   const lbl = document.getElementById('dp-file-label');
   const btn = document.getElementById('dp-btn');
   dpAllIssues = []; dpParagraphs = []; dpTotalWords = 0;
+  dpXlsxRows = []; dpXlsxPlan = null;
+  const planBox = document.getElementById('dp-xlsx-plan');
+  if (planBox) { planBox.style.display = 'none'; planBox.innerHTML = ''; }
   document.getElementById('dp-results').style.display = 'none';
   document.getElementById('dp-error').style.display   = 'none';
   dpRenderCostEstimate();
-  if (!dpFile) { lbl.textContent = ''; btn.disabled = true; return; }
+  if (!dpFile) { lbl.textContent = ''; btn.disabled = true; dpFileKind = ''; return; }
+  const nm = (dpFile.name || '').toLowerCase();
+  dpFileKind = nm.endsWith('.xlsx') ? 'xlsx' : nm.endsWith('.docx') ? 'docx' : 'pdf';
+  if (dpFileKind === 'xlsx') { await dpXlsxOnFile(); return; }
   lbl.textContent = `📎 ${dpFile.name} (${(dpFile.size/1024/1024).toFixed(2)} MB) · ⏳ extracting text…`;
   btn.disabled = true;
   // Pre-extract so the cost estimate is volume-accurate and Analyze
@@ -8238,6 +8250,140 @@ async function dpOnFile(input) {
     lbl.textContent = `📎 ${dpFile.name} · ❌ ${e.message}`;
     btn.disabled = true;
   }
+}
+
+// ── Spreadsheet (.xlsx) proofreading ─────────────────────────────
+// Mirrors the Document Translator's structured-xlsx flow: detect the
+// sheet's columns, let the user tick which column(s) to proofread and
+// (optionally) a source column for bilingual context, then review each
+// cell like a paragraph. Output keeps every other cell/column/style
+// byte-for-byte and marks the changed words in the fixed cells RED.
+
+// Fraction of a column's filled cells that contain Hebrew letters —
+// used to default-tick the Hebrew column(s) in a multilingual sheet.
+function dpColHebrewShare(rows, headerIdx, colIdx) {
+  let filled = 0, heb = 0;
+  for (let r = headerIdx + 1; r < rows.length; r++) {
+    const v = ((rows[r] || [])[colIdx] || '').toString().trim();
+    if (!v) continue;
+    filled++;
+    if (/[֐-׿]/.test(v)) heb++;
+  }
+  return filled ? heb / filled : 0;
+}
+
+// Build a column plan for any sheet. Uses the translator's detector when it
+// finds a header; otherwise falls back to treating row 1 as the header.
+async function dpXlsxBuildPlan() {
+  let det = { hasStructure: false };
+  try { det = await dtDetectXlsxStructure(dpFile); } catch (e) {}
+  let headerIdx, columns;
+  if (det.hasStructure) {
+    headerIdx = det.headerIdx; columns = det.columns;
+  } else {
+    headerIdx = 0;
+    const header = dpXlsxRows[0] || [];
+    let maxCol = 0;
+    for (const r of dpXlsxRows) maxCol = Math.max(maxCol, (r || []).length);
+    columns = [];
+    for (let c = 0; c < maxCol; c++) {
+      const name = (header[c] || '').toString().trim();
+      let filled = 0;
+      for (let r = 1; r < dpXlsxRows.length; r++) if (((dpXlsxRows[r] || [])[c] || '').toString().trim()) filled++;
+      if (!name && !filled) continue;
+      columns.push({ idx: c, letter: dtLocTestIdxToColRef(c), name: name || '(no header)', role: dtClassifyCol(name), filled });
+    }
+  }
+  columns = columns.map(c => {
+    const heShare = dpColHebrewShare(dpXlsxRows, headerIdx, c.idx);
+    return { ...c, heShare, proofread: heShare > 0.5 };   // default: proofread the Hebrew column(s)
+  });
+  // If nothing looked Hebrew, fall back to any detected target column.
+  if (!columns.some(c => c.proofread)) columns.forEach(c => { if (c.role === 'target' && c.filled) c.proofread = true; });
+  const srcCol = columns.find(c => c.role === 'source');
+  return {
+    headerIdx, dataRows: dpXlsxRows.length - (headerIdx + 1),
+    columns, sourceIdx: srcCol ? srcCol.idx : -1,
+  };
+}
+
+async function dpXlsxOnFile() {
+  const lbl = document.getElementById('dp-file-label');
+  const btn = document.getElementById('dp-btn');
+  lbl.textContent = `📎 ${dpFile.name} (${(dpFile.size/1024/1024).toFixed(2)} MB) · ⏳ reading sheet…`;
+  btn.disabled = true;
+  try {
+    dpXlsxRows = await dtLocTestReadXlsxRows(dpFile);
+    dpXlsxPlan = await dpXlsxBuildPlan();
+    if (!dpXlsxPlan.columns.length) throw new Error('No columns with data found in the first sheet.');
+    dpRenderXlsxPlan();
+    document.getElementById('dp-xlsx-plan').style.display = 'block';
+    const dl = document.getElementById('dp-dl-btn');
+    if (dl) dl.textContent = '⬇ Download Proofread .xlsx';
+    dpXlsxRefreshUnits();
+  } catch (e) {
+    lbl.textContent = `📎 ${dpFile.name} · ❌ ${e.message}`;
+    btn.disabled = true;
+  }
+}
+
+// Re-extract the reviewable units from the currently-ticked columns and
+// refresh the word count / cost / button state.
+function dpXlsxRefreshUnits() {
+  const lbl = document.getElementById('dp-file-label');
+  const btn = document.getElementById('dp-btn');
+  const P = dpXlsxPlan;
+  const units = []; let idx = 0;
+  const start = P.headerIdx + 1;             // 0-based first data row
+  for (const col of P.columns) {
+    if (!col.proofread) continue;
+    for (let r = start; r < dpXlsxRows.length; r++) {
+      const val = ((dpXlsxRows[r] || [])[col.idx] || '').toString();
+      const t = val.trim();
+      if (t.length < 2) continue;
+      if (/^["']?[\d.,\-+%\/]+["']?$/.test(t)) continue;   // pure number / label
+      const src = (P.sourceIdx >= 0) ? ((dpXlsxRows[r] || [])[P.sourceIdx] || '').toString() : '';
+      units.push({ idx: idx++, text: val, reviewable: true, cell: { rowNum: r + 1, colLetter: dtLocTestIdxToColRef(col.idx), colName: col.name }, src });
+    }
+  }
+  dpParagraphs = units;
+  dpTotalWords = units.reduce((s, p) => s + adminCountWords(p.text), 0);
+  dpRenderCostEstimate();
+  const nCols = P.columns.filter(c => c.proofread).length;
+  lbl.textContent = `📎 ${dpFile.name} · ${units.length} cell${units.length===1?'':'s'} in ${nCols} column${nCols===1?'':'s'} ready (${dpTotalWords.toLocaleString()} words)`
+    + (P.sourceIdx >= 0 ? ` · bilingual vs ${dtLocTestIdxToColRef(P.sourceIdx)}` : ' · monolingual');
+  btn.disabled = units.length === 0;
+}
+
+function dpRenderXlsxPlan() {
+  const box = document.getElementById('dp-xlsx-plan');
+  const P = dpXlsxPlan;
+  const srcOpts = `<option value="-1"${P.sourceIdx < 0 ? ' selected' : ''}>(none — monolingual Hebrew review)</option>` +
+    P.columns.map(c => `<option value="${c.idx}"${c.idx === P.sourceIdx ? ' selected' : ''}>${esc(c.name)} (${c.letter})</option>`).join('');
+  const rowsHtml = P.columns.map((c, i) => {
+    const he = c.heShare > 0.5 ? ' · 🅗 Hebrew' : '';
+    const tag = c.role === 'source' ? '🟢 source' : c.role === 'target' ? '🎯 target' : c.role === 'meta' ? '⚪ meta' : '·';
+    return `<div style="display:flex;align-items:center;gap:.45rem;padding:.2rem 0;flex-wrap:wrap">
+      <label style="display:flex;align-items:center;gap:.4rem;flex:1;min-width:220px">
+        <input type="checkbox" data-dpx="pr" data-i="${i}" ${c.proofread ? 'checked' : ''}/>
+        <b>${esc(c.name)}</b> <span style="color:#64748b">${c.letter}</span>
+        <span style="font-size:.68rem;color:#94a3b8">${tag}${c.filled ? ' · ' + c.filled + ' filled' : ' · empty'}${he}</span>
+      </label>
+    </div>`;
+  }).join('');
+  box.innerHTML =
+    `<div style="font-weight:600;color:#86efac;margin-bottom:.35rem">📊 Structured sheet — choose which column(s) to proofread</div>
+     <div style="font-size:.72rem;color:#94a3b8;margin-bottom:.45rem">Header on row ${P.headerIdx + 1} · ${P.dataRows} data rows. Only ticked columns are reviewed; every other column, the header row, and all styling are preserved. Approved fixes are written back with the <span style="color:#f87171">changed words in red</span>.</div>
+     ${rowsHtml}
+     <div style="display:flex;align-items:center;gap:.5rem;margin-top:.55rem;flex-wrap:wrap">
+       <span style="font-size:.72rem;color:#cbd5e1">Source column for bilingual context:</span>
+       <select data-dpx="src" style="background:#0a0a14;border:1px solid var(--border);border-radius:5px;color:#e2e8f0;font-size:.72rem;padding:.2rem .3rem">${srcOpts}</select>
+     </div>`;
+  box.querySelectorAll('[data-dpx="pr"]').forEach(cb => cb.addEventListener('change', e => {
+    dpXlsxPlan.columns[+e.target.dataset.i].proofread = e.target.checked; dpXlsxRefreshUnits();
+  }));
+  const sel = box.querySelector('[data-dpx="src"]');
+  if (sel) sel.addEventListener('change', e => { dpXlsxPlan.sourceIdx = +e.target.value; dpXlsxRefreshUnits(); });
 }
 
 function dpRenderCostEstimate() {
@@ -8398,6 +8544,57 @@ The "suggestion" MUST be the FULL replacement paragraph (not just the corrected 
   }
 }
 
+// Bilingual (source-aware) review for spreadsheet cells. Returns the SAME
+// JSON shape as dpReviewBatch so all downstream rendering/download is shared.
+// If no source text is present it behaves like the monolingual reviewer.
+async function dpReviewBatchXlsx(batch, model, apiKey) {
+  const hasSrc = batch.some(p => (p.src || '').trim());
+  const numbered = batch.map((p, i) => {
+    const he = (p.text || '').replace(/\s+/g, ' ').trim();
+    const src = (p.src || '').replace(/\s+/g, ' ').trim();
+    return src ? `${i+1}. [SOURCE] ${src}\n   [HEBREW] ${he}` : `${i+1}. ${he}`;
+  }).join('\n\n');
+  const systemPrompt =
+`You are a senior English→Hebrew (he-IL) localization proofreader reviewing UI/product strings from a spreadsheet.
+${hasSrc ? 'Each item gives the SOURCE (original) text and the current HEBREW translation.' : 'Each item is a Hebrew string.'} Flag only genuine quality issues — not nitpicks.
+
+CATEGORIES: grammar, spelling, terminology, style, punctuation, formality, clarity${hasSrc ? ', mistranslation (Hebrew does not match the source meaning)' : ''}.
+
+SEVERITY:
+- critical: changes meaning, unreadable, or ${hasSrc ? 'a clear mistranslation' : 'factually wrong'}
+- major: clear error a professional editor would fix
+- minor: polish, optional improvement
+
+PRESERVE EXACTLY in every "suggestion": leading bullets (·, ・), numbers, %s/%d/{...} placeholders, brand/product names, "Wi-Fi", "App", model codes, slashes, and the structure of "A/B" pairs. Keep terminology consistent with how the same term is rendered elsewhere. Gender-neutral phrasing where the source is neutral.
+
+For EACH numbered item return exactly one JSON object:
+  { "n": <number>, "issues": [ { "severity": "critical"|"major"|"minor", "category": "<one above>", "description": "<short English explanation>", "suggestion": "<corrected FULL Hebrew string>" } ] }
+If the Hebrew is fine, return { "n": <number>, "issues": [] }.
+
+Output a JSON ARRAY of exactly ${batch.length} objects in order. ONLY the JSON array — no markdown, no code fences, no commentary. The "suggestion" MUST be the FULL replacement Hebrew string.`;
+
+  try {
+    const r = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, temperature: 0.2, messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user',   content: numbered },
+      ] }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error?.message || 'GPT error ' + r.status);
+    let raw = (data.choices?.[0]?.message?.content || '').trim();
+    raw = raw.replace(/^```[a-z]*\n?/i, '').replace(/```\s*$/, '').trim();
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) throw new Error('Expected JSON array');
+    return parsed;
+  } catch (e) {
+    console.warn('[dp] xlsx batch failed:', e.message);
+    return batch.map((_, i) => ({ n: i+1, issues: [] }));
+  }
+}
+
 async function dpAnalyze() {
   const apiKey = getApiKey();
   if (!apiKey) { promptApiKey(); return; }
@@ -8416,11 +8613,15 @@ async function dpAnalyze() {
   bar.style.width = '5%';
 
   try {
-    // Paragraphs were pre-extracted at upload time (see dpOnFile).
+    // Units were pre-extracted at upload time (see dpOnFile / dpXlsxRefreshUnits).
+    const isXlsx = dpFileKind === 'xlsx';
+    const unitWord = isXlsx ? 'cell' : 'paragraph';
     const toReview = dpParagraphs.filter(p => p.reviewable);
-    if (toReview.length === 0) throw new Error('No reviewable paragraphs found — upload a .pdf or .docx first.');
+    if (toReview.length === 0) throw new Error(isXlsx
+      ? 'No reviewable cells — tick at least one column with Hebrew text.'
+      : 'No reviewable paragraphs found — upload a .pdf or .docx first.');
 
-    txt.textContent = `Reviewing ${toReview.length} paragraph(s) with ${model}…`;
+    txt.textContent = `Reviewing ${toReview.length} ${unitWord}(s) with ${model}…`;
     bar.style.width = '15%';
 
     const BATCH = 8;
@@ -8428,9 +8629,11 @@ async function dpAnalyze() {
     let counter = 0;
     for (let i = 0; i < toReview.length; i += BATCH) {
       const batch = toReview.slice(i, i + BATCH);
-      txt.textContent = `Reviewing paragraphs ${i+1}–${Math.min(i+BATCH, toReview.length)} of ${toReview.length} (${model})…`;
+      txt.textContent = `Reviewing ${unitWord}s ${i+1}–${Math.min(i+BATCH, toReview.length)} of ${toReview.length} (${model})…`;
       bar.style.width = (15 + (i / toReview.length) * 80) + '%';
-      const results = await dpReviewBatch(batch, model, apiKey);
+      const results = isXlsx
+        ? await dpReviewBatchXlsx(batch, model, apiKey)
+        : await dpReviewBatch(batch, model, apiKey);
       for (let j = 0; j < batch.length; j++) {
         const r = results.find(x => x.n === j+1) || { issues: [] };
         if (r.issues && r.issues.length > 0) {
@@ -8438,6 +8641,8 @@ async function dpAnalyze() {
             id: 'dp_' + (counter++),
             paraIdx: batch[j].idx,
             text: batch[j].text,
+            cell: batch[j].cell,
+            src: batch[j].src,
             issues: r.issues,
             approved: false,
           });
@@ -8522,17 +8727,24 @@ function dpRenderCard(item) {
   const cardBorder = item.approved ? '1px solid #14532d' : '1px solid #1f2937';
   const cardBg     = item.approved ? 'rgba(52,211,153,0.04)' : '#0f0f17';
   const preview    = (item.text || '').slice(0, 90) + ((item.text || '').length > 90 ? '…' : '');
+  const locBadge   = item.cell
+    ? `${esc(item.cell.colLetter)}${esc(String(item.cell.rowNum))}`
+    : `¶&nbsp;#${esc(String(item.paraIdx + 1))}`;
+  const srcLine = (item.cell && (item.src || '').trim())
+    ? `<div style="padding:.4rem .75rem;border-bottom:1px solid #1f2937;background:rgba(59,130,246,0.05)"><span style="font-size:.6rem;color:#93c5fd;text-transform:uppercase;letter-spacing:.06em;font-weight:700">Source</span> <span style="font-size:.78rem;color:#cbd5e1">${esc((item.src || '').slice(0, 160))}${(item.src || '').length > 160 ? '…' : ''}</span></div>`
+    : '';
 
   return `
     <div style="display:grid;grid-template-columns:104px 1fr;border:${cardBorder};border-radius:8px;overflow:hidden;background:${cardBg}">
       <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.35rem;padding:.7rem .35rem;background:#0a0a14;border-right:1px solid #1f2937">
         ${sevChips}
       </div>
-      <div style="display:grid;grid-template-rows:auto auto auto auto">
+      <div style="display:grid;grid-template-rows:auto auto auto auto auto">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:.7rem;padding:.55rem .75rem;background:#0a0a14;border-bottom:1px solid #1f2937">
           <div dir="rtl" style="font-size:.82rem;color:#e2e8f0;line-height:1.4;flex:1 1 auto;min-width:0;text-align:right">${esc(preview)}</div>
-          <div style="font-size:.7rem;color:#64748b;font-family:monospace;white-space:nowrap;flex:0 0 auto;padding-top:.18rem">¶&nbsp;#${esc(String(item.paraIdx + 1))}</div>
+          <div style="font-size:.7rem;color:#64748b;font-family:monospace;white-space:nowrap;flex:0 0 auto;padding-top:.18rem">${locBadge}</div>
         </div>
+        ${srcLine}
         <div style="padding:.5rem .75rem;border-bottom:1px solid #1f2937;background:rgba(15,15,23,0.4)">
           ${explainHTML}
         </div>
@@ -8679,6 +8891,7 @@ function dpBuildStylesXml() {
 }
 
 async function dpDownloadRevised() {
+  if (dpFileKind === 'xlsx') return dpDownloadRevisedXlsx();
   if (!dpFile) { showAdminToast('No file loaded.'); return; }
   if (!dpParagraphs.length) { showAdminToast('No paragraphs available — run Analyze first.'); return; }
   const btn = document.getElementById('dp-dl-btn');
@@ -8728,6 +8941,139 @@ async function dpDownloadRevised() {
   } catch (e) {
     btn.disabled = false;
     btn.textContent = '⬇ Download Proofread .docx';
+    document.getElementById('dp-error').style.display = 'block';
+    document.getElementById('dp-error').textContent = '❌ ' + e.message;
+  }
+}
+
+// ── .xlsx proofread output (style-preserving, changed words in red) ──
+// Only the approved cells are rewritten, as inline rich strings whose
+// changed words carry a red font; every other cell, column, style,
+// shared string and embedded image is copied through byte-for-byte.
+
+// Word-level diff → array of { text, red }. Tokens not present in the
+// original (insert/replace) are marked red; whitespace stays black.
+function dpTokenDiffRuns(orig, corr) {
+  const a = orig.split(/(\s+)/), b = corr.split(/(\s+)/);
+  const n = a.length, m = b.length;
+  // LCS length table
+  const dp = Array.from({ length: n + 1 }, () => new Int32Array(m + 1));
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const seq = [];
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) { seq.push({ text: b[j], red: false }); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { i++; }                       // deleted from original
+    else { seq.push({ text: b[j], red: true }); j++; }                    // inserted/changed
+  }
+  while (j < m) { seq.push({ text: b[j], red: true }); j++; }
+  // whitespace-only tokens: never red; merge adjacent same-colour runs
+  const merged = [];
+  for (const s of seq) {
+    if (s.text === '') continue;
+    const red = s.red && s.text.trim() !== '';
+    if (merged.length && merged[merged.length - 1].red === red) merged[merged.length - 1].text += s.text;
+    else merged.push({ text: s.text, red });
+  }
+  return merged;
+}
+
+// Parse xl/styles.xml → the run-property font (as <rPr> inner XML, no
+// colour) for a given cell style index, plus that font's own colour.
+// Lets the red/black runs render in exactly the cell's font.
+function dpXlsxStyleFont(stylesXml, sIdx) {
+  const fontsBlock = (stylesXml.match(/<fonts\b[^>]*>[\s\S]*?<\/fonts>/) || [''])[0];
+  const fonts = fontsBlock.match(/<font\/>|<font>[\s\S]*?<\/font>/g) || [];
+  const xfsBlock = (stylesXml.match(/<cellXfs\b[^>]*>[\s\S]*?<\/cellXfs>/) || [''])[0];
+  const xfs = xfsBlock.match(/<xf\b[^>]*\/>|<xf\b[^>]*>[\s\S]*?<\/xf>/g) || [];
+  let fontId = 0;
+  const xf = xfs[sIdx | 0];
+  if (xf) { const mm = /fontId="(\d+)"/.exec(xf); if (mm) fontId = +mm[1]; }
+  let font = fonts[fontId] || '';
+  let inner = font.replace(/^<font>/, '').replace(/<\/font>$/, '').replace(/^<font\/>$/, '');
+  let origColor = '';
+  const cm = /<color\b[^>]*\/>/.exec(inner);
+  if (cm) origColor = cm[0];
+  let base = inner.replace(/<color\b[^>]*\/>/g, '');
+  base = base.replace(/<name\b/g, '<rFont');   // <name val=".."/> → <rFont val=".."/>
+  return { base, origColor };
+}
+
+function dpXlsxCellStyleIdx(sheetXml, ref) {
+  const m = new RegExp(`<c\\b[^>]*\\br="${ref}"[^>]*?/?>`).exec(sheetXml);
+  if (!m) return 0;
+  const sm = /\bs="(\d+)"/.exec(m[0]);
+  return sm ? +sm[1] : 0;
+}
+
+function dpXlsxRun(text, red, base, origColor) {
+  const color = red ? '<color rgb="FFFF0000"/>' : (origColor || '');
+  return `<r><rPr>${base}${color}</rPr><t xml:space="preserve">${dpXmlEscape(text)}</t></r>`;
+}
+
+function dpXlsxRunsXml(orig, corr, stylesXml, ref, sheetXml) {
+  const { base, origColor } = dpXlsxStyleFont(stylesXml, dpXlsxCellStyleIdx(sheetXml, ref));
+  return dpTokenDiffRuns(orig, corr).map(r => dpXlsxRun(r.text, r.red, base, origColor)).join('');
+}
+
+// Replace the R{row}/{col} cell with an inline rich string, keeping its
+// style index (s=…) so fill / border / alignment / RTL are preserved.
+function dpXlsxPatchRichCell(sheetXml, rowNum, colLetter, runsXml) {
+  const ref = colLetter + rowNum;
+  const build = (attrs) => {
+    attrs = (attrs || '').replace(/\bt="[^"]*"/g, '').trim();
+    return `<c ${attrs} t="inlineStr"><is>${runsXml}</is></c>`.replace('<c  ', '<c ');
+  };
+  const selfRe = new RegExp(`<c\\b([^/>]*?\\br="${ref}"[^/>]*?)/>`);
+  if (selfRe.test(sheetXml)) return sheetXml.replace(selfRe, (m, a) => build(a));
+  const openRe = new RegExp(`<c\\b([^>]*?\\br="${ref}"[^>]*?)>[\\s\\S]*?</c>`);
+  if (openRe.test(sheetXml)) return sheetXml.replace(openRe, (m, a) => build(a));
+  const rowRe = new RegExp(`(<row\\b[^>]*\\br="${rowNum}"[^>]*>[\\s\\S]*?)</row>`);
+  const cell = `<c r="${ref}" t="inlineStr"><is>${runsXml}</is></c>`;
+  if (rowRe.test(sheetXml)) return sheetXml.replace(rowRe, `$1${cell}</row>`);
+  return sheetXml.replace(/<\/sheetData>/, `<row r="${rowNum}">${cell}</row></sheetData>`);
+}
+
+async function dpDownloadRevisedXlsx() {
+  if (!dpFile) { showAdminToast('No file loaded.'); return; }
+  const btn = document.getElementById('dp-dl-btn');
+  btn.disabled = true; btn.textContent = '⏳ Building .xlsx…';
+  try {
+    const zip = await JSZip.loadAsync(await dpFile.arrayBuffer());
+    const sheetFile = zip.file('xl/worksheets/sheet1.xml');
+    if (!sheetFile) throw new Error('Workbook has no sheet1.');
+    let sheetXml = await sheetFile.async('text');
+    const stylesFile = zip.file('xl/styles.xml');
+    const stylesXml = stylesFile ? await stylesFile.async('text') : '';
+
+    let n = 0;
+    for (const item of dpAllIssues) {
+      if (!item.approved || !item.cell) continue;
+      const sugg = (item.issues.find(i => i.suggestion) || {}).suggestion;
+      if (!sugg || sugg.trim() === (item.text || '').trim()) continue;
+      const ref = item.cell.colLetter + item.cell.rowNum;
+      const runsXml = dpXlsxRunsXml(item.text || '', sugg, stylesXml, ref, sheetXml);
+      sheetXml = dpXlsxPatchRichCell(sheetXml, item.cell.rowNum, item.cell.colLetter, runsXml);
+      n++;
+    }
+    if (!n) { showAdminToast('No approved fixes to write.'); btn.disabled = false; btn.textContent = '⬇ Download Proofread .xlsx'; return; }
+
+    zip.file('xl/worksheets/sheet1.xml', sheetXml);
+    const blob = await zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (dpFile.name || 'sheet').replace(/\.xlsx$/i, '') + '_PROOFREAD.xlsx';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+    showAdminToast(`✅ Wrote ${n} approved fix${n===1?'':'es'} (changed words in red) — .xlsx downloaded.`);
+    btn.textContent = `✓ Downloaded — ${n} fix${n===1?'':'es'} applied. Re-download?`;
+    btn.disabled = false;
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = '⬇ Download Proofread .xlsx';
     document.getElementById('dp-error').style.display = 'block';
     document.getElementById('dp-error').textContent = '❌ ' + e.message;
   }
