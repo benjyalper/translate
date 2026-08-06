@@ -1282,10 +1282,20 @@ function wbReadFile(input) {
 // agree/disagree and writes "agree" in "Validation feedback (from proofreader)" (col I).
 // Columns: Key | Source | Before translation | Suggested translation | Error category |
 // Sub category | Severity | LQA comments | Validation feedback (from proofreader) | …
-function wbIsLqaReport(header) {
+// The ORIGINAL LQA template ("Suggested Translation" + a "Before"/comment column). Its columns
+// map differently (below), so keep a narrow check for that mapping branch only.
+function wbIsOldLqaFormat(header) {
   const h = header.map((x) => String(x).toLowerCase());
   const has = (re) => h.some((x) => re.test(x));
   return has(/suggested translation/) && has(/before translation|lqa comment|validation feedback/);
+}
+// Is this an adjudicated LQA report at all? Broadened to also recognize the CURRENT TikTok
+// format — a "Valid (Y/N)" column plus a "Final Translation" column (what the linguist fills).
+// Drives WB.lqa (the ✏ Edit note→Column-I area + stamping); mapping still branches on format.
+function wbIsLqaReport(header) {
+  const h = header.map((x) => String(x).toLowerCase());
+  const has = (re) => h.some((x) => re.test(x));
+  return wbIsOldLqaFormat(header) || (has(/\bvalid\b/) && has(/final translation/));
 }
 // True if a workbook tab's own header is an LQA report AND it has at least one data row.
 // Used to auto-select the data tab on load (its name — e.g. "All" — matches no locale pattern).
@@ -1303,12 +1313,13 @@ function wbTabIsLqaWithData(wb, name) {
 function wbAutoMap(header) {
   const used = new Set(), map = {};
   const find = (re) => { for (let i = 0; i < header.length; i++) { if (used.has(i)) continue; if (re.test(header[i])) { used.add(i); return i; } } return -1; };
-  if (wbIsLqaReport(header)) {
+  if (wbIsOldLqaFormat(header)) {
     map.key   = find(/^key$|\bkey\b/i);
     map.src   = find(/^source$|source/i);                 // first "Source" (col B), not the far-right "Source"
     map.tgt   = find(/before translation|^before/i);      // current Hebrew = the "Before"
     map.final = find(/suggested translation|suggest/i);   // the LQA fix to write into Starling
     map.valid = find(/validation feedback/i);             // col I (proofreader) — your "agree"
+    map.note  = map.valid;                                // old template's Column-I note target
     map.lang  = find(/^lang(uage)?$/i);   // exact "Language"/"Lang" only — NOT "Validation feedback (from Language Leads)"
     return map;
   }
@@ -1318,6 +1329,11 @@ function wbAutoMap(header) {
   map.src = find(/source|原文/i);
   map.tgt = find(/suggest/i); map.tgt = find(/^target$|\btarget\b|译文|譯文/i) >= 0 ? find(/^target$|\btarget\b|译文|譯文/i) : map.tgt;
   map.lang = find(/^lang|language|语言|語言/i);
+  // Note target for the ✏ Edit → Column-I stamp on a CURRENT-format LQA sheet: the linguist's
+  // "Comments" column (exact — NOT "ErrorComment"), else "Updated on Starling". Never the Valid
+  // column (that holds Y/N). Left -1 on non-LQA sheets; wbStampForKey falls back safely.
+  map.note = find(/^comments?$/i);
+  if (map.note < 0) map.note = find(/updated on starling/i);
   return map;
 }
 function wbLoad() {
@@ -1409,7 +1425,7 @@ function wbBuild() {
 function wbStampForKey(key, note, overwrite) {
   if (typeof XLSX === 'undefined' || !WB.workbook || !WB.sheetName) return 0;
   const ws = WB.workbook.Sheets[WB.sheetName];
-  const colI = WB.map.valid, colKey = WB.map.key;
+  const colI = (WB.map.note != null && WB.map.note >= 0) ? WB.map.note : WB.map.valid, colKey = WB.map.key;
   if (!ws || !ws['!ref'] || colI == null || colI < 0 || colKey == null || colKey < 0) return 0;
   const range = XLSX.utils.decode_range(ws['!ref']);
   const want = String(key == null ? '' : key).trim();
@@ -1815,7 +1831,13 @@ function wbPickCandidate(key, segs, taskId) {
   const clip = (s) => { s = String(s || ''); return s.length > 100 ? s.slice(0, 100) + '…' : s; };
   let best = null;
   for (const s of segs) {
-    const hit = entries.find((e) => wbFold(e.source) === wbFold(s.source));
+    // A key can appear in SEVERAL sheet tabs for the same source with conflicting verdicts
+    // (e.g. a Valid=No row in "For Liat to check" AND the Valid=Yes row you queued from in a
+    // sync tab). A plain .find() would grab whichever comes first — often the Valid=No one —
+    // and wrongly mark a real fix as "skip". So among all source-matches, prefer the
+    // ACTIONABLE row (valid + has a Final), then any valid row, then the first match.
+    const matches = entries.filter((e) => wbFold(e.source) === wbFold(s.source));
+    const hit = matches.find((e) => e.valid && e.final) || matches.find((e) => e.valid) || matches[0] || null;
     let verdict, why, sim = 1;
     if (!hit) {
       verdict = 'norev';
