@@ -1303,6 +1303,27 @@
           </div>
         </div>
 
+        <!-- ── 📝 STYLE GUIDE: a reusable rule set injected into the translation prompt.
+             Ships with built-in presets (e.g. Manga Guidelines); add/edit your own. -->
+        <div style="margin-bottom:.7rem;padding:.55rem .8rem;background:rgba(59,130,246,.05);border:1px solid rgba(59,130,246,.22);border-radius:8px">
+          <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+            <span style="font-size:.8rem;color:#93c5fd;font-weight:600;white-space:nowrap">📝 Style guide</span>
+            <select id="dt-styleguide" onchange="dtOnStyleGuideChange()" style="flex:1;min-width:180px;padding:.45rem .6rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.78rem"></select>
+            <button class="tbtn" onclick="dtToggleSgManage()" style="width:auto;padding:.4rem .8rem;font-size:.74rem;background:#1e293b;color:#cbd5e1">✎ Manage</button>
+          </div>
+          <div id="dt-sg-hint" style="font-size:.7rem;color:#64748b;margin-top:.35rem"></div>
+          <div id="dt-sg-manage" style="display:none;margin-top:.55rem;border-top:1px dashed rgba(59,130,246,.2);padding-top:.55rem">
+            <input id="dt-sg-name" placeholder="Style-guide name" style="width:100%;padding:.45rem .6rem;background:#0a0a14;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.78rem;margin-bottom:.4rem"/>
+            <textarea id="dt-sg-text" rows="8" placeholder="Paste the style-guide rules here…" style="width:100%;padding:.5rem .65rem;background:#0a0a14;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.76rem;font-family:inherit;line-height:1.5;resize:vertical"></textarea>
+            <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.4rem">
+              <button class="tbtn" onclick="dtSgSaveNew()" style="width:auto;padding:.4rem .8rem;font-size:.74rem;background:#1e1b4b;color:#a5b4fc">➕ Add as new</button>
+              <button class="tbtn" onclick="dtSgUpdate()" style="width:auto;padding:.4rem .8rem;font-size:.74rem;background:#1e293b;color:#cbd5e1">💾 Update selected</button>
+              <button class="tbtn" onclick="dtSgDelete()" style="width:auto;padding:.4rem .8rem;font-size:.74rem;background:#2a0a0a;color:#fca5a5">🗑 Delete</button>
+            </div>
+            <div style="font-size:.68rem;color:#64748b;margin-top:.35rem">Built-in guides can't be overwritten or deleted — edit one and “Add as new” to make your own copy. Custom guides are saved in this browser.</div>
+          </div>
+        </div>
+
         <!-- ── 🧪 LOCALIZATION TEST MODE (glossary + style guide + context-aware) ──
              Off by default. When enabled with an .xlsx whose header row contains
              "source" / "target" / "context" columns (case-insensitive), the
@@ -12966,11 +12987,127 @@ async function dtTranslateCsvStr(csv, sourceLang, targetLang, model, apiKey, ui)
 
 // ── The actual GPT call. JSON-mode for reliable parsing. Returns array of
 // strings, padded with originals if model returns too few.
+// ── Style-guide presets ─────────────────────────────────────────
+// A reusable rule set injected into the main translation prompt. Ships with
+// built-in guides; users can add/edit their own (persisted in localStorage).
+const DT_BUILTIN_STYLEGUIDES = [
+  { id: 'manga-flitto', name: 'Manga Guidelines (Flitto)', text:
+`MANGA TRANSLATION — FLITTO GUIDELINES (translation-relevant rules)
+
+GENERAL
+- Localize for the target market: adapt to the manga's background and characteristics rather than translating word-for-word.
+- The original text in the STARTING language is authoritative/"correct" (Japanese-start → the Japanese is correct; English-start → the English is correct). Follow it faithfully, except where a rule below says to match the Japanese version.
+- Use consistent terminology and wording throughout. Proper nouns (character names, place names, items, special-move / technique names) and repeated or flashback lines must be identical everywhere they appear.
+
+DO NOT TRANSLATE
+- Text OUTSIDE speech bubbles written in English or in Japanese romanization stays as-is (if a pre-revision file already translated it, remove that translation).
+- Text inside illustrations / artwork is not translated (unless explicitly requested).
+- English-only annotations / translator's notes are not translated.
+
+PUNCTUATION & CASE
+- Ellipsis: use "..." only — never ".." or "....".
+- For other symbols, follow the target language's standard publishing convention and keep it consistent.
+- For case-distinguishing languages, set text in ALL CAPS by default. Use lowercase only when all-caps reads unnaturally, and then flag it (e.g. a note "intentionally lowercase").
+
+LENGTH & FIT
+- Keep translations as short as possible without changing the overall meaning, so the text fits the speech bubble / space. Prioritize a clean fit.
+
+MATCH THE JAPANESE VERSION
+- Onomatopoeia / SFX: the number of repeated sound units should roughly match the Japanese (need not be exact — natural in the target language is fine; only fix if unnatural, looks like a missing translation, or is inconsistent across the title).
+- Text formatting (bold / italics) should match the Japanese version within what is natural for the language.
+
+SENSITIVITY — adapt or flag content that may be inappropriate in the target market: protection of minors; extreme violence/brutality, smoking/drinking/drugs; LGBTQIA+ stereotyping or perverse sexualization; racial/ethnic discrimination or hate (e.g. slavery, blackface); historical insensitivity (e.g. Nazi persecution of Jews); religious blasphemy/insensitivity; glorifying crime/terrorism; and other sexual, political, national-symbol, or animal-cruelty concerns. Localize to the target country's standards.` },
+];
+function dtCustomStyleGuides() { try { return JSON.parse(localStorage.getItem('dtStyleGuidesCustom') || '[]'); } catch (e) { return []; } }
+function dtSaveCustomStyleGuides(a) { localStorage.setItem('dtStyleGuidesCustom', JSON.stringify(a)); }
+function dtAllStyleGuides() { return [...DT_BUILTIN_STYLEGUIDES, ...dtCustomStyleGuides()]; }
+function dtStyleGuideById(id) { return dtAllStyleGuides().find((g) => g.id === id) || null; }
+function dtSelectedStyleGuide() { const id = localStorage.getItem('dtStyleGuideSel') || ''; return id ? dtStyleGuideById(id) : null; }
+function dtIsBuiltinGuide(id) { return DT_BUILTIN_STYLEGUIDES.some((g) => g.id === id); }
+
+function dtRenderStyleGuideSelect() {
+  const sel = document.getElementById('dt-styleguide');
+  if (!sel) return;
+  const cur = localStorage.getItem('dtStyleGuideSel') || '';
+  const opts = ['<option value="">(none)</option>']
+    .concat(dtAllStyleGuides().map((g) => `<option value="${g.id}"${g.id === cur ? ' selected' : ''}>${dtXmlEscape(g.name)}${dtIsBuiltinGuide(g.id) ? '' : ' ✎'}</option>`));
+  sel.innerHTML = opts.join('');
+  if (cur && !dtStyleGuideById(cur)) { localStorage.removeItem('dtStyleGuideSel'); sel.value = ''; }
+  dtUpdateSgHint();
+}
+function dtUpdateSgHint() {
+  const hint = document.getElementById('dt-sg-hint');
+  if (!hint) return;
+  const g = dtSelectedStyleGuide();
+  hint.textContent = g
+    ? `Applied to every translation in this tool · ${g.text.split(/\s+/).length.toLocaleString()} words${dtIsBuiltinGuide(g.id) ? ' · built-in' : ' · custom'}`
+    : 'No style guide — translations use the default professional prompt.';
+}
+function dtOnStyleGuideChange() {
+  const sel = document.getElementById('dt-styleguide');
+  if (sel.value) localStorage.setItem('dtStyleGuideSel', sel.value); else localStorage.removeItem('dtStyleGuideSel');
+  const mg = document.getElementById('dt-sg-manage');
+  if (mg && mg.style.display !== 'none') dtSgLoadIntoEditor();
+  dtUpdateSgHint();
+}
+function dtToggleSgManage() {
+  const mg = document.getElementById('dt-sg-manage');
+  if (!mg) return;
+  const show = mg.style.display === 'none';
+  mg.style.display = show ? 'block' : 'none';
+  if (show) dtSgLoadIntoEditor();
+}
+function dtSgLoadIntoEditor() {
+  const g = dtSelectedStyleGuide();
+  document.getElementById('dt-sg-name').value = g ? (dtIsBuiltinGuide(g.id) ? g.name + ' (copy)' : g.name) : '';
+  document.getElementById('dt-sg-text').value = g ? g.text : '';
+}
+function dtSgSaveNew() {
+  const name = (document.getElementById('dt-sg-name').value || '').trim();
+  const text = (document.getElementById('dt-sg-text').value || '').trim();
+  if (!name || !text) { showAdminToast('Give the style guide a name and some text.'); return; }
+  const list = dtCustomStyleGuides();
+  const id = 'c' + Date.now();
+  list.push({ id, name, text });
+  dtSaveCustomStyleGuides(list);
+  localStorage.setItem('dtStyleGuideSel', id);
+  dtRenderStyleGuideSelect();
+  showAdminToast(`✅ Saved style guide "${name}".`);
+}
+function dtSgUpdate() {
+  const id = localStorage.getItem('dtStyleGuideSel') || '';
+  if (!id || dtIsBuiltinGuide(id)) { showAdminToast('Built-in guides can\'t be edited — use “Add as new”.'); return; }
+  const name = (document.getElementById('dt-sg-name').value || '').trim();
+  const text = (document.getElementById('dt-sg-text').value || '').trim();
+  if (!name || !text) { showAdminToast('Name and text are required.'); return; }
+  const list = dtCustomStyleGuides().map((g) => g.id === id ? { ...g, name, text } : g);
+  dtSaveCustomStyleGuides(list);
+  dtRenderStyleGuideSelect();
+  showAdminToast('💾 Updated.');
+}
+function dtSgDelete() {
+  const id = localStorage.getItem('dtStyleGuideSel') || '';
+  if (!id || dtIsBuiltinGuide(id)) { showAdminToast('Built-in guides can\'t be deleted.'); return; }
+  if (!confirm('Delete this custom style guide?')) return;
+  dtSaveCustomStyleGuides(dtCustomStyleGuides().filter((g) => g.id !== id));
+  localStorage.removeItem('dtStyleGuideSel');
+  dtRenderStyleGuideSelect();
+  document.getElementById('dt-sg-manage').style.display = 'none';
+  showAdminToast('🗑 Deleted.');
+}
+(function initDtStyleGuides() {
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', dtRenderStyleGuideSelect);
+  else dtRenderStyleGuideSelect();
+})();
+
 async function dtTranslateBatch(items, sourceLang, targetLang, model, apiKey) {
   if (items.length === 0) return [];
   const srcLabel = sourceLang === 'auto' ? 'the source language (auto-detect)'
                  : sourceLang === 'he' ? 'Hebrew' : 'English';
   const tgtLabel = targetLang === 'he' ? 'Hebrew' : 'English';
+
+  const sg = dtSelectedStyleGuide();
+  const sgBlock = sg ? `\n\nSTYLE GUIDE — follow these rules strictly (they override the generic rules above on any conflict):\n${sg.text}\n` : '';
 
   const sys = `You are a senior professional translator (Hebrew ↔ English).
 
@@ -12983,7 +13120,7 @@ RULES
 - If an item is empty or whitespace-only, return it UNCHANGED.
 - Match the input's punctuation/capitalization style.
 - Do NOT add explanations, footnotes, or commentary.
-- Return EXACTLY ${items.length} translations, one per input item, IN THE SAME ORDER.
+- Return EXACTLY ${items.length} translations, one per input item, IN THE SAME ORDER.${sgBlock}
 
 OUTPUT
 JSON only, with this exact shape:
