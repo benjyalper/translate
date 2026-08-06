@@ -1351,6 +1351,11 @@
              live during the run, then show actual numbers when done. -->
         <div id="dt-stats" style="display:none;margin-bottom:.7rem;padding:.55rem .8rem;background:rgba(79,70,229,.06);border:1px solid rgba(79,70,229,.2);border-radius:8px;font-size:.78rem;color:#cbd5e1;line-height:1.5"></div>
 
+        <!-- ── 📊 STRUCTURED-SHEET PLAN: appears when an uploaded .xlsx has a header row.
+             Lets you choose which columns to translate and where each translation goes,
+             so headers/comments/source columns are left untouched and styling is preserved. -->
+        <div id="dt-xlsx-plan" style="display:none;margin-bottom:.7rem;padding:.6rem .8rem;background:rgba(34,197,94,.06);border:1px solid rgba(34,197,94,.28);border-radius:8px;font-size:.78rem;color:#cbd5e1"></div>
+
         <button class="tbtn gold" id="dt-translate-btn" onclick="dtTranslate()" disabled>🌐 Translate Document</button>
         <button class="tbtn" id="dt-dl-btn" onclick="dtDownload()" style="display:none;width:auto;padding:.65rem 1.3rem;font-size:.82rem;background:#1e1b4b;color:#a5b4fc;margin-left:.5rem">⬇ Download Translated File</button>
 
@@ -10450,6 +10455,10 @@ function dtOnFile(input) {
   // Kick off a non-blocking preflight: count words now so the user can see
   // estimated cost/time before they decide to click Translate.
   dtRunPreflight(file, ext);
+  // For .xlsx, detect a structured/bilingual sheet and show the "what to
+  // translate" checkbox panel; other formats clear any prior panel.
+  if (ext === 'xlsx') { dtMaybePlanXlsx(file); }
+  else { dtXlsxPlan = null; const pb = document.getElementById('dt-xlsx-plan'); if (pb) { pb.style.display = 'none'; pb.innerHTML = ''; } }
 }
 
 async function dtRunPreflight(file, ext) {
@@ -10671,11 +10680,15 @@ async function dtTranslate() {
     } else if (ext === 'pptx') {
       result = await dtTranslatePptx(dtFile, sourceLang, targetLang, model, apiKey, { bar, txt });
     } else if (ext === 'xlsx') {
-      // Auto-detect a loc-test paper even if the user forgot to check the
-      // box. If the xlsx has a header row with both "source" and "target"
-      // columns AND a glossary has been loaded, the only sane interpretation
-      // is loc-test mode — running generic mode would translate every cell
-      // including the source column, destroying the deliverable.
+      // Routing priority for .xlsx:
+      //   1. Localization Test Mode (glossary + style guide) — explicit, or
+      //      auto-enabled when a glossary is loaded and the sheet has
+      //      source/target columns.
+      //   2. Structured plan — a bilingual/structured sheet was detected on
+      //      upload; translate only the columns the user ticked in the 📊
+      //      panel, into their chosen destination, preserving everything else
+      //      (headers, source column, other columns, styling).
+      //   3. Generic in-place — a flat sheet: translate every string cell.
       let useLocTest = dtLocTestEnabled;
       if (!useLocTest && dtLocTestGlossary.length > 0) {
         try {
@@ -10683,40 +10696,19 @@ async function dtTranslate() {
           for (let i = 0; i < Math.min(probe.length, 6); i++) {
             const lowered = (probe[i] || []).map(c => (c || '').toString().trim().toLowerCase());
             if (lowered.includes('source') && lowered.includes('target')) {
-              useLocTest = true;
-              dtLocTestEnabled = true;
-              const cb = document.getElementById('dt-loctest-enable');
-              if (cb) cb.checked = true;
+              useLocTest = true; dtLocTestEnabled = true;
+              const cb = document.getElementById('dt-loctest-enable'); if (cb) cb.checked = true;
               showAdminToast('🧪 Auto-enabled Localization Test Mode (detected source/target columns + glossary loaded)');
               break;
             }
           }
-        } catch { /* probe failed — fall through to manual routing */ }
-      }
-      // If user disabled loc-test mode but the file STILL looks like a test
-      // paper, warn before nuking the source column.
-      if (!useLocTest) {
-        try {
-          const probe2 = await dtLocTestReadXlsxRows(dtFile);
-          for (let i = 0; i < Math.min(probe2.length, 6); i++) {
-            const lowered = (probe2[i] || []).map(c => (c || '').toString().trim().toLowerCase());
-            if (lowered.includes('source') && lowered.includes('target')) {
-              const proceed = confirm(
-                '⚠️ This .xlsx has "source" and "target" columns — it looks like a localization test paper.\n\n' +
-                'Generic mode will translate EVERY string cell, including the source column and headers, destroying the deliverable.\n\n' +
-                'OK = proceed with generic mode anyway (DANGEROUS)\nCancel = stop, let me enable Localization Test Mode first'
-              );
-              if (!proceed) throw new Error('Cancelled — enable 🧪 Localization Test Mode and re-run');
-              break;
-            }
-          }
-        } catch (e) {
-          if (/Cancelled/.test(e.message)) throw e;
-          /* probe failed — proceed silently */
-        }
+        } catch { /* probe failed — fall through */ }
       }
       if (useLocTest) {
         result = await dtTranslateLocTestXlsx(dtFile, sourceLang, targetLang, model, apiKey, { bar, txt });
+      } else if (dtXlsxPlan) {
+        if (!dtXlsxPlan.columns.some(c => c.translate)) throw new Error('Tick at least one column to translate in the 📊 panel above.');
+        result = await dtTranslateXlsxStructured(dtFile, dtXlsxPlan, sourceLang, targetLang, model, apiKey, { bar, txt });
       } else {
         result = await dtTranslateXlsx(dtFile, sourceLang, targetLang, model, apiKey, { bar, txt });
       }
@@ -11417,6 +11409,146 @@ async function dtTranslatePptx(file, sourceLang, targetLang, model, apiKey, ui) 
 // inside <si><t>...</t></si> (or inside <r><t>...</t></r> for rich text).
 // Numbers, dates, and formulas are NOT in shared strings and are left
 // untouched, which is exactly what we want.
+// ═════════════════════════════════════════════════════════════════════════
+// STRUCTURED-SHEET DETECTION + "what to translate" plan (general bilingual xlsx)
+// ═════════════════════════════════════════════════════════════════════════
+// The generic dtTranslateXlsx below edits sharedStrings in place — fine for a
+// flat sheet, but for a BILINGUAL template (EN source col + TRANSLATION col +
+// COMMENT/PAGE…) it translates the headers and the source column and can't put
+// the result in the target column. This detects the header row, classifies each
+// column, and shows checkboxes so the user chooses exactly what to translate and
+// where each translation goes — written via the same style-preserving inline-
+// string patch the loc-test path uses, so headers/other columns/styling are
+// untouched.
+let dtXlsxPlan = null;
+
+function dtClassifyCol(name) {
+  const n = (name || '').toString().trim().toLowerCase();
+  if (!n) return 'empty';
+  if (/^(en|eng|english|source|src|原文|原本|jp|japanese|kr|korean|zh|chinese|source ?text|source ?string)$/.test(n) ||
+      /\b(english|source text|source string|原文)\b/.test(n)) return 'source';
+  if (/^(translation|target|tgt|he|he-?il|hebrew|עברית|תרגום|译文|翻译|target ?text|traduction|übersetzung)$/.test(n) ||
+      /\b(translation|target text|hebrew|he-il)\b/.test(n)) return 'target';
+  if (/^(page|no\.?|num|number|#|id|key|索引|comment|comments|note|notes|remark|remarks|备注|reviewed|review|reviewed-final|final|context|上下文|status|char|chars|length|字数|screenshot|ref|reference|עמוד|הערה)$/.test(n) ||
+      /\b(comment|note|reviewed|context|status|char count|screenshot)\b/.test(n)) return 'meta';
+  return 'other';
+}
+
+async function dtDetectXlsxStructure(file) {
+  let rows;
+  try { rows = await dtLocTestReadXlsxRows(file); } catch (e) { return { hasStructure: false }; }
+  let headerIdx = -1;
+  for (let i = 0; i < Math.min(rows.length, 8); i++) {
+    const cells = (rows[i] || []).map(c => (c || '').toString().trim());
+    const labels = cells.filter(c => c && c.length <= 40 && !/^["']?[\d.,\-+%\/]+["']?$/.test(c));
+    if (labels.length < 2) continue;
+    const roles = labels.map(dtClassifyCol);
+    if (roles.some(r => r === 'source' || r === 'target' || r === 'meta')) { headerIdx = i; break; }
+  }
+  if (headerIdx < 0) return { hasStructure: false };
+  const header = rows[headerIdx] || [];
+  let maxCol = 0;
+  for (let i = headerIdx; i < rows.length; i++) maxCol = Math.max(maxCol, (rows[i] || []).length);
+  const columns = [];
+  for (let c = 0; c < maxCol; c++) {
+    const name = (header[c] || '').toString().trim();
+    let filled = 0;
+    for (let r = headerIdx + 1; r < rows.length; r++) if (((rows[r] || [])[c] || '').toString().trim()) filled++;
+    if (!name && !filled) continue;
+    columns.push({ idx: c, letter: dtLocTestIdxToColRef(c), name: name || '(no header)', role: dtClassifyCol(name), filled });
+  }
+  return { hasStructure: true, headerIdx, columns, dataRows: rows.length - (headerIdx + 1) };
+}
+
+function dtMaybePlanXlsx(file) {
+  const box = document.getElementById('dt-xlsx-plan');
+  dtXlsxPlan = null; box.style.display = 'none'; box.innerHTML = '';
+  dtDetectXlsxStructure(file).then(det => {
+    if (!dtFile || dtFile !== file || !det.hasStructure) return;   // newer file chosen, or flat sheet
+    const targets = det.columns.filter(c => c.role === 'target');
+    const defDest = targets.find(c => c.filled === 0) || targets[0] || null;
+    dtXlsxPlan = {
+      headerIdx: det.headerIdx, dataRows: det.dataRows, skipHeader: true,
+      columns: det.columns.map(c => ({
+        idx: c.idx, letter: c.letter, name: c.name, role: c.role, filled: c.filled,
+        translate: c.role === 'source',
+        dest: (c.role === 'source' && defDest) ? defDest.idx : c.idx
+      }))
+    };
+    dtRenderXlsxPlan(); box.style.display = 'block';
+  }).catch(() => {});
+}
+
+function dtRenderXlsxPlan() {
+  const box = document.getElementById('dt-xlsx-plan');
+  if (!dtXlsxPlan) { box.style.display = 'none'; return; }
+  const P = dtXlsxPlan;
+  const destOptions = (col) =>
+    P.columns.map(c => `<option value="${c.idx}"${c.idx === col.dest ? ' selected' : ''}>${dtXmlEscape(c.name)} (${c.letter})</option>`).join('');
+  const rows = P.columns.map((c, i) => {
+    const tag = c.role === 'source' ? '🟢 source' : c.role === 'target' ? '🎯 target' : c.role === 'meta' ? '⚪ skip' : '·';
+    return `<div style="display:flex;align-items:center;gap:.45rem;padding:.22rem 0;flex-wrap:wrap">
+      <label style="display:flex;align-items:center;gap:.4rem;flex:1;min-width:190px">
+        <input type="checkbox" data-dtx="tr" data-i="${i}" ${c.translate ? 'checked' : ''}/>
+        <b>${dtXmlEscape(c.name)}</b> <span style="color:#64748b">${c.letter}</span>
+        <span style="font-size:.68rem;color:#94a3b8">${tag}${c.filled ? ' · ' + c.filled + ' filled' : ' · empty'}</span>
+      </label>
+      <span style="color:#64748b;font-size:.7rem">→ into</span>
+      <select data-dtx="dest" data-i="${i}" style="background:#0a0a14;border:1px solid var(--border);border-radius:5px;color:#e2e8f0;font-size:.72rem;padding:.2rem .3rem">${destOptions(c)}</select>
+    </div>`;
+  }).join('');
+  box.innerHTML =
+    `<div style="font-weight:600;color:#86efac;margin-bottom:.35rem">📊 Structured sheet detected — choose what to translate</div>
+     <div style="font-size:.72rem;color:#94a3b8;margin-bottom:.45rem">Header on row ${P.headerIdx + 1} · ${P.dataRows} data rows. Unchecked columns and the header row are left exactly as-is — styling is fully preserved.</div>
+     ${rows}
+     <label style="display:flex;align-items:center;gap:.4rem;margin-top:.5rem;font-size:.74rem;color:#cbd5e1">
+       <input type="checkbox" data-dtx="skiphdr" ${P.skipHeader ? 'checked' : ''}/> Skip the header row (don't translate column titles)
+     </label>`;
+  box.querySelectorAll('[data-dtx="tr"]').forEach(cb => cb.addEventListener('change', e => { P.columns[+e.target.dataset.i].translate = e.target.checked; }));
+  box.querySelectorAll('[data-dtx="dest"]').forEach(s => s.addEventListener('change', e => { P.columns[+e.target.dataset.i].dest = +e.target.value; }));
+  const sh = box.querySelector('[data-dtx="skiphdr"]'); if (sh) sh.addEventListener('change', e => { P.skipHeader = e.target.checked; });
+}
+
+// Structure-aware translate: only the ticked columns, into their chosen dest
+// column, via the style-preserving inline-string patch. Everything else — other
+// columns, the header row, sharedStrings, all cell/column styling — is untouched.
+async function dtTranslateXlsxStructured(file, plan, sourceLang, targetLang, model, apiKey, ui) {
+  const rows = await dtLocTestReadXlsxRows(file);
+  const zip = await JSZip.loadAsync(await file.arrayBuffer());
+  const sheetFile = zip.file('xl/worksheets/sheet1.xml');
+  if (!sheetFile) throw new Error('Workbook has no sheet1');
+  let sheetXml = await sheetFile.async('text');
+  const startRow = plan.headerIdx + 2;   // 1-based first data row (header skipped)
+  const jobs = [];                       // { rowNum, destLetter, text }
+  for (const col of plan.columns) {
+    if (!col.translate) continue;
+    const destLetter = dtLocTestIdxToColRef(col.dest);
+    for (let r = startRow; r <= rows.length; r++) {
+      const val = ((rows[r - 1] || [])[col.idx] || '').toString();
+      const t = val.trim();
+      if (!t || /^["']?[\d.,\-+%]+["']?$/.test(t)) continue;   // empty / pure number
+      jobs.push({ rowNum: r, destLetter, text: val });
+    }
+  }
+  if (!jobs.length) throw new Error('The ticked column(s) have no translatable text.');
+  ui.txt.textContent = `Translating ${jobs.length} cell(s)…`; ui.bar.style.width = '15%';
+  const BATCH = 30;
+  const results = new Array(jobs.length);
+  for (let i = 0; i < jobs.length; i += BATCH) {
+    const slice = jobs.slice(i, i + BATCH);
+    const tr = await dtTranslateBatch(slice.map(j => j.text), sourceLang, targetLang, model, apiKey);
+    for (let j = 0; j < slice.length; j++) results[i + j] = tr[j] || slice[j].text;
+    ui.bar.style.width = (15 + Math.min(75, (i + BATCH) / jobs.length * 75)) + '%';
+    ui.txt.textContent = `Translating ${Math.min(i + BATCH, jobs.length)} / ${jobs.length}…`;
+  }
+  ui.txt.textContent = 'Writing translated cells…';
+  for (let i = 0; i < jobs.length; i++) sheetXml = dtLocTestPatchTargetCell(sheetXml, jobs[i].rowNum, jobs[i].destLetter, results[i]);
+  zip.file('xl/worksheets/sheet1.xml', sheetXml);
+  const blob = await zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+  const tag = targetLang === 'he' ? '_HE' : '_EN';
+  return { blob, name: `${file.name.replace(/\.xlsx$/i, '')}${tag}.xlsx`, count: jobs.length };
+}
+
 async function dtTranslateXlsx(file, sourceLang, targetLang, model, apiKey, ui) {
   const buf = await file.arrayBuffer();
   const zip = await JSZip.loadAsync(buf);
