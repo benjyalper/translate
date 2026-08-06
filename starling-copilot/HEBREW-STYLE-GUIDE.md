@@ -99,6 +99,11 @@ surfaced to the human instead of hidden:
 ## Grammar & numbers
 - **Numerals, not spelled-out** numbers: `2`, not `שתיים`.
 - **Space** between a number and its unit: `512 KB`.
+- **Time-unit abbreviations → the Hebrew word** (keep the digit, localize the unit): `20s` → `20 שניות`,
+  `5min`/`5m` → `5 דקות`, `2h`/`2hr` → `2 שעות`, `3d` → `3 ימים`. Never keep the Latin letter —
+  `20s` staying `20s` is a real error (esp. when the value fills a `{placeholder}` inside a Hebrew
+  sentence). This is *not* number-preservation: only the digit is preserved. **Exception** — genuine
+  symbols stay Latin: `512 KB`/`MB`/`GB`, `50%`, `1080p`/`4K`, `60fps`, `Mbps`.
 - Negative numbers use the **minus sign** `–`: `–50%`.
 - Figures are fine for dates, addresses, percentages, fractions, decimals, scores, stats,
   pages, IDs, and time.
