@@ -13,7 +13,7 @@
   // tab is running an older version, re-injects this file via chrome.scripting so stale tabs
   // self-heal (no page reload needed). Re-injection tears down the previous version's message
   // listener first (below) so there's never a double-listener race.
-  const CS_VERSION = 33;
+  const CS_VERSION = 34;
   if (window.__scVer === CS_VERSION) return;                         // this exact version already live here
   if (typeof window.__scCleanup === 'function') { try { window.__scCleanup(); } catch (e) {} }  // remove an older/stale one
   window.__scVer = CS_VERSION;
@@ -1215,7 +1215,16 @@
   // Distinctive English chunk for the search box: strip {placeholders}/ICU braces.
   function pluralSearchStr(edit) {
     const s = (edit.srcForms && (edit.srcForms.other || edit.srcForms.one)) || (edit.tgtForms && (edit.tgtForms.other || edit.tgtForms.one)) || '';
-    return String(s).replace(/\{[^}]*\}/g, ' ').replace(/[{}]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+    // Search a CONTIGUOUS literal run of the form — NOT the placeholders stripped-and-collapsed.
+    // Stripping "({num} rooms)" → "( rooms)" spans the placeholder gap and matches nothing in
+    // Starling's search (its source still contains "{num}"), so the segment never comes into view.
+    // Split on {placeholders}, drop surrounding punctuation, and take the longest remaining chunk
+    // (e.g. "rooms", "Redeem this voucher within") — that substring really exists in the source.
+    const chunks = String(s).split(/\{[^}]*\}/)
+      .map((x) => x.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '').trim())
+      .filter((x) => x.length >= 2);
+    chunks.sort((a, b) => b.length - a.length);
+    return (chunks[0] || String(s).replace(/[{}]/g, ' ').replace(/\s+/g, ' ').trim()).slice(0, 40);
   }
   function searchClear() {
     const b = searchBox();
