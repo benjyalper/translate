@@ -715,6 +715,57 @@ async function doSubmit() {
   } catch (e) { info('submit-info', e.message, 'err'); }
 }
 
+// One-click finish: Write approved → Confirm all (API) → Submit. A SINGLE upfront
+// confirmation (Submit is irreversible — it delivers the task), then it runs the three
+// proven steps in order and STOPS if any step fails, so it never submits a half-written
+// task. No cosmetic reload between confirm and submit (that would break the chain; submit
+// gates on pending deliverable content, not on the ✓✓ colour).
+async function doWriteConfirmSubmit() {
+  const edits = state.proposals ? state.proposals.filter((p) => p.approved && !p.manual).map((p) => ({ seg: p.seg, text: p.next })) : [];
+  const manual = state.proposals ? state.proposals.filter((p) => p.manual).length : 0;
+  const lines = [
+    'One-click finish — this will:',
+    `  1) Write ${edits.length} approved segment(s) into Starling`,
+    '  2) Confirm all unconfirmed segments (ignoring normal QA — Critical still blocks)',
+    '  3) SUBMIT the task to the requester — this DELIVERS your translation and can\'t be undone',
+    manual ? `\n⚠ ${manual} tagged (copy-by-hand) segment(s) are NOT auto-written — if they still need pasting, Cancel and do that first.` : '',
+    '\nProceed?'
+  ].filter(Boolean);
+  if (!confirm(lines.join('\n'))) return;
+  const btn = $('write-confirm-submit'); btn.disabled = true;
+  const say = (m, k) => info('wcs-info', m, k || '');
+  try {
+    // 1) WRITE
+    if (edits.length) {
+      say(`1/3 · writing ${edits.length} segment(s)…`);
+      const results = [];
+      for (let i = 0; i < edits.length; i += 5) {
+        const r = await send({ type: 'WRITE', edits: edits.slice(i, i + 5) });
+        (r && r.results || []).forEach((x) => results.push(x));
+      }
+      const bad = results.filter((r) => !r.ok);
+      if (bad.length) { say(`⚠ ${bad.length}/${results.length} write(s) failed — stopped before confirm/submit. Fix and retry.`, 'err'); bad.forEach((b) => log(`wcs write #${b.seg} failed: ${b.reason}`)); return; }
+      say(`1/3 · wrote ${results.length} ✓ — confirming…`);
+    } else {
+      say('1/3 · nothing to write — confirming…');
+    }
+    // 2) CONFIRM ALL (no reload — we need the tab alive to submit next)
+    const c = await send({ type: 'API_CONFIRM_ALL', opts: { ignoreQa: true } });
+    if (!c || !c.ok) {
+      const f = (c && c.failed) || [];
+      const why = f.length ? ` · ${f.slice(0, 4).map((x) => '#' + x.rank + ' ' + x.msg).join('; ')}` : (c && c.error ? ' · ' + c.error : '');
+      say(`Confirm failed (${(c && c.confirmed) || 0}/${(c && c.attempted) || 0})${why} — stopped before submit.`, 'err'); return;
+    }
+    say(`2/3 · confirmed ${c.confirmed}/${c.attempted} ✓ — submitting…`);
+    // 3) SUBMIT
+    const s = await send({ type: 'SUBMIT_TASK' });
+    if (s && s.ok) { say(s.submitted ? '✅ Written, confirmed & submitted to the requester.' : '✅ Written & confirmed; submit dialog closed (verify Starling shows “Task submitted”).', 'good'); }
+    else if (s && s.disabled) { say('Written & confirmed ✓, but Submit found nothing pending — reload the page and click ➤ Submit task if it isn\'t already submitted.', 'err'); }
+    else { say(`Written & confirmed ✓, but couldn't confirm the submit${s && s.buttonNow ? ` (button now: "${s.buttonNow}")` : ''} — check Starling; if it shows “Task submitted”, it went through, otherwise click ➤ Submit task.`, 'err'); }
+  } catch (e) { say(e.message, 'err'); }
+  finally { btn.disabled = false; }
+}
+
 // ---- QA summary + post-confirm summary -------------------------------------
 function qaCategory(row) {
   if (/critical/i.test(row.level)) return 'critical';
@@ -2831,6 +2882,7 @@ async function init() {
   $('xliff-file').addEventListener('change', (e) => onXliffFile(e.target));
   $('run-gpt').addEventListener('click', doGpt);
   $('write').addEventListener('click', doWrite);
+  $('write-confirm-submit').addEventListener('click', doWriteConfirmSubmit);
   $('confirm-all').addEventListener('click', doConfirmAll);
   $('submit-task').addEventListener('click', doSubmit);
   $('qa-read').addEventListener('click', doQaSummary);
