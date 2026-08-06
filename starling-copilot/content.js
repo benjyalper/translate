@@ -13,7 +13,7 @@
   // tab is running an older version, re-injects this file via chrome.scripting so stale tabs
   // self-heal (no page reload needed). Re-injection tears down the previous version's message
   // listener first (below) so there's never a double-listener race.
-  const CS_VERSION = 32;
+  const CS_VERSION = 33;
   if (window.__scVer === CS_VERSION) return;                         // this exact version already live here
   if (typeof window.__scCleanup === 'function') { try { window.__scCleanup(); } catch (e) {} }  // remove an older/stale one
   window.__scVer = CS_VERSION;
@@ -1067,6 +1067,42 @@
     } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
   }
 
+  // Atomic WRITE + proofread-confirm for a set of edits, straight through the API —
+  // no DOM typing, so it can't race Starling's autosave-on-blur. confirmTextTaskTargetV2
+  // carries the Content itself, so one call both writes the target and confirms it. We
+  // look up each segment's identity (sourceTextId / key / flowSequence) from the task JSON
+  // by its rank (= the editor's segment number). edits: [{ seg, text }].
+  async function apiWriteConfirm(edits, ignoreQa) {
+    try {
+      const tid = taskId();
+      const res = await apiTask(tid);
+      if (!res || !res.ok) return { ok: false, error: (res && res.error) || 'could not read the task' };
+      const byRank = new Map(res.rows.map((r) => [String(r.rank), r]));
+      const results = [];
+      for (const e of (edits || [])) {
+        const row = byRank.get(String(e.seg));
+        if (!row) { results.push({ seg: e.seg, ok: false, reason: 'segment #' + e.seg + ' not found in task' }); continue; }
+        if (!row.sourceTextId) { results.push({ seg: e.seg, ok: false, reason: 'no sourceTextId for #' + e.seg }); continue; }
+        const body = {
+          SubTaskID: String(tid), TextKey: row.key, sourceTextId: row.sourceTextId,
+          FlowSequence: row.flowSequence == null ? 2 : row.flowSequence,
+          IgnoreQa: ignoreQa !== false, TMScore: '0', PreTranslationType: 0,
+          targetText: { Content: String(e.text == null ? '' : e.text), OrderSourceID: row.sourceTextId, TextKey: row.key }
+        };
+        try {
+          const r = await fetch(API + 'confirmTextTaskTargetV2', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'content-type': 'application/json' }, body: JSON.stringify(body)
+          });
+          let j = null; try { j = await r.json(); } catch (er) {}
+          results.push({ seg: e.seg, ok: r.ok && (!j || j.status_code === 1000), status_code: j && j.status_code, msg: (j && (j.status_message || j.message)) || '' });
+        } catch (err) { results.push({ seg: e.seg, ok: false, reason: String(err && err.message || err) }); }
+        await sleep(60);
+      }
+      return { ok: results.length > 0 && results.every((x) => x.ok), attempted: results.length, confirmed: results.filter((x) => x.ok).length, results };
+    } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
+  }
+
   // ---- SUBMIT TASK (DOM) ---------------------------------------------------
   // Unlike confirm, the final submit fires over a non-HTTP channel (WebSocket/internal) —
   // there's no endpoint to replay. But its whole flow is TEXT-LABELLED, so a text-matched
@@ -1219,6 +1255,7 @@
           case 'WRITE_PLURAL': sendResponse(await writePlural(msg.edit || {})); break;
           case 'CONFIRM_ALL': sendResponse(await confirmAll(msg.ignoreNormal !== false)); break;
           case 'API_CONFIRM_ALL': sendResponse(await apiConfirmAll(msg.opts || {})); break;
+          case 'API_WRITE_CONFIRM': sendResponse(await apiWriteConfirm(msg.edits || [], msg.ignoreQa)); break;
           case 'SUBMIT_TASK': sendResponse(await domSubmit()); break;
           case 'WB_CTX': sendResponse(wbCtx()); break;
           case 'WB_OPEN': sendResponse(wbOpen(msg.taskId)); break;
@@ -1243,7 +1280,7 @@
   window.__wb = {
     ver: CS_VERSION, ctx: () => wbCtx(), find: (k, s) => wbFind(k, s), write: (e) => wbWrite(e || {}),
     apiTask: (id) => apiTask(id), apiConfirm: (p) => apiConfirm(p || {}), apiTasks: (k) => apiTasks(k),
-    apiConfirmAll: (p) => apiConfirmAll(p || {}), submitTask: () => domSubmit(),
+    apiConfirmAll: (p) => apiConfirmAll(p || {}), apiWriteConfirm: (e, q) => apiWriteConfirm(e || [], q), submitTask: () => domSubmit(),
     reveal: (seg) => revealSeg(seg).then((c) => !!c).catch(() => false),
     writeSeg: (e) => wbWriteBySeg(e || {}),
     eyeRows: () => wbEyeRows().map((r) => r.id), open: (id) => wbOpen(id)

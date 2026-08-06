@@ -715,19 +715,33 @@ async function doSubmit() {
   } catch (e) { info('submit-info', e.message, 'err'); }
 }
 
-// One-click finish: Write approved → Confirm all (API) → Submit. A SINGLE upfront
-// confirmation (Submit is irreversible — it delivers the task), then it runs the three
-// proven steps in order and STOPS if any step fails, so it never submits a half-written
-// task. No cosmetic reload between confirm and submit (that would break the chain; submit
-// gates on pending deliverable content, not on the ✓✓ colour).
+// Poll a tab until its content script (matching CS_EXPECT) answers PING — used
+// after a reload so we don't message the page before the script re-injects.
+async function wbWaitContentReady(tabId, ms) {
+  const deadline = Date.now() + (ms || 12000);
+  while (Date.now() < deadline) {
+    try { const r = await chrome.tabs.sendMessage(tabId, { type: 'PING' }); if (r && r.ver === CS_EXPECT) return true; }
+    catch (e) { /* not injected yet */ }
+    await wbSleep(500);
+  }
+  return false;
+}
+
+// One-click finish: Write+Confirm (atomic, API) → Confirm the rest → reload → Submit.
+// A SINGLE upfront confirmation (Submit is irreversible — it delivers the task), then it
+// runs in order and STOPS if any step fails, so it never submits a half-written task.
+// Writing goes through the API (confirmTextTaskTargetV2 carries the content), so it both
+// writes AND confirms server-side in one call — this avoids the race that made a DOM write
+// look "written" while the immediate confirm found nothing saved yet. We then reload so the
+// editor reflects the confirmed state (which the submit dialog needs) before submitting.
 async function doWriteConfirmSubmit() {
   const edits = state.proposals ? state.proposals.filter((p) => p.approved && !p.manual).map((p) => ({ seg: p.seg, text: p.next })) : [];
   const manual = state.proposals ? state.proposals.filter((p) => p.manual).length : 0;
   const lines = [
     'One-click finish — this will:',
-    `  1) Write ${edits.length} approved segment(s) into Starling`,
-    '  2) Confirm all unconfirmed segments (ignoring normal QA — Critical still blocks)',
-    '  3) SUBMIT the task to the requester — this DELIVERS your translation and can\'t be undone',
+    `  1) Write & confirm ${edits.length} approved segment(s) via Starling's API`,
+    '  2) Confirm any remaining unconfirmed segments (ignoring normal QA — Critical still blocks)',
+    '  3) Reload, then SUBMIT the task to the requester — this DELIVERS your translation and can\'t be undone',
     manual ? `\n⚠ ${manual} tagged (copy-by-hand) segment(s) are NOT auto-written — if they still need pasting, Cancel and do that first.` : '',
     '\nProceed?'
   ].filter(Boolean);
@@ -735,33 +749,40 @@ async function doWriteConfirmSubmit() {
   const btn = $('write-confirm-submit'); btn.disabled = true;
   const say = (m, k) => info('wcs-info', m, k || '');
   try {
-    // 1) WRITE
+    // 1) WRITE + CONFIRM the approved changed segments, atomically via the API.
     if (edits.length) {
-      say(`1/3 · writing ${edits.length} segment(s)…`);
-      const results = [];
-      for (let i = 0; i < edits.length; i += 5) {
-        const r = await send({ type: 'WRITE', edits: edits.slice(i, i + 5) });
-        (r && r.results || []).forEach((x) => results.push(x));
+      say(`1/3 · writing & confirming ${edits.length} segment(s)…`);
+      const w = await send({ type: 'API_WRITE_CONFIRM', edits, ignoreQa: true });
+      if (!w || !w.ok) {
+        const bad = (w && w.results || []).filter((x) => !x.ok);
+        const why = bad.length ? ' · ' + bad.slice(0, 4).map((b) => '#' + b.seg + ' ' + (b.msg || b.reason || '')).join('; ') : (w && w.error ? ' · ' + w.error : '');
+        say(`Write+confirm failed (${(w && w.confirmed) || 0}/${(w && w.attempted) || 0})${why} — stopped, nothing submitted.`, 'err'); return;
       }
-      const bad = results.filter((r) => !r.ok);
-      if (bad.length) { say(`⚠ ${bad.length}/${results.length} write(s) failed — stopped before confirm/submit. Fix and retry.`, 'err'); bad.forEach((b) => log(`wcs write #${b.seg} failed: ${b.reason}`)); return; }
-      say(`1/3 · wrote ${results.length} ✓ — confirming…`);
+      say(`1/3 · wrote & confirmed ${w.confirmed} ✓ — confirming the rest…`);
     } else {
       say('1/3 · nothing to write — confirming…');
     }
-    // 2) CONFIRM ALL (no reload — we need the tab alive to submit next)
+    // 2) CONFIRM the remaining unconfirmed (unchanged) segments.
     const c = await send({ type: 'API_CONFIRM_ALL', opts: { ignoreQa: true } });
     if (!c || !c.ok) {
       const f = (c && c.failed) || [];
       const why = f.length ? ` · ${f.slice(0, 4).map((x) => '#' + x.rank + ' ' + x.msg).join('; ')}` : (c && c.error ? ' · ' + c.error : '');
       say(`Confirm failed (${(c && c.confirmed) || 0}/${(c && c.attempted) || 0})${why} — stopped before submit.`, 'err'); return;
     }
-    say(`2/3 · confirmed ${c.confirmed}/${c.attempted} ✓ — submitting…`);
-    // 3) SUBMIT
+    // 3) Reload so the editor's own state shows everything confirmed (the submit dialog
+    //    reads client state), wait for the content script to come back, then submit.
+    say(`2/3 · confirmed — refreshing the page to submit…`);
+    const t = await activeTab();
+    if (t) {
+      await chrome.tabs.reload(t.id);
+      const ready = await wbWaitContentReady(t.id, 15000);
+      if (!ready) { say('Written & confirmed ✓, but the page didn\'t finish reloading in time — click ➤ Submit task manually.', 'err'); return; }
+    }
+    say('3/3 · submitting…');
     const s = await send({ type: 'SUBMIT_TASK' });
-    if (s && s.ok) { say(s.submitted ? '✅ Written, confirmed & submitted to the requester.' : '✅ Written & confirmed; submit dialog closed (verify Starling shows “Task submitted”).', 'good'); }
-    else if (s && s.disabled) { say('Written & confirmed ✓, but Submit found nothing pending — reload the page and click ➤ Submit task if it isn\'t already submitted.', 'err'); }
-    else { say(`Written & confirmed ✓, but couldn't confirm the submit${s && s.buttonNow ? ` (button now: "${s.buttonNow}")` : ''} — check Starling; if it shows “Task submitted”, it went through, otherwise click ➤ Submit task.`, 'err'); }
+    if (s && s.ok) { say(s.submitted ? '✅ Written, confirmed & submitted to the requester.' : '✅ Written & confirmed; submit dialog closed — verify Starling shows “Task submitted”.', 'good'); }
+    else if (s && s.disabled) { say('Written & confirmed ✓, but Submit found nothing pending — it may already be submitted.', 'err'); }
+    else { say(`Written & confirmed ✓, but couldn't confirm the submit${s && s.error ? ' · ' + s.error : ''} — check Starling; click ➤ Submit task if needed.`, 'err'); }
   } catch (e) { say(e.message, 'err'); }
   finally { btn.disabled = false; }
 }
@@ -1158,7 +1179,7 @@ function wbBuildIndex() {
 }
 const WB_FIELDS = [['key', 'Key'], ['valid', 'Valid (Y/N)'], ['final', 'Final Translation'], ['src', 'Source (EN)'], ['tgt', 'Current target'], ['lang', 'Language']];
 const STAR_KEY_URL = 'https://starling.bytedance.com/#/all-task?pageNum=1&pageSize=10&progress=all&translateTypeList=%5B%5D&sortType=1&order=0&sourceLocales=en&targetLocales=he-IL&textKeys=';
-const CS_EXPECT = 32;   // must match content.js CS_VERSION
+const CS_EXPECT = 33;   // must match content.js CS_VERSION
 
 // Direct call surface — invokes the page's window.__wb.* via chrome.scripting.executeScript.
 // This bypasses chrome.runtime messaging entirely, so a stale/duplicate content-script
