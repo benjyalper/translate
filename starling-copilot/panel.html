@@ -82,6 +82,17 @@
       </details>
     </details>
 
+    <details class="card" id="tm-card">
+      <summary>🧠 Consistency memory <span id="tm-badge" class="hint"></span></summary>
+      <div class="hint" style="margin:4px 0 8px">Every segment you <b>write</b> is remembered (source → your target). When the same source turns up again — this task or a future one — the copilot fills in your previous wording so it stays identical. It also aligns repeated identical sources within a task. Builds itself from your work; no upkeep.</div>
+      <div class="row">
+        <button id="tm-export" class="btn sm ghost" title="Download the memory as JSON (back up / move to another machine)">Export</button>
+        <label class="btn sm ghost" style="cursor:pointer">Import<input id="tm-import" type="file" accept="application/json" hidden /></label>
+        <button id="tm-clear" class="btn sm ghost danger" title="Forget every remembered string (can't be undone)">Clear memory</button>
+      </div>
+      <div id="tm-info" class="info"></div>
+    </details>
+
     <div id="view-starling">
     <!-- STEP 1 · HARVEST -->
     <section class="card">

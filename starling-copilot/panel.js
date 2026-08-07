@@ -384,6 +384,70 @@ function brainText() {
   return s;
 }
 
+// ---- CONSISTENCY MEMORY: self-populating exact-match translation memory -----
+// Every segment you WRITE is remembered as source → your target. On the next
+// Process, any segment whose source EXACTLY matches (after wbFold normalisation)
+// is set back to your previous wording — deterministically, no GPT drift — so
+// recurrences stay identical across tasks and sessions. It also aligns repeated
+// identical sources WITHIN one task. Grows from your own work; zero upkeep.
+let TM = { map: {}, updatedAt: 0 };
+async function tmLoad() { try { TM = await store.get('consistencyTM', { map: {}, updatedAt: 0 }); } catch (e) {} if (!TM || !TM.map) TM = { map: {}, updatedAt: 0 }; return TM; }
+async function tmSave() { TM.updatedAt = Date.now(); try { await store.set({ consistencyTM: TM }); } catch (e) {} }
+function tmCount() { return TM && TM.map ? Object.keys(TM.map).length : 0; }
+function tmKey(src) { return wbFold(String(src == null ? '' : src)); }   // normalise quotes/dashes/spaces/fullwidth; case kept
+function tmLookup(src) { const k = tmKey(src); return (k && TM.map[k]) ? TM.map[k] : null; }
+function tmRecordOne(src, tgt) {
+  const k = tmKey(src); const t = String(tgt == null ? '' : tgt).trim();
+  if (!k || !t) return false;
+  const prev = TM.map[k];
+  TM.map[k] = { src: String(src), tgt: t, ts: Date.now(), n: (prev ? prev.n || 1 : 0) + 1 };
+  return true;
+}
+// Record every approved, non-manual proposal that was actually written (okSegs = a
+// Set of seg numbers that succeeded, or null to record all approved non-manual).
+async function tmRecordWritten(okSegs) {
+  let n = 0;
+  for (const p of state.proposals || []) {
+    if (p.manual || !p.approved) continue;
+    if (okSegs && !okSegs.has(p.seg)) continue;
+    if (tmRecordOne(p.src, p.next)) n++;
+  }
+  if (n) await tmSave();
+  return n;
+}
+// Enforce memory on a freshly-built proposal list (called before state.proposals=…).
+function tmApply(proposals) {
+  // 1) cross-task/session memory — prior wording wins over a fresh GPT suggestion.
+  for (const p of proposals) {
+    if (p.manual) continue;
+    const hit = tmLookup(p.src);
+    if (!hit) continue;
+    if (wbFold(hit.tgt) !== wbFold(p.next)) {
+      p.tmPrev = p.next;           // what GPT proposed this time
+      p.next = hit.tgt;            // your previous, endorsed wording
+      p.tm = true;
+      p.approved = !p.manual && p.next !== String(p.old);
+    } else {
+      p.tm = true;                 // GPT already matches memory → badge as consistent
+    }
+  }
+  // 2) intra-run alignment — identical sources in THIS task get one identical target.
+  const groups = new Map();
+  for (const p of proposals) { if (p.manual) continue; const k = tmKey(p.src); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(p); }
+  for (const arr of groups.values()) {
+    if (arr.length < 2) continue;
+    const canonP = arr.find((p) => p.tm) || arr.find((p) => p.next && p.next !== p.old) || arr[0];
+    const canon = canonP.next;
+    for (const p of arr) {
+      if (wbFold(p.next) !== wbFold(canon)) {
+        if (!p.tmPrev) p.tmPrev = p.next;
+        p.next = canon; p.dedupe = true;
+        p.approved = !p.manual && p.next !== String(p.old);
+      }
+    }
+  }
+}
+
 // ---- GPT: system prompt (identical policy to the admin Copy Deck tool) ------
 // tiktok=true appends the TikTok Hebrew Style Guide (Starling / Feishu). Omit it for memoQ/Crowdin/YiCAT.
 function sysPrompt(mode, plural, tiktok) {
@@ -543,10 +607,12 @@ async function doGpt() {
         await new Promise((r) => setTimeout(r, 250));
       }
     }
+    tmApply(proposals);   // enforce your remembered wording on exact-source recurrences
     state.proposals = proposals;
     const changed = proposals.filter((p) => p.next !== p.old).length;
+    const tmN = proposals.filter((p) => p.tm || p.dedupe).length;
     const pf = done - filled;
-    info('gpt-info', `✅ ${done} done${filled ? ` (${pf} proofread · ${filled} translated)` : ''} · ${changed} changed${failed ? ` · ${failed} failed` : ''}`, failed ? 'err' : 'good');
+    info('gpt-info', `✅ ${done} done${filled ? ` (${pf} proofread · ${filled} translated)` : ''} · ${changed} changed${tmN ? ` · 🧠 ${tmN} from memory` : ''}${failed ? ` · ${failed} failed` : ''}`, failed ? 'err' : 'good');
     renderReview();
     $('review-card').hidden = false;
     $('write-card').hidden = false;
@@ -600,6 +666,8 @@ function renderReview() {
     return `<div class="rc${p.tagged ? ' tagged' : ''}${p.manual ? ' manual' : ''}${changed ? '' : ' unchanged'}" data-i="${idx}">
       <div class="rc-top">
         <span class="rc-seg">#${esc(p.seg)}</span>
+        ${p.tm ? `<span class="rc-warn" style="background:#0c4a6e" title="${p.tmPrev ? 'You translated this exact source before — set to your previous wording for consistency. GPT proposed: ' + esc(p.tmPrev) : 'Matches a source you translated before — already consistent with your previous wording.'}">🧠 memory</span>` : ''}
+        ${p.dedupe && !p.tm ? '<span class="rc-warn" style="background:#0c4a6e" title="This exact source appears more than once in this task — aligned to one wording for consistency.">🧠 same-as-above</span>' : ''}
         ${p.filled ? '<span class="rc-warn" title="Target was empty — translated from the source and will be written in with the rest." style="background:#0a7a3f">＋ new</span>' : ''}
         ${p.chip ? '<span class="rc-warn" title="Real inline-tag object (chip) in the cell — copy-by-hand.">⚠ chip</span>' : (p.tagWrapped ? '<span class="rc-warn" title="Numbered wrapping tags (①②③ / O-/C- tokens) — copy-by-hand; writing would type the literal tokens and break the tags. Use the per-part Copy buttons.">⚠ tag</span>' : (p.tagged ? '<span class="rc-warn" title="Text placeholder ({0}, %s, &lt;g id&gt;…) — kept byte-for-byte; safe to write. Eyeball that the token survived.">⚠ placeholder</span>' : ''))}
         ${amountMismatch(p.src, p.next) ? '<span class="rc-warn" title="Number/currency differs from the source — the amount &amp; currency symbol must stay verbatim (may be a stale TM value).">⚠ number</span>' : ''}
@@ -641,7 +709,7 @@ async function doWriteOne(idx, btn) {
   try {
     const r = await send({ type: 'WRITE', edits: [{ seg: p.seg, text: p.next }] });
     const res = (r && r.results && r.results[0]) || null;
-    if (res && res.ok) { btn.textContent = '✓ written'; p.written = true; }
+    if (res && res.ok) { btn.textContent = '✓ written'; p.written = true; if (tmRecordOne(p.src, p.next)) await tmSave(); }
     else { btn.textContent = '✕ failed'; log(`write #${p.seg} failed: ${(res && res.reason) || (r && r.error) || 'unknown'}`); }
   } catch (e) {
     btn.textContent = '✕ failed'; log(`write #${p.seg} failed: ${e.message}`);
@@ -676,7 +744,10 @@ async function doWrite() {
     }
     const ok = results.filter((r) => r.ok).length;
     const bad = results.filter((r) => !r.ok);
-    info('write-info', `✅ Wrote ${ok}/${results.length}${bad.length ? ` · ${bad.length} failed` : ''}`, bad.length ? 'err' : 'good');
+    const okSegs = new Set(results.filter((r) => r.ok).map((r) => r.seg));
+    const remembered = await tmRecordWritten(okSegs);
+    if (remembered) tmRefresh();
+    info('write-info', `✅ Wrote ${ok}/${results.length}${bad.length ? ` · ${bad.length} failed` : ''}${remembered ? ` · 🧠 ${remembered} remembered` : ''}`, bad.length ? 'err' : 'good');
     bad.forEach((b) => log(`write #${b.seg} failed: ${b.reason}`));
   } catch (e) {
     info('write-info', e.message, 'err');
@@ -778,6 +849,8 @@ async function doWriteConfirmSubmit() {
         const why = bad.length ? ' · ' + bad.slice(0, 4).map((b) => '#' + b.seg + ' ' + (b.msg || b.reason || '')).join('; ') : (w && w.error ? ' · ' + w.error : '');
         say(`Write+confirm failed (${(w && w.confirmed) || 0}/${(w && w.attempted) || 0})${why} — stopped, nothing submitted.`, 'err'); return;
       }
+      const okSegs = new Set(((w.results || []).filter((x) => x.ok).map((x) => x.seg)));
+      await tmRecordWritten(okSegs.size ? okSegs : null);
       say(`1/3 · wrote & confirmed ${w.confirmed} ✓ — confirming the rest…`);
     } else {
       say('1/3 · nothing to write — confirming…');
@@ -2910,6 +2983,27 @@ async function brainImport(file) {
   } catch (e) { brainInfo('Import failed: ' + e.message, 'err'); }
 }
 
+// ---- Consistency memory: UI glue ----
+function tmRefresh() { const b = $('tm-badge'); if (b) b.textContent = tmCount() ? `· ${tmCount()} string${tmCount() === 1 ? '' : 's'}` : '· empty'; }
+function tmInfo(msg, cls) { const el = $('tm-info'); if (el) { el.textContent = msg || ''; el.className = 'info' + (cls ? ' ' + cls : ''); } }
+function tmExport() {
+  const blob = new Blob([JSON.stringify(TM, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'consistency-memory-' + new Date().toISOString().slice(0, 10) + '.json'; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+async function tmImport(file) {
+  try {
+    const o = JSON.parse(await file.text());
+    const src = o && o.map && typeof o.map === 'object' ? o.map : null;
+    if (!src) throw new Error('not a consistency-memory JSON.');
+    let n = 0;
+    for (const k of Object.keys(src)) { const e = src[k]; if (e && e.src && e.tgt) { if (tmRecordOne(e.src, e.tgt)) n++; } }
+    await tmSave(); tmRefresh();
+    tmInfo(`Imported ${n} string(s) — memory now holds ${tmCount()}.`, 'good');
+  } catch (e) { tmInfo('Import failed: ' + e.message, 'err'); }
+}
+
 async function init() {
   $('key').value = await store.get('key', '');
   $('model').value = await store.get('model', 'gpt-5.4');
@@ -2951,6 +3045,15 @@ async function init() {
   $('brain-clear').addEventListener('click', async () => {
     if (!confirm('Remove all ingested rules and glossary terms? The built-in guide stays in effect.')) return;
     BRAIN.rules = []; BRAIN.glossary = []; await brainSave(); brainRefresh(); brainInfo('Cleared — back to the built-in guide only.', '');
+  });
+
+  // Consistency memory
+  await tmLoad(); tmRefresh();
+  $('tm-export').addEventListener('click', tmExport);
+  $('tm-import').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) tmImport(f); e.target.value = ''; });
+  $('tm-clear').addEventListener('click', async () => {
+    if (!confirm('Forget every remembered string? This can\'t be undone.')) return;
+    TM = { map: {}, updatedAt: 0 }; await tmSave(); tmRefresh(); tmInfo('Memory cleared.', '');
   });
 
   $('harvest').addEventListener('click', doHarvest);
