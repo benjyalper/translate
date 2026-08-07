@@ -391,7 +391,7 @@ function brainText() {
 // recurrences stay identical across tasks and sessions. It also aligns repeated
 // identical sources WITHIN one task. Grows from your own work; zero upkeep.
 let TM = { map: {}, updatedAt: 0 };
-async function tmLoad() { try { TM = await store.get('consistencyTM', { map: {}, updatedAt: 0 }); } catch (e) {} if (!TM || !TM.map) TM = { map: {}, updatedAt: 0 }; return TM; }
+async function tmLoad() { try { TM = await store.get('consistencyTM', { map: {}, enabled: true, updatedAt: 0 }); } catch (e) {} if (!TM || !TM.map) TM = { map: {}, enabled: true, updatedAt: 0 }; if (TM.enabled === undefined) TM.enabled = true; return TM; }
 async function tmSave() { TM.updatedAt = Date.now(); try { await store.set({ consistencyTM: TM }); } catch (e) {} }
 function tmCount() { return TM && TM.map ? Object.keys(TM.map).length : 0; }
 function tmKey(src) { return wbFold(String(src == null ? '' : src)); }   // normalise quotes/dashes/spaces/fullwidth; case kept
@@ -417,7 +417,8 @@ async function tmRecordWritten(okSegs) {
 }
 // Enforce memory on a freshly-built proposal list (called before state.proposals=…).
 function tmApply(proposals) {
-  // 1) cross-task/session memory — prior wording wins over a fresh GPT suggestion.
+  if (!TM || !TM.enabled) return;   // enforcement switched off in Settings
+  // 1) cross-task/session memory — prior wording is offered over a fresh GPT suggestion.
   for (const p of proposals) {
     if (p.manual) continue;
     const hit = tmLookup(p.src);
@@ -425,8 +426,9 @@ function tmApply(proposals) {
     if (wbFold(hit.tgt) !== wbFold(p.next)) {
       p.tmPrev = p.next;           // what GPT proposed this time
       p.next = hit.tgt;            // your previous, endorsed wording
-      p.tm = true;
-      p.approved = !p.manual && p.next !== String(p.old);
+      p.tm = true; p.tmOverride = true;
+      p.approved = false;          // memory DIFFERS from GPT → leave UNCHECKED so you confirm;
+                                   // a remembered mistake can never re-apply itself silently.
     } else {
       p.tm = true;                 // GPT already matches memory → badge as consistent
     }
@@ -666,7 +668,8 @@ function renderReview() {
     return `<div class="rc${p.tagged ? ' tagged' : ''}${p.manual ? ' manual' : ''}${changed ? '' : ' unchanged'}" data-i="${idx}">
       <div class="rc-top">
         <span class="rc-seg">#${esc(p.seg)}</span>
-        ${p.tm ? `<span class="rc-warn" style="background:#0c4a6e" title="${p.tmPrev ? 'You translated this exact source before — set to your previous wording for consistency. GPT proposed: ' + esc(p.tmPrev) : 'Matches a source you translated before — already consistent with your previous wording.'}">🧠 memory</span>` : ''}
+        ${p.tmOverride ? `<span class="rc-warn" style="background:#7a5c0a" title="Memory has a DIFFERENT wording than GPT for this exact source. Set to your remembered version but left UNCHECKED — confirm it, or edit the text if the memory is wrong (writing your fix updates the memory). GPT proposed: ${esc(p.tmPrev || '')}">🧠 memory — review</span>`
+          : p.tm ? '<span class="rc-warn" style="background:#0c4a6e" title="Matches a source you translated before — already consistent with your previous wording.">🧠 memory</span>' : ''}
         ${p.dedupe && !p.tm ? '<span class="rc-warn" style="background:#0c4a6e" title="This exact source appears more than once in this task — aligned to one wording for consistency.">🧠 same-as-above</span>' : ''}
         ${p.filled ? '<span class="rc-warn" title="Target was empty — translated from the source and will be written in with the rest." style="background:#0a7a3f">＋ new</span>' : ''}
         ${p.chip ? '<span class="rc-warn" title="Real inline-tag object (chip) in the cell — copy-by-hand.">⚠ chip</span>' : (p.tagWrapped ? '<span class="rc-warn" title="Numbered wrapping tags (①②③ / O-/C- tokens) — copy-by-hand; writing would type the literal tokens and break the tags. Use the per-part Copy buttons.">⚠ tag</span>' : (p.tagged ? '<span class="rc-warn" title="Text placeholder ({0}, %s, &lt;g id&gt;…) — kept byte-for-byte; safe to write. Eyeball that the token survived.">⚠ placeholder</span>' : ''))}
@@ -2984,7 +2987,25 @@ async function brainImport(file) {
 }
 
 // ---- Consistency memory: UI glue ----
-function tmRefresh() { const b = $('tm-badge'); if (b) b.textContent = tmCount() ? `· ${tmCount()} string${tmCount() === 1 ? '' : 's'}` : '· empty'; }
+function tmRefresh() {
+  const b = $('tm-badge'); if (b) b.textContent = tmCount() ? `· ${tmCount()} string${tmCount() === 1 ? '' : 's'}` : '· empty';
+  const t = $('tm-toggle'); if (t) t.checked = !!(TM && TM.enabled);
+  const n = $('tm-count-n'); if (n) n.textContent = tmCount();
+  tmRenderList($('tm-search') ? $('tm-search').value : '');
+}
+function tmRenderList(filter) {
+  const box = $('tm-list'); if (!box) return;
+  const q = (filter || '').toLowerCase().trim();
+  const rows = Object.keys(TM.map).map((k) => ({ k, ...TM.map[k] }))
+    .filter((e) => !q || (e.src || '').toLowerCase().includes(q) || (e.tgt || '').toLowerCase().includes(q))
+    .sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 300);
+  box.innerHTML = rows.length
+    ? rows.map((e) => `<div class="bl-row"><button class="bl-del" data-tmk="${esc(e.k)}" title="Forget this string">✕</button><span class="bi-text"><span dir="ltr">${esc(e.src)}</span> → <span dir="rtl">${esc(e.tgt)}</span></span></div>`).join('')
+    : '<div class="hint">No matches — write a segment and it lands here.</div>';
+  box.querySelectorAll('.bl-del').forEach((btn) => btn.addEventListener('click', async () => {
+    const k = btn.getAttribute('data-tmk'); if (k in TM.map) { delete TM.map[k]; await tmSave(); tmRefresh(); tmInfo('Forgot 1 string.', ''); }
+  }));
+}
 function tmInfo(msg, cls) { const el = $('tm-info'); if (el) { el.textContent = msg || ''; el.className = 'info' + (cls ? ' ' + cls : ''); } }
 function tmExport() {
   const blob = new Blob([JSON.stringify(TM, null, 2)], { type: 'application/json' });
@@ -3051,9 +3072,14 @@ async function init() {
   await tmLoad(); tmRefresh();
   $('tm-export').addEventListener('click', tmExport);
   $('tm-import').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) tmImport(f); e.target.value = ''; });
+  $('tm-toggle').addEventListener('change', async (e) => {
+    TM.enabled = e.target.checked; await tmSave();
+    tmInfo(TM.enabled ? 'On — remembered wording is applied to matching sources.' : 'Off — memory is kept but not applied to new translations.', '');
+  });
+  $('tm-search').addEventListener('input', (e) => tmRenderList(e.target.value));
   $('tm-clear').addEventListener('click', async () => {
     if (!confirm('Forget every remembered string? This can\'t be undone.')) return;
-    TM = { map: {}, updatedAt: 0 }; await tmSave(); tmRefresh(); tmInfo('Memory cleared.', '');
+    TM = { map: {}, enabled: TM.enabled, updatedAt: 0 }; await tmSave(); tmRefresh(); tmInfo('Memory cleared.', '');
   });
 
   $('harvest').addEventListener('click', doHarvest);
