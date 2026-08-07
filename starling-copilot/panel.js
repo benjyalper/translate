@@ -1566,16 +1566,30 @@ function wbStampUpdatedForKey(key) {
   }
   return n;
 }
-// Shared post-write bookkeeping on an LQA workbook: stamp the note/Comments column AND
-// "Updated on Starling" = Yes, then persist. Used by every write path.
+// Stamp the workbook for one written key. Distinguishes the two sheet types by their columns:
+//   • SYNC sheet (has an "Updated on Starling" column) → stamp it "Yes". The default "agree"
+//     is NOT written (only an explicit ✏ note goes to Comments).
+//   • LQA report (no "Updated on Starling") → stamp "agree" (or your note) into Validation
+//     feedback / Column I, as before.
+function wbStampRow(q) {
+  if (!(WB.lqa && WB.workbook)) return;
+  const hasUpdated = WB.map.updated != null && WB.map.updated >= 0;
+  const explicitNote = !!(q && q.noteText && String(q.noteText).trim());
+  if (explicitNote || !hasUpdated) {
+    const ci = wbColIFor(q);
+    const st = wbStampForKey(q.key, ci.note, ci.overwrite);
+    if (st) wbLog(`📋 Column I → "${ci.note}" for ${q.key} (${st} row) — Export form to download`);
+  }
+  if (hasUpdated) {
+    const su = wbStampUpdatedForKey(q.key);
+    if (su) wbLog(`✅ "Updated on Starling" → Yes for ${q.key} (${su} row)`);
+  }
+}
+// Shared post-write bookkeeping on an LQA workbook: stamp the row, then persist.
 function wbMarkWritten(q) {
   if (!(WB.lqa && WB.workbook)) return;
   q.agreed = true;
-  const ci = wbColIFor(q);
-  const st = wbStampForKey(q.key, ci.note, ci.overwrite);
-  if (st) wbLog(`📋 Column I → "${ci.note}" for ${q.key} (${st} row) — Export form to download`);
-  const su = wbStampUpdatedForKey(q.key);
-  if (su) wbLog(`✅ "Updated on Starling" → Yes for ${q.key} (${su} row)`);
+  wbStampRow(q);
   wbPersistProgress();
 }
 // The Column-I value for a card: an explicit note wins, else "agree". Returns { note, overwrite }.
@@ -1651,7 +1665,7 @@ async function wbRestoreProgress() {
     if (editsMap[q.key] != null) q.editText = editsMap[q.key];
     const tasks = doneMap[q.key];
     if (tasks && tasks.length) {
-      q.doneTasks = tasks.slice(); q.status = 'done'; q.agreed = true; const ci = wbColIFor(q); wbStampForKey(q.key, ci.note, ci.overwrite); wbStampUpdatedForKey(q.key); nDone++;
+      q.doneTasks = tasks.slice(); q.status = 'done'; q.agreed = true; wbStampRow(q); nDone++;
     } else if (skipSet.has(q.key)) {
       q.status = 'done'; q.note = 'Skipped last session (not written).'; nSkip++;
     } else if (wbColIFilledForKey(q.key)) {
