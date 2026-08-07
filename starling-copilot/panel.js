@@ -1279,7 +1279,7 @@ function wbBuildIndex() {
     if (n || dropped) WB.indexTabs.push(`${name}:${n}` + (dropped ? ` (+${dropped} non-he dropped)` : ''));
   }
 }
-const WB_FIELDS = [['key', 'Key'], ['valid', 'Valid (Y/N)'], ['final', 'Final Translation'], ['src', 'Source (EN)'], ['tgt', 'Current target'], ['lang', 'Language']];
+const WB_FIELDS = [['key', 'Key'], ['valid', 'Valid (Y/N)'], ['final', 'Final Translation'], ['src', 'Source (EN)'], ['tgt', 'Current target'], ['lang', 'Language'], ['updated', 'Updated on Starling']];
 const STAR_KEY_URL = 'https://starling.bytedance.com/#/all-task?pageNum=1&pageSize=10&progress=all&translateTypeList=%5B%5D&sortType=1&order=0&sourceLocales=en&targetLocales=he-IL&textKeys=';
 const CS_EXPECT = 35;   // must match content.js CS_VERSION
 
@@ -1423,6 +1423,7 @@ function wbAutoMap(header) {
     map.valid = find(/validation feedback/i);             // col I (proofreader) — your "agree"
     map.note  = map.valid;                                // old template's Column-I note target
     map.lang  = find(/^lang(uage)?$/i);   // exact "Language"/"Lang" only — NOT "Validation feedback (from Language Leads)"
+    map.updated = find(/updated on starling/i);           // usually absent on the old template → -1
     return map;
   }
   map.key = find(/^key$|\bkey\b|键|鍵/i);
@@ -1432,10 +1433,12 @@ function wbAutoMap(header) {
   map.tgt = find(/suggest/i); map.tgt = find(/^target$|\btarget\b|译文|譯文/i) >= 0 ? find(/^target$|\btarget\b|译文|譯文/i) : map.tgt;
   map.lang = find(/^lang|language|语言|語言/i);
   // Note target for the ✏ Edit → Column-I stamp on a CURRENT-format LQA sheet: the linguist's
-  // "Comments" column (exact — NOT "ErrorComment"), else "Updated on Starling". Never the Valid
-  // column (that holds Y/N). Left -1 on non-LQA sheets; wbStampForKey falls back safely.
+  // "Comments" column (exact — NOT "ErrorComment"). Never the Valid column (that holds Y/N).
+  // Left -1 on non-LQA sheets; wbStampForKey falls back safely.
   map.note = find(/^comments?$/i);
-  if (map.note < 0) map.note = find(/updated on starling/i);
+  // "Updated on Starling" (Y/N) is its own column: on every successful write we stamp it "Yes"
+  // (separate from the note/Comments stamp), so the exported sheet records what you pushed.
+  map.updated = find(/updated on starling/i);
   return map;
 }
 function wbLoad() {
@@ -1543,6 +1546,38 @@ function wbStampForKey(key, note, overwrite) {
   return n;
 }
 function wbStampAgreeForKey(key) { return wbStampForKey(key, 'agree', false); }
+// Stamp the "Updated on Starling" column = "Yes" for every row of this key. Called on each
+// successful write (a write always means the row was updated on Starling). Overwrites, so a
+// pre-existing "No" flips to "Yes". No-op when the column isn't mapped. Returns rows stamped.
+function wbStampUpdatedForKey(key) {
+  if (typeof XLSX === 'undefined' || !WB.workbook || !WB.sheetName) return 0;
+  const col = WB.map.updated, colKey = WB.map.key;
+  if (col == null || col < 0 || colKey == null || colKey < 0) return 0;
+  const ws = WB.workbook.Sheets[WB.sheetName];
+  if (!ws || !ws['!ref']) return 0;
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  const want = String(key == null ? '' : key).trim();
+  let n = 0;
+  for (let R = range.s.r; R <= range.e.r; R++) {
+    const kc = ws[XLSX.utils.encode_cell({ r: R, c: colKey })];
+    if (!kc || String(kc.v == null ? '' : kc.v).trim() !== want) continue;
+    ws[XLSX.utils.encode_cell({ r: R, c: col })] = { t: 's', v: 'Yes' };
+    n++;
+  }
+  return n;
+}
+// Shared post-write bookkeeping on an LQA workbook: stamp the note/Comments column AND
+// "Updated on Starling" = Yes, then persist. Used by every write path.
+function wbMarkWritten(q) {
+  if (!(WB.lqa && WB.workbook)) return;
+  q.agreed = true;
+  const ci = wbColIFor(q);
+  const st = wbStampForKey(q.key, ci.note, ci.overwrite);
+  if (st) wbLog(`📋 Column I → "${ci.note}" for ${q.key} (${st} row) — Export form to download`);
+  const su = wbStampUpdatedForKey(q.key);
+  if (su) wbLog(`✅ "Updated on Starling" → Yes for ${q.key} (${su} row)`);
+  wbPersistProgress();
+}
 // The Column-I value for a card: an explicit note wins, else "agree". Returns { note, overwrite }.
 function wbColIFor(q) {
   const note = q && q.noteText && String(q.noteText).trim();
@@ -1616,7 +1651,7 @@ async function wbRestoreProgress() {
     if (editsMap[q.key] != null) q.editText = editsMap[q.key];
     const tasks = doneMap[q.key];
     if (tasks && tasks.length) {
-      q.doneTasks = tasks.slice(); q.status = 'done'; q.agreed = true; const ci = wbColIFor(q); wbStampForKey(q.key, ci.note, ci.overwrite); nDone++;
+      q.doneTasks = tasks.slice(); q.status = 'done'; q.agreed = true; const ci = wbColIFor(q); wbStampForKey(q.key, ci.note, ci.overwrite); wbStampUpdatedForKey(q.key); nDone++;
     } else if (skipSet.has(q.key)) {
       q.status = 'done'; q.note = 'Skipped last session (not written).'; nSkip++;
     } else if (wbColIFilledForKey(q.key)) {
@@ -1898,7 +1933,7 @@ async function wbWriteDom(i) {
     // Clear the live read so the next task must be Checked, and keep the buttons live so
     // you can Search → open another 👁 → Check → Write again. "Done" ends the card.
     q.live = null; q.decision = null; q.status = 'written';
-    if (WB.lqa && WB.workbook) { q.agreed = true; const ci = wbColIFor(q); const st = wbStampForKey(q.key, ci.note, ci.overwrite); if (st) wbLog(`📋 Column I → "${ci.note}" for ${q.key} (${st} row) — Export form to download`); wbPersistProgress(); }
+    wbMarkWritten(q);
     q.note = `Wrote${r.confirmed ? ' + proofread-confirmed ✓' : ' (auto-confirm off / not found — confirm by hand)'} to task ${tid}. Same key in another task? Search again, open it with 👁, Check, Write. Click “Done” when every task is fixed. You resubmit each task.`;
     wbRenderQueue();
   } catch (e) { wbSetStatus(i, 'checked', e.message); }
@@ -2140,7 +2175,7 @@ async function wbWriteApi(i) {
     wbLog(`API-wrote ${q.key} @task ${a.taskId} id=${a.sourceTextId} (${why}) — server=${ok2 ? 'matches ✓' : (seg2 ? 'not-yet(status ' + seg2.status + ')' : 're-read failed')}`);
     q.doneTasks = q.doneTasks || []; if (!q.doneTasks.includes(a.taskId)) q.doneTasks.push(a.taskId);
     q.live = null; q.decision = null; q.api = null; q.status = 'written';
-    if (WB.lqa && WB.workbook) { q.agreed = true; const ci = wbColIFor(q); const st = wbStampForKey(q.key, ci.note, ci.overwrite); if (st) wbLog(`📋 Column I → "${ci.note}" for ${q.key} (${st} row) — Export form to download`); wbPersistProgress(); }
+    wbMarkWritten(q);
     q.note = `✅ Written + confirmed via the API · task ${a.taskId}${ok2 ? ' · server confirms it saved' : ' · sent'} · refreshing the task so the fix shows in the editor… Same key elsewhere? Search → 👁 → Check → Write. You resubmit each task.`;
     wbRenderQueue();
     // The API write saves server-side but doesn't repaint the on-screen editor — reload the
@@ -2184,7 +2219,7 @@ async function wbWriteApi(i) {
     q.doneTasks = q.doneTasks || [];
     if (!q.doneTasks.includes(a.taskId)) q.doneTasks.push(a.taskId);
     q.live = null; q.decision = null; q.api = null; q.status = 'written';
-    if (WB.lqa && WB.workbook) { q.agreed = true; const ci = wbColIFor(q); const st = wbStampForKey(q.key, ci.note, ci.overwrite); if (st) wbLog(`📋 Column I → "${ci.note}" for ${q.key} (${st} row) — Export form to download`); wbPersistProgress(); }
+    wbMarkWritten(q);
     const serverNote = persisted ? 'server confirms it saved' : 'typed into the editor — it will save on confirm/resubmit';
     q.note = `✅ Typed into the editor + ${r.confirmed ? 'proofread-confirmed' : 'written (not confirmed — confirm by hand)'} · task ${a.taskId} (seg #${a.rank}) · ${serverNote}. The editor now shows the fix. Same key in another task? Search again, open it with 👁, Check, Write. Click “Done” when every task is fixed. You resubmit each task.`;
     wbRenderQueue();
