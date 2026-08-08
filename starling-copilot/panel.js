@@ -1633,14 +1633,20 @@ async function wbPersistProgress() {
 function wbColIFilledForKey(key) {
   if (typeof XLSX === 'undefined' || !WB.workbook || !WB.sheetName) return false;
   const ws = WB.workbook.Sheets[WB.sheetName];
-  const colI = WB.map.valid, colKey = WB.map.key;
-  if (!ws || !ws['!ref'] || colI == null || colI < 0 || colKey == null || colKey < 0) return false;
+  // The "already done in the sheet" signal differs by report type:
+  //   • SYNC sheet (has an "Updated on Starling" column) → THAT column being filled = written.
+  //     Valid(Y/N) is filled for EVERY adjudicated row (Yes AND No), so it must NOT count as done —
+  //     otherwise finishing adjudication makes the whole queue vanish. (bug fixed 2026-08-07)
+  //   • old LQA report (no "Updated on Starling") → Column I (the agree/validation column) filled = done.
+  const hasUpdated = WB.map.updated != null && WB.map.updated >= 0;
+  const colDone = hasUpdated ? WB.map.updated : WB.map.valid, colKey = WB.map.key;
+  if (!ws || !ws['!ref'] || colDone == null || colDone < 0 || colKey == null || colKey < 0) return false;
   const range = XLSX.utils.decode_range(ws['!ref']);
   const want = String(key == null ? '' : key).trim();
   for (let R = range.s.r; R <= range.e.r; R++) {
     const kc = ws[XLSX.utils.encode_cell({ r: R, c: colKey })];
     if (!kc || String(kc.v == null ? '' : kc.v).trim() !== want) continue;
-    const vc = ws[XLSX.utils.encode_cell({ r: R, c: colI })];
+    const vc = ws[XLSX.utils.encode_cell({ r: R, c: colDone })];
     if (vc && String(vc.v == null ? '' : vc.v).trim()) return true;
   }
   return false;
@@ -1669,7 +1675,7 @@ async function wbRestoreProgress() {
     } else if (skipSet.has(q.key)) {
       q.status = 'done'; q.note = 'Skipped last session (not written).'; nSkip++;
     } else if (wbColIFilledForKey(q.key)) {
-      q.status = 'done'; q.agreed = true; q.note = 'Already filled in the sheet (Column I).'; nFile++;
+      q.status = 'done'; q.agreed = true; q.note = 'Already marked done in the sheet.'; nFile++;
     }
   }
   const parts = [];
@@ -1783,22 +1789,30 @@ async function wbStyledExport(fname) {
   if (!xml) throw new Error('sheet xml missing: ' + sheetPath);
   const ws = WB.workbook.Sheets[WB.sheetName];
   const range = XLSX.utils.decode_range(ws['!ref']);
-  const colI = WB.map.valid, colLetter = zipColLetter(colI);
-  const stampMap = {};
-  for (let R = range.s.r; R <= range.e.r; R++) {
-    const cell = ws[XLSX.utils.encode_cell({ r: R, c: colI })];
-    const val = cell && cell.v != null ? String(cell.v).trim() : '';
-    if (val) stampMap[R + 1] = val;
+  // Inject EVERY column the tool stamps, so both LQA-report stamps (Column I / Comments = "agree"/note)
+  // AND sync-sheet stamps ("Updated on Starling" = Yes) survive. (Old bug: only WB.map.valid was
+  // injected, so a sync sheet's "Updated on Starling" verdicts were silently dropped on export.)
+  const cols = [...new Set([WB.map.valid, WB.map.note, WB.map.updated].filter((c) => c != null && c >= 0))];
+  let outXml = xml, total = 0;
+  for (const col of cols) {
+    const stampMap = {};
+    for (let R = range.s.r; R <= range.e.r; R++) {
+      const cell = ws[XLSX.utils.encode_cell({ r: R, c: col })];
+      const val = cell && cell.v != null ? String(cell.v).trim() : '';
+      if (val) stampMap[R + 1] = val;
+    }
+    if (!Object.keys(stampMap).length) continue;
+    const res = injectCol(outXml, zipColLetter(col), stampMap);
+    outXml = res.xml; total += res.n;
   }
-  const res = injectCol(xml, colLetter, stampMap);
-  const nb = new TextEncoder().encode(res.xml);
+  const nb = new TextEncoder().encode(outXml);
   const te = byName[sheetPath];
   te.usize = nb.length; te.crc = crc32(nb); te.method = 8; te.cdata = await zipDeflateRaw(nb);
   const out = zipBuild(entries);
   const url = URL.createObjectURL(new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
   const a = document.createElement('a'); a.href = url; a.download = fname; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 4000);
-  return res.n;
+  return total;
 }
 function wbExportPlain(fname, count) {
   try { XLSX.writeFile(WB.workbook, fname.replace(/ with-agrees\.xlsx$/i, '_he_filled.xlsx')); info('wb-queue-info', `⬇ Exported (plain — Excel styling NOT preserved) · Column I = "agree" on ${count} key(s). To keep formatting, run make-deliverable.bat on the original + this file.`, 'good'); }
@@ -1809,24 +1823,25 @@ function wbExportPlain(fname, count) {
 function wbExportForm() {
   if (typeof XLSX === 'undefined') { info('wb-queue-info', 'xlsx writer not loaded — reload the extension.', 'err'); return; }
   if (!WB.workbook || !WB.sheetName) { info('wb-queue-info', 'Export needs the original .xlsx (load the file, not pasted text).', 'err'); return; }
-  if (WB.map.valid == null || WB.map.valid < 0 || WB.map.key == null || WB.map.key < 0) { info('wb-queue-info', 'Column I ("Validation feedback") or Key isn\'t mapped — fix the mapping.', 'err'); return; }
-  // Re-stamp anything written THIS session first, then gate on what's actually in Column I —
-  // so a file whose agrees were restored from the sheet (no doneTasks) still exports.
-  const wroteKeys = [...new Set(WB.queue.filter((q) => q.doneTasks && q.doneTasks.length).map((q) => q.key))];
-  for (const k of wroteKeys) wbStampAgreeForKey(k);
+  const hasUpdated = WB.map.updated != null && WB.map.updated >= 0;
+  const doneCol = hasUpdated ? WB.map.updated : WB.map.valid;   // sync → "Updated on Starling" · LQA → Column I
+  if (doneCol == null || doneCol < 0 || WB.map.key == null || WB.map.key < 0) { info('wb-queue-info', 'The done column ("Updated on Starling" / Column I) or Key isn\'t mapped — fix the mapping.', 'err'); return; }
+  // Re-stamp anything written THIS session first (sync → Updated=Yes · LQA → Column I=agree), then
+  // gate on what's actually in that column — so a restored-from-sheet file still exports.
+  for (const q of WB.queue) if (q.doneTasks && q.doneTasks.length) wbStampRow(q);
   let filled = 0;
   const ws0 = WB.workbook.Sheets[WB.sheetName];
   if (ws0 && ws0['!ref']) {
     const rg = XLSX.utils.decode_range(ws0['!ref']);
-    for (let R = rg.s.r + 1; R <= rg.e.r; R++) { const c = ws0[XLSX.utils.encode_cell({ r: R, c: WB.map.valid })]; if (c && c.v != null && String(c.v).trim()) filled++; }
+    for (let R = rg.s.r + 1; R <= rg.e.r; R++) { const c = ws0[XLSX.utils.encode_cell({ r: R, c: doneCol })]; if (c && c.v != null && String(c.v).trim()) filled++; }
   }
-  if (!filled) { info('wb-queue-info', 'Nothing in Column I to export yet — write/agree to some rows (or load a file that already has agrees) first.', 'err'); return; }
+  if (!filled) { info('wb-queue-info', hasUpdated ? 'Nothing in "Updated on Starling" yet — write some fixes to Starling first.' : 'Nothing in Column I to export yet — write/agree to some rows first.', 'err'); return; }
   const base = WB.fileName ? WB.fileName.replace(/\.xlsx?$/i, '') : (WB.sheetName || 'LQA');
   const fname = base + ' with-agrees.xlsx';
   if (WB.rawBytes && typeof DecompressionStream !== 'undefined' && typeof CompressionStream !== 'undefined') {
     info('wb-queue-info', 'Building the formatted file…', 'good');
     wbStyledExport(fname)
-      .then((n) => info('wb-queue-info', `⬇ Exported ${fname} — ${n} "agree"(s) in Column I, original formatting kept. Ready to submit.`, 'good'))
+      .then((n) => info('wb-queue-info', `⬇ Exported ${fname} — ${hasUpdated ? '"Updated on Starling" = Yes' : '"agree" in Column I'} stamped (${n} cell(s)), original formatting kept. Ready to submit.`, 'good'))
       .catch((e) => { wbLog('styled export failed: ' + (e && e.message)); info('wb-queue-info', 'Formatted export failed (' + (e && e.message) + ') — wrote a plain copy instead.', 'err'); wbExportPlain(fname, filled); });
   } else {
     wbExportPlain(fname, filled);
@@ -2801,11 +2816,70 @@ function ycRender() {
 }
 
 function setMode(m) {
-  const views = { starling: 'view-starling', lqa: 'view-lqa', wb: 'view-wb', crowdin: 'view-crowdin', memoq: 'view-memoq', yicat: 'view-yicat' };
-  const btns = { starling: 'mode-starling', lqa: 'mode-lqa', wb: 'mode-wb', crowdin: 'mode-crowdin', memoq: 'mode-memoq', yicat: 'mode-yicat' };
+  const views = { starling: 'view-starling', lqa: 'view-lqa', wb: 'view-wb', crowdin: 'view-crowdin', memoq: 'view-memoq', yicat: 'view-yicat', pay: 'view-pay' };
+  const btns = { starling: 'mode-starling', lqa: 'mode-lqa', wb: 'mode-wb', crowdin: 'mode-crowdin', memoq: 'mode-memoq', yicat: 'mode-yicat', pay: 'mode-pay' };
   if (!views[m]) m = 'starling';
   Object.keys(views).forEach((k) => { $(views[k]).hidden = k !== m; $(btns[k]).classList.toggle('active', k === m); });
   store.set({ mode_ui: m });
+}
+
+// ---- 💰 Weighted word count & pay -----------------------------------------
+// Reads Starling "My tasks" via /api/task/getMyTasks (offset/limit paging — pageNum is
+// ignored server-side; offset+limit works). The displayed "Weighted word count" column is
+// weightingWordCountV2. Sums it and multiplies by the editing rate. Fetch runs in the active
+// Starling tab's context (same-origin cookie) via executeScript — no content.js dependency.
+const PC = { rows: null };
+const PC_STATUS = { 1: 'In progress', 2: 'Submitted', 3: 'Closed', 4: 'To be claimed' };
+function pcInfo(m, k) { info('pc-info', m, k || ''); }
+async function pcFetch() {
+  const t = await wbActiveTab();
+  if (!t || !/^https:\/\/starling\.bytedance\.com\//.test(t.url || '')) { pcInfo('Open any starling.bytedance.com tab (e.g. My tasks), then Compute.', 'err'); return; }
+  if ($('pc-run')) $('pc-run').disabled = true; pcInfo('Reading My tasks…');
+  try {
+    const [r] = await chrome.scripting.executeScript({
+      target: { tabId: t.id },
+      func: async () => {
+        try {
+          const res = await fetch('/api/task/getMyTasks?offset=0&limit=5000&progress=all&translateTypeList=%5B%5D&_=' + Date.now(), { credentials: 'include', cache: 'no-store' });
+          const j = await res.json(); const d = j.data || {};
+          const rows = (d.rows || []).map((x) => ({ s: x.taskStatus, w: Number(x.weightingWordCountV2) || 0 }));
+          return { ok: true, count: d.count, rows };
+        } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+      }
+    });
+    const out = r && r.result;
+    if (!out || !out.ok) throw new Error((out && out.error) || 'fetch failed');
+    PC.rows = out.rows;
+    pcInfo(`Loaded ${out.rows.length} translation task(s) from My tasks.`, 'good');
+    pcRender();
+  } catch (e) { pcInfo('Could not read My tasks — reload the extension, make sure a Starling tab is active, then try again. (' + e.message + ')', 'err'); }
+  finally { if ($('pc-run')) $('pc-run').disabled = false; }
+}
+function pcRender() {
+  if (!PC.rows) return;
+  const rate = Number($('pc-rate').value) || 0;
+  const sel = $('pc-status').value;
+  const rows = sel === 'all' ? PC.rows : PC.rows.filter((r) => String(r.s) === sel);
+  const n = rows.length;
+  const weighted = rows.reduce((a, r) => a + r.w, 0);
+  const fmt = (x) => x.toLocaleString('en-US', { maximumFractionDigits: 1 });
+  const money = (x) => x.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const by = {};
+  for (const r of PC.rows) { by[r.s] = by[r.s] || { n: 0, w: 0 }; by[r.s].n++; by[r.s].w += r.w; }
+  const brk = Object.keys(by).sort().map((k) =>
+    `<tr${String(k) === sel ? ' style="font-weight:700"' : ''}><td>${esc(PC_STATUS[k] || 'Status ' + k)}</td><td style="text-align:right">${by[k].n}</td><td style="text-align:right">${fmt(by[k].w)}</td><td style="text-align:right">${money(by[k].w * rate)}</td></tr>`).join('');
+  $('pc-out').hidden = false;
+  $('pc-out').innerHTML =
+    `<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:baseline;font-weight:600">
+       <div><span style="font-size:1.7em">${n}</span> tasks summed</div>
+       <div><span style="font-size:1.7em">${fmt(weighted)}</span> weighted words</div>
+       <div>× ${rate} = <span style="font-size:1.7em;color:#1a7f37">${money(weighted * rate)}</span></div>
+     </div>
+     <table style="width:100%;margin-top:10px;border-collapse:collapse;font-size:.92em">
+       <thead><tr style="text-align:left;border-bottom:1px solid #8884"><th>Status</th><th style="text-align:right">Tasks</th><th style="text-align:right">Weighted</th><th style="text-align:right">Pay</th></tr></thead>
+       <tbody>${brk}</tbody>
+     </table>
+     <div class="hint" style="margin-top:6px">Sums the <b>Weighted word count</b> column (weightingWordCountV2). Translation tasks only; bold row = current filter.</div>`;
 }
 
 // ---- PLURAL (one/two/many/other) sub-forms --------------------------------
@@ -3117,6 +3191,27 @@ async function init() {
     BRAIN.rules = []; BRAIN.glossary = []; await brainSave(); brainRefresh(); brainInfo('Cleared — back to the built-in guide only.', '');
   });
 
+  // Manual add — type a rule/term straight into the brain (no GPT distillation)
+  const bmCat = $('bm-cat');
+  if (bmCat && !bmCat.options.length) BRAIN_CATS.forEach((c) => { const o = document.createElement('option'); o.value = c; o.textContent = c; bmCat.appendChild(o); });
+  const bmInfo = (m, k) => info('bm-info', m, k || '');
+  if ($('bm-add-rule')) $('bm-add-rule').addEventListener('click', async () => {
+    const cat = ($('bm-cat').value || 'misc'), text = ($('bm-rule').value || '').trim();
+    if (!text) { bmInfo('Type the rule text first.', 'err'); return; }
+    if ((BRAIN.rules || []).some((r) => (r.text || '').toLowerCase() === text.toLowerCase())) { bmInfo('That exact rule is already in the brain.', 'err'); return; }
+    BRAIN.rules.push({ id: brainUid(), cat, text, source: 'manual', ts: Date.now() });
+    await brainSave(); brainRefresh(); $('bm-rule').value = '';
+    bmInfo(`Added rule (${cat}). Brain: ${BRAIN.rules.length} rules · ${BRAIN.glossary.length} terms — active on the next Run.`, 'good');
+  });
+  if ($('bm-add-term')) $('bm-add-term').addEventListener('click', async () => {
+    const en = ($('bm-en').value || '').trim(), he = ($('bm-he').value || '').trim(), note = ($('bm-note').value || '').trim();
+    if (!en || !he) { bmInfo('Both EN and HE are required for a term.', 'err'); return; }
+    BRAIN.glossary = BRAIN.glossary.filter((g) => (g.en || '').toLowerCase() !== en.toLowerCase());   // newest wins
+    BRAIN.glossary.push({ id: brainUid(), en, he, note, source: 'manual', ts: Date.now() });
+    await brainSave(); brainRefresh(); $('bm-en').value = ''; $('bm-he').value = ''; $('bm-note').value = '';
+    bmInfo(`Added term "${en}" → "${he}". Brain: ${BRAIN.rules.length} rules · ${BRAIN.glossary.length} terms.`, 'good');
+  });
+
   // Consistency memory
   await tmLoad(); tmRefresh();
   $('tm-export').addEventListener('click', tmExport);
@@ -3126,6 +3221,14 @@ async function init() {
     tmInfo(TM.enabled ? 'On — remembered wording is applied to matching sources.' : 'Off — memory is kept but not applied to new translations.', '');
   });
   $('tm-search').addEventListener('input', (e) => tmRenderList(e.target.value));
+  if ($('tm-add')) $('tm-add').addEventListener('click', async () => {
+    const src = ($('tm-add-src').value || '').trim(), tgt = ($('tm-add-tgt').value || '').trim();
+    if (!src || !tgt) { tmInfo('Enter both a source and your target.', 'err'); return; }
+    const existed = !!tmLookup(src);
+    tmRecordOne(src, tgt); await tmSave(); tmRefresh();
+    $('tm-add-src').value = ''; $('tm-add-tgt').value = '';
+    tmInfo(`${existed ? 'Updated' : 'Remembered'} — "${src}" → "${tgt}". ${tmCount()} string(s).`, 'good');
+  });
   $('tm-clear').addEventListener('click', async () => {
     if (!confirm('Forget every remembered string? This can\'t be undone.')) return;
     TM = { map: {}, enabled: TM.enabled, updatedAt: 0 }; await tmSave(); tmRefresh(); tmInfo('Memory cleared.', '');
@@ -3192,6 +3295,10 @@ async function init() {
   // YiCAT (segment API + copy / experimental DOM write)
   if ($('yc-model')) $('yc-model').textContent = $('model').value;
   $('mode-yicat').addEventListener('click', () => { setMode('yicat'); ycDetect(); });
+  $('mode-pay').addEventListener('click', () => { setMode('pay'); if (!PC.rows) pcFetch(); });
+  $('pc-run').addEventListener('click', pcFetch);
+  $('pc-rate').addEventListener('input', () => { if (PC.rows) pcRender(); });
+  $('pc-status').addEventListener('change', () => { if (PC.rows) pcRender(); });
   $('yc-detect').addEventListener('click', ycDetect);
   $('yc-harvest').addEventListener('click', ycHarvest);
   $('yc-propose').addEventListener('click', ycPropose);

@@ -20,6 +20,7 @@
       <button id="mode-crowdin" class="mode-btn">🌐 Crowdin</button>
       <button id="mode-memoq" class="mode-btn">🅜 memoQ</button>
       <button id="mode-yicat" class="mode-btn">🐱 YiCAT</button>
+      <button id="mode-pay" class="mode-btn">💰 Word count</button>
     </div>
 
     <!-- SETTINGS -->
@@ -75,6 +76,22 @@
       </div>
       <div id="brain-info" class="info"></div>
       <div id="brain-review" class="brain-review" hidden></div>
+      <details class="sub" id="brain-manual">
+        <summary>➕ Add a rule / term manually</summary>
+        <p class="hint">Type a rule (pick a category) or an EN→HE term and it's merged straight into the brain — no GPT, no doc needed. Active on the next Run.</p>
+        <div class="row" style="margin-top:6px;gap:6px">
+          <select id="bm-cat" title="Rule category"></select>
+          <input id="bm-rule" type="text" placeholder="Rule text (Hebrew or English)" dir="auto" style="flex:1;min-width:140px" />
+          <button id="bm-add-rule" class="btn sm">Add rule</button>
+        </div>
+        <div class="row" style="margin-top:6px;gap:6px">
+          <input id="bm-en" type="text" placeholder="EN term" dir="ltr" style="width:90px" />
+          <input id="bm-he" type="text" placeholder="HE term" dir="rtl" style="width:110px" />
+          <input id="bm-note" type="text" placeholder="note (optional)" dir="auto" style="flex:1;min-width:90px" />
+          <button id="bm-add-term" class="btn sm">Add term</button>
+        </div>
+        <div id="bm-info" class="info"></div>
+      </details>
       <details class="sub" id="brain-current">
         <summary>Current brain — <span id="brain-rules-n">0</span> rules · <span id="brain-gloss-n">0</span> terms</summary>
         <div id="brain-list" class="brain-list"></div>
@@ -91,6 +108,15 @@
         <label class="btn sm ghost" style="cursor:pointer">Import<input id="tm-import" type="file" accept="application/json" hidden /></label>
         <button id="tm-clear" class="btn sm ghost danger" title="Forget every remembered string (can't be undone)">Clear memory</button>
       </div>
+      <details class="sub" id="tm-manual">
+        <summary>➕ Add a remembered pair manually</summary>
+        <p class="hint">Store a source → your target directly (same as if you'd written it). Next time that exact source appears, this wording fills in. Overwrites any existing entry for the same source.</p>
+        <div class="row" style="margin-top:6px;gap:6px">
+          <input id="tm-add-src" type="text" placeholder="Source (EN)" dir="ltr" style="flex:1;min-width:120px" />
+          <input id="tm-add-tgt" type="text" placeholder="Your target (HE)" dir="rtl" style="flex:1;min-width:120px" />
+          <button id="tm-add" class="btn sm">Remember</button>
+        </div>
+      </details>
       <details class="sub" id="tm-current">
         <summary>Stored strings — <span id="tm-count-n">0</span></summary>
         <input id="tm-search" type="text" placeholder="filter by source or target…" style="width:100%;margin:6px 0" />
@@ -533,6 +559,27 @@
       </details>
 
     </div><!-- /view-yicat -->
+
+    <div id="view-pay" hidden>
+    <section class="card">
+      <div class="step"><span class="num">$</span> Weighted word count &amp; pay</div>
+      <p class="hint">Reads your Starling <b>My tasks → Translation task</b> list via the API and sums the <b>Weighted word count</b> column, then × your rate. Be on any <code>starling.bytedance.com</code> tab, then Compute.</p>
+      <div class="row" style="gap:10px;align-items:center;flex-wrap:wrap">
+        <label class="row" style="gap:4px">Rate&nbsp;<input id="pc-rate" type="number" step="0.001" min="0" value="0.04" style="width:80px" /></label>
+        <label class="row" style="gap:4px">Tasks&nbsp;
+          <select id="pc-status">
+            <option value="all">All</option>
+            <option value="2">Submitted</option>
+            <option value="1">In progress</option>
+            <option value="3">Closed</option>
+          </select>
+        </label>
+        <button id="pc-run" class="btn">🔄 Compute from My Tasks</button>
+      </div>
+      <div id="pc-info" class="info"></div>
+      <div id="pc-out" hidden style="margin-top:10px"></div>
+    </section>
+    </div><!-- /view-pay -->
   </div>
 
   <script src="vendor/xlsx.mini.min.js"></script>
