@@ -12,6 +12,11 @@ panel:
 | **🌐 Crowdin** | Harvest a Crowdin Enterprise file via the official **API v2** → GPT-5.4 cards → enter translations (unapproved) for you to submit. |
 | **🅜 memoQ** | Harvest a memoQ web-editor doc via memoQ's own editor API → GPT-5.4 cards → write back as unconfirmed drafts. |
 | **🐱 YiCAT** | Harvest a YiCAT (self-hosted Tmxmall) task via its segment API → GPT-5.4 cards → **copy** each proposal, or opt-in **auto-write** through YiCAT's own in-cell editor (verified). |
+| **💰 Word count** | Sum the **weighted word count** across your Starling *My tasks* and price it (× your editing rate), with a per-status breakdown and the number of tasks summed. |
+
+Two cross-cutting aids apply across the CAT modes: a **🧠 Style Brain** (house-style rules +
+glossary you can grow) and a **🧩 Consistency memory** (a source→target TM that overrides GPT
+post-hoc). Both are documented below.
 
 Everything runs in **your** logged-in browser with **your** OpenAI key. No server. **The tool never
 submits/approves** on any platform — it stops at the point where a human decision is required.
@@ -34,7 +39,7 @@ submits/approves** on any platform — it stops at the point where a human decis
 
 ### Version lockstep
 `content.js` carries a `CS_VERSION`; `panel.js` a matching `CS_EXPECT`. They are **bumped together
-on every content.js change** (currently **21**). The panel checks the page's live `window.__wb.ver`
+on every content.js change** (currently **35**). The panel checks the page's live `window.__wb.ver`
 and re-injects `content.js` if a tab is stale, so tabs self-heal without a manual reload.
 
 ---
@@ -162,6 +167,26 @@ Key** — the step you were doing by hand.
    - **3 · Write + confirm** — see the hybrid write below.
 
 **It never blind-pastes and never submits.** It stops at *confirmed*; **you** resubmit the task.
+
+### Two sheet shapes — sync sheet vs. old LQA report
+The loader auto-detects which of two layouts you dropped, keyed on whether an **Updated on Starling**
+column is present (`WB.map.updated >= 0`):
+
+| | **Sync sheet** (has *Updated on Starling*) | **Old LQA report** (Column I = agree) |
+|---|---|---|
+| "Done" for restore-progress | the **Updated on Starling** column | the **Valid** column |
+| Write-back stamps | **Updated on Starling = Yes** *and* **Comments**, plus Column I | Column I (agree) only |
+
+This split fixes two bugs that showed up on sync sheets:
+
+- **Queue vanished after adjudication.** Restore-progress used to treat a row as already handled when
+  its **Valid** column was filled — but on a sync sheet *every* adjudicated row has a Valid, so the
+  whole queue read as "done" (e.g. *"39 already marked done"*). It now judges done-ness by **Updated
+  on Starling**, so only rows you've actually written back are skipped.
+- **Updated on Starling not written.** Write-back only injected Column I, silently dropping the
+  sync stamps. The styled export now injects the **union** of the *Valid*, *Comments*, and *Updated
+  on Starling* columns, so Write + confirm stamps **Updated on Starling = Yes** (and the comment) as
+  you go.
 
 ### The engine — API **Check**, editor **Write** (hybrid)
 
@@ -329,6 +354,67 @@ inspecting the live editor) runs in the extension's **MAIN world** (`yicat-main.
 
 ---
 
+## 💰 Word count mode (pay estimate)
+
+Sums the **Weighted word count** across your Starling **My tasks** and prices it — the number you
+need for editing invoices.
+
+1. Open any Starling tab (logged in) → **💰 Word count**. It auto-loads on first open; **🔄 Refresh**
+   re-fetches.
+2. It pulls your task list from `GET /api/task/getMyTasks?offset=0&limit=5000&progress=all` (the
+   pagination is **offset + limit** — `pageNum/pageSize` are ignored server-side) and reads each
+   task's **`weightingWordCountV2`** (the float behind the displayed *Weighted word count*).
+3. **Rate** (default **0.04**) × the summed weighted words = the estimate. Change the rate and it
+   re-computes live.
+4. **Status filter** scopes the sum — *All*, *Submitted (2)*, *In progress (1)*, *Closed (3)*. The
+   output shows **the number of tasks summed**, the total weighted words, the pay, and a per-status
+   breakdown table.
+
+> Sums **translation** tasks. Runs entirely off the API in your session — no page scraping, nothing
+> sent to OpenAI.
+
+---
+
+## 🧠 Style Brain (house-style memory)
+
+A growable set of **house-style rules** and a **glossary** that get folded into the GPT prompt in the
+CAT modes (Starling proofread/translate and Feishu LQA), so recurring style decisions stick without
+re-explaining them each run.
+
+- **Structure:** `{ rules:[{cat,text,…}], glossary:[{en,he,note,…}] }`, stored in
+  `chrome.storage.local` under `styleBrain`. Rule categories: *register, address, punctuation, tone,
+  numbers, format, placeholders, glossary, misc*.
+- **Add manually** (the panel's Style Brain block): pick a category + type a rule → **add**; or type
+  **en / he / note** → **add** a glossary term. Rules de-dupe by text; terms de-dupe by English
+  (newest wins). Entries added this way are tagged `source: manual`.
+- **Import / export:** load a `.json` of the same shape to bulk-add (e.g. the duration-plural pack),
+  or export the current brain.
+- **Applied** via `brainText()`, which serializes the brain into the system prompt for each card.
+
+## 🧩 Consistency memory (source→target TM)
+
+A translation memory that enforces a **fixed target for a given source**, overriding GPT after the
+fact so the same string always lands the same way.
+
+- **Structure:** `{ map:{ <foldedSource>: <target> }, enabled, updatedAt }`, key = `wbFold(source)`
+  (the full folded source string).
+- **How it overrides:** after GPT proposes, `tmApply` swaps in the remembered target when the source
+  matches. When the remembered target **differs** from GPT's, the row's **🧠 memory — review**
+  checkbox is left **unticked** so you eyeball the swap before writing.
+- **Add manually:** the Consistency-memory block takes a **source** + **target** → **add**
+  (`tmRecordOne`). Writes also record what you confirmed, so the memory grows as you work.
+- **Toggle:** the memory can be enabled/disabled without clearing it.
+
+> **Brain vs. memory — which wins?** They operate at different stages. The **Style Brain** is
+> *advisory* — it shapes the prompt, so GPT may still choose a fitting inflection (e.g. brain glossary
+> `add → הוסף`, but GPT renders `להוסיף` where the grammar calls for the infinitive). The
+> **Consistency memory** is *mandatory* — a matching source is **force-replaced** with its stored
+> target after GPT runs. So if the brain says `add = הוסף` and the memory maps that source to
+> `להוסיף`, the **memory's `להוסיף` wins** in the output (and, because it differs from GPT, it's
+> surfaced unticked for review).
+
+---
+
 ## ⚠️ Calibration (Starling DOM)
 
 Starling is a React app; its DOM is **not a stable API**. The content script ships with best-known
@@ -395,6 +481,7 @@ Default selectors are **unions** covering both editors; hidden measurement-clone
 | — | **🌐 Crowdin mode** on API v2 (background proxy, detect/harvest/propose/enter) |
 | — | **🅜 memoQ** + **🐱 YiCAT** modes (editor-API / Tiptap write-back) |
 | 21 | Edge-whitespace now carried onto the **proposal** too — harvest re-attaches the source's edge space/newline and the panel mirror includes newlines, so copy/tagged/display paths keep the blue `·`/`↵` |
+| 22–35 | Chip vs. string-placeholder split + empty-target fill; numbered wrapping-tag (`O-/C-`) copy-by-hand; markdown **bold** preservation; **🧠 Style Brain** + **🧩 Consistency memory** (with manual-add); Sheet→Starling **sync-sheet** handling (restore-progress on *Updated on Starling*; write-back stamps *Updated on Starling* + *Comments*); **💰 Word count** pay-estimate tab |
 
 ## Test the panel offline
 ```bash
