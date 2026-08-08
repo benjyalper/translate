@@ -250,6 +250,11 @@
           <label class="lbl" style="margin:0">Sheet tab <span class="hint">pick the one to adjudicate — e.g. 8.5 sync</span></label>
           <select id="lq-tab"></select>
         </div>
+        <label class="lbl">Language <span class="hint">the sheet mixes locales (he / jv / ko …) — adjudicate only yours</span></label>
+        <select id="lq-lang">
+          <option value="he" selected>Hebrew only (he)</option>
+          <option value="all">All languages</option>
+        </select>
         <button id="lq-load" class="btn" style="margin-top:8px">📥 Load rows</button>
         <div id="lq-info" class="info"></div>
       </section>
@@ -300,7 +305,7 @@
         <summary>ℹ️ How Feishu LQA works</summary>
         <div class="help-body">
           <p>The task owners ran a global AI translation check and listed suspected errors in a Feishu sheet. For each row you decide whether the AI-flagged error is <b>valid</b> (real → fix it in Starling) or <b>invalid</b> (false positive).</p>
-          <p>Feishu sheets are drawn on a <code>&lt;canvas&gt;</code> — the cells aren't real HTML, so this can't scrape them. Instead you <b>paste</b> the rows (Ctrl+C copies them as tab-separated text), or <b>load an .xlsx / CSV / TSV</b> — for an .xlsx, pick the sheet tab (e.g. <i>8.5 sync</i>) — and it runs <b>gpt-5.4</b> per row.</p>
+          <p>Feishu sheets are drawn on a <code>&lt;canvas&gt;</code> — the cells aren't real HTML, so this can't scrape them. Instead you <b>paste</b> the rows (Ctrl+C copies them as tab-separated text), or <b>load an .xlsx / CSV / TSV</b> — for an .xlsx, pick the sheet tab (e.g. <i>8.5 sync</i>) — and it runs <b>gpt-5.4</b> per row. The sync tabs stack he/jv/ko together, so the <b>Language</b> selector defaults to <b>Hebrew only</b> and hides the other locales.</p>
           <p>It fills the sheet's 5 <b>Linguists</b> columns:</p>
           <ol>
             <li><b>Valid (Yes/No)</b> — is the AI error real.</li>

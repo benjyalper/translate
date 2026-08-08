@@ -1006,11 +1006,21 @@ function lqLoad(preRows) {
   $('lq-map-card').hidden = false; $('lq-run-card').hidden = false;
   $('lq-review-card').hidden = true; $('lq-paste-card').hidden = true;
   $('lq-cards').innerHTML = ''; $('lq-legend').innerHTML = '';
-  info('lq-info', `Loaded ${LQ.rows.length} rows (header row ${hi + 1}). Check the mapping, then pick a range.`, 'good');
+  info('lq-info', `Loaded ${LQ.rows.length} rows${LQ.langFiltered ? ` (Hebrew only — ${LQ.langFiltered} other-language rows hidden)` : ''} (header row ${hi + 1}). Check the mapping, then pick a range.`, 'good');
 }
+function lqIsHe(v) { return /^he([_-]?il)?$|hebrew|עברית/i.test(String(v == null ? '' : v).trim()); }
 function lqBuildRows() {
   const m = LQ.map, g = (r, i) => (i >= 0 && i < r.length) ? String(r[i]).trim() : '';
-  LQ.rows = LQ.records.map((r, idx) => ({ n: idx + 1, lang: g(r, m.lang), src: g(r, m.src), tgt: g(r, m.tgt), ai: g(r, m.ai), cat: g(r, m.cat), level: g(r, m.level), comment: g(r, m.comment), key: g(r, m.key), valid: g(r, m.valid) }));
+  let rows = LQ.records.map((r) => ({ lang: g(r, m.lang), src: g(r, m.src), tgt: g(r, m.tgt), ai: g(r, m.ai), cat: g(r, m.cat), level: g(r, m.level), comment: g(r, m.comment), key: g(r, m.key), valid: g(r, m.valid) }));
+  // The sync sheets stack he / jv / ko in one tab; default to Hebrew-only when a Language column exists.
+  const wantHe = (($('lq-lang') && $('lq-lang').value) || 'he') === 'he';
+  LQ.langFiltered = 0;
+  if (wantHe && m.lang >= 0) {
+    const before = rows.length;
+    rows = rows.filter((x) => lqIsHe(x.lang));
+    LQ.langFiltered = before - rows.length;
+  }
+  LQ.rows = rows.map((x, idx) => Object.assign({ n: idx + 1 }, x));
 }
 function lqRenderMap() {
   const wrap = $('lq-map'); if (!wrap) return;
@@ -1240,7 +1250,7 @@ function lqLoadSheet() {
   $('lq-input').value = '';                            // xlsx wins; keep the paste box clear
   lqLoad(rows);
   const n = LQ.rows ? LQ.rows.length : 0;
-  info('lq-info', `Tab "${name}" (${LQ.fileName}) · ${n} row(s). Switch tabs above to pick another, or check the mapping below.`, 'good');
+  info('lq-info', `Tab "${name}" (${LQ.fileName}) · ${n} row(s)${LQ.langFiltered ? ` — Hebrew only, ${LQ.langFiltered} other-language rows hidden` : ''}. Switch tabs above to pick another, or check the mapping below.`, 'good');
 }
 // ══════════ SHEET → STARLING WRITE-BACK (Mode 3) ═══════════════════════════
 // Ingest the adjudicated sheet (xlsx/csv/paste), build a queue of Valid=Yes rows
@@ -3294,6 +3304,14 @@ async function init() {
   $('lq-load').addEventListener('click', () => { if (LQ.workbook && !$('lq-input').value.trim()) lqLoadSheet(); else lqLoad(); });
   $('lq-file').addEventListener('change', (e) => lqOnFile(e.target));
   $('lq-tab').addEventListener('change', lqLoadSheet);
+  $('lq-lang').addEventListener('change', () => {
+    if (!LQ.records.length) return;                 // nothing loaded yet
+    LQ.results = {}; LQ.sel = [];
+    lqBuildRows(); lqRenderMap();
+    $('lq-review-card').hidden = true; $('lq-paste-card').hidden = true;
+    $('lq-cards').innerHTML = ''; $('lq-legend').innerHTML = '';
+    info('lq-info', `${LQ.rows.length} row(s)${LQ.langFiltered ? ` (Hebrew only, ${LQ.langFiltered} hidden)` : ''}.`, 'good');
+  });
   $('lq-run').addEventListener('click', lqRun);
   $('lq-valid-mean').addEventListener('change', (e) => { LQ.validYmeansReal = e.target.value === 'real'; if (LQ.sel.length) { lqRenderLegend(); lqRenderCards(); } });
   $('lq-copy-all').addEventListener('click', (e) => lqCopyAll(e.currentTarget));
