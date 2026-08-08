@@ -131,7 +131,10 @@ owners run a global AI translation check that flags a suspected error per string
 Feishu sheets render to a `<canvas>` (cells aren't real HTML), so this **can't** scrape them — you
 **paste** the rows and GPT-5.4 works on the text.
 
-1. Select rows in Feishu (with header) → **Ctrl+C** → paste (or drop a CSV/TSV) → **Load rows**.
+1. Select rows in Feishu (with header) → **Ctrl+C** → paste (or drop a **CSV/TSV**), **or load an
+   `.xlsx`** and pick the **Sheet tab** to adjudicate (e.g. `8.5 sync`; an LQA/sync/he tab is
+   auto-selected) → **Load rows**. The `.xlsx` is read locally by the bundled SheetJS — nothing is
+   uploaded.
 2. Check the auto-detected **column mapping** (skips the merged "AI" banner row; maps *Suggested
    Target by AI* before the plain *Target*).
 3. Type which **segments** to adjudicate — `1, 3, 1-10, 5-8` or `all` — → **Adjudicate with gpt-5.4**.

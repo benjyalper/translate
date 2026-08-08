@@ -949,7 +949,7 @@ async function doDiag() {
 // Feishu sheets render to <canvas> (no DOM cells), so this ingests pasted rows /
 // CSV instead of scraping, then GPT-5.4 decides whether each AI-flagged error is
 // real. Reuses esc/hl/panelCopy and the shared key/model/plural settings.
-const LQ = { header: [], records: [], map: {}, rows: [], sel: [], results: {}, filter: 'all', validYmeansReal: true };
+const LQ = { header: [], records: [], map: {}, rows: [], sel: [], results: {}, filter: 'all', validYmeansReal: true, workbook: null, fileName: '' };
 const LQ_FIELDS = [['src', 'Source (EN)'], ['tgt', 'Current target'], ['ai', 'AI suggested'], ['cat', 'Error type'], ['level', 'Level'], ['comment', 'AI comment'], ['key', 'Key'], ['valid', 'Valid col'], ['lang', 'Language']];
 const LQ_BATCH = 8;
 
@@ -981,14 +981,20 @@ function lqAutoMap(header) {
   map.valid = find(/valid/i);
   return map;
 }
-function lqLoad() {
+function lqLoad(preRows) {
   LQ.results = {}; LQ.sel = [];
-  const text = $('lq-input').value;
-  if (!text.trim()) { info('lq-info', 'Paste rows copied from Feishu, or load a CSV/TSV.', 'err'); return; }
-  const mode = $('lq-delim').value;
-  const delim = mode === 'csv' ? ',' : mode === 'tsv' ? '\t' : (text.indexOf('\t') >= 0 ? '\t' : ',');
-  const rows = lqSplitTable(text, delim).filter((r) => r.length);
-  if (!rows.length) { info('lq-info', 'Nothing parsed — check the format.', 'err'); return; }
+  let rows;
+  if (Array.isArray(preRows)) {                     // xlsx tab → already a 2-D array of cells
+    rows = preRows.filter((r) => Array.isArray(r) && r.length);
+    if (!rows.length) { info('lq-info', 'That sheet tab is empty.', 'err'); return; }
+  } else {
+    const text = $('lq-input').value;
+    if (!text.trim()) { info('lq-info', 'Paste rows copied from Feishu, or load an .xlsx / CSV / TSV.', 'err'); return; }
+    const mode = $('lq-delim').value;
+    const delim = mode === 'csv' ? ',' : mode === 'tsv' ? '\t' : (text.indexOf('\t') >= 0 ? '\t' : ',');
+    rows = lqSplitTable(text, delim).filter((r) => r.length);
+    if (!rows.length) { info('lq-info', 'Nothing parsed — check the format.', 'err'); return; }
+  }
   let hi = rows.findIndex((r) => r.some((c) => /source/i.test(c)) && r.some((c) => /target/i.test(c)));
   if (hi < 0) hi = rows.findIndex((r) => r.some((c) => /source|target|error/i.test(c)));
   if (hi < 0) hi = 0;
@@ -1200,9 +1206,41 @@ function lqCopyStarling(btn) {
 }
 function lqOnFile(input) {
   const f = input.files && input.files[0]; if (!f) return;
+  input.value = '';
+  if (/\.xlsx?$/i.test(f.name)) {                    // Excel workbook → read it, offer a tab picker
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        const wb = XLSX.read(new Uint8Array(r.result), { type: 'array' });
+        LQ.workbook = wb; LQ.fileName = f.name;
+        const sel = $('lq-tab');
+        sel.innerHTML = wb.SheetNames.map((n) => `<option>${esc(n)}</option>`).join('');
+        const pick = wb.SheetNames.find((n) => wbTabIsLqaWithData(wb, n))    // real LQA columns + data
+          || wb.SheetNames.find((n) => /sync|he[_-]?il|hebrew|^he$/i.test(n))
+          || wb.SheetNames[0];
+        sel.value = pick;
+        $('lq-tab-row').hidden = false;
+        lqLoadSheet();
+      } catch (e) { info('lq-info', 'Could not read that .xlsx: ' + ((e && e.message) || e), 'err'); }
+    };
+    r.readAsArrayBuffer(f);
+    return;
+  }
+  LQ.workbook = null; $('lq-tab-row').hidden = true;   // CSV/TSV/TXT → plain-text path (unchanged)
   const r = new FileReader();
   r.onload = () => { $('lq-input').value = r.result; if (/\.csv$/i.test(f.name)) $('lq-delim').value = 'csv'; else if (/\.(tsv|tab)$/i.test(f.name)) $('lq-delim').value = 'tsv'; lqLoad(); };
-  r.readAsText(f); input.value = '';
+  r.readAsText(f);
+}
+// Load the currently-selected xlsx tab into the adjudication queue.
+function lqLoadSheet() {
+  if (!LQ.workbook) return;
+  const name = $('lq-tab').value, ws = LQ.workbook.Sheets[name];
+  if (!ws) { info('lq-info', 'That tab is gone — reload the workbook.', 'err'); return; }
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: false, blankrows: false });
+  $('lq-input').value = '';                            // xlsx wins; keep the paste box clear
+  lqLoad(rows);
+  const n = LQ.rows ? LQ.rows.length : 0;
+  info('lq-info', `Tab "${name}" (${LQ.fileName}) · ${n} row(s). Switch tabs above to pick another, or check the mapping below.`, 'good');
 }
 // ══════════ SHEET → STARLING WRITE-BACK (Mode 3) ═══════════════════════════
 // Ingest the adjudicated sheet (xlsx/csv/paste), build a queue of Valid=Yes rows
@@ -3253,8 +3291,9 @@ async function init() {
   $('lq-model').textContent = $('model').value;
   $('mode-starling').addEventListener('click', () => setMode('starling'));
   $('mode-lqa').addEventListener('click', () => setMode('lqa'));
-  $('lq-load').addEventListener('click', lqLoad);
+  $('lq-load').addEventListener('click', () => { if (LQ.workbook && !$('lq-input').value.trim()) lqLoadSheet(); else lqLoad(); });
   $('lq-file').addEventListener('change', (e) => lqOnFile(e.target));
+  $('lq-tab').addEventListener('change', lqLoadSheet);
   $('lq-run').addEventListener('click', lqRun);
   $('lq-valid-mean').addEventListener('change', (e) => { LQ.validYmeansReal = e.target.value === 'real'; if (LQ.sel.length) { lqRenderLegend(); lqRenderCards(); } });
   $('lq-copy-all').addEventListener('click', (e) => lqCopyAll(e.currentTarget));
