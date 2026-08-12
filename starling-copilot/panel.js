@@ -971,13 +971,13 @@ function lqAutoMap(header) {
   const used = new Set(), map = {};
   const find = (re) => { for (let i = 0; i < header.length; i++) { if (used.has(i)) continue; if (re.test(header[i])) { used.add(i); return i; } } return -1; };
   map.lang = find(/lang|语言|語言/i);
-  map.ai = find(/suggest/i);                                   // "Suggested Target by AI" — claim before plain Target
-  map.tgt = find(/target|译文|譯文/i);
-  map.src = find(/source|原文/i);
+  map.ai = find(/suggest|correct\s*target/i);                  // Feishu "Suggested Target by AI" · XBench/CAT "CorrectTarget" (the proposed fix), claimed before plain Target
+  map.tgt = find(/target|译文|譯文|tgt\s*text|\btgt\b/i);      // "Target" / "TgtText"
+  map.src = find(/source|原文|src\s*text|\bsrc\b/i);           // "Source" / "SrcText"
   map.cat = find(/category|errortype|error\s*type|类型|類型/i);
   map.level = find(/level|severity|等级|等級/i);
   map.comment = find(/comment|说明|說明|备注|備註|reason/i);
-  map.key = find(/^key$|\bkey\b|键|鍵/i);
+  map.key = find(/^keys?$|\bkeys?\b|键|鍵/i);                  // "Key" or "keys"
   map.valid = find(/valid/i);
   return map;
 }
