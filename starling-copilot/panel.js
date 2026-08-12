@@ -1245,6 +1245,40 @@ function lqCopyAgreeFixed(btn) {
   const cell = first ? ('I' + (first.ri + (LQ.hi || 0) + 2)) : 'column I';
   info('lq-paste-info', `Copied ${lines.length} rows · ${nAcc} accepted → I="fixed" / J="agree". Paste at cell ${cell} — it fills columns I and J. Existing column-I notes are kept.`, 'good');
 }
+// Same as above, but writes the values straight into the loaded workbook and downloads it — no
+// pasting. All tabs are preserved; every value is re-derived from the original load snapshot
+// (LQ.records) so re-downloading after changing verdicts stays correct.
+function lqDownloadAgreeFixed(btn) {
+  if (!LQ.workbook) { info('lq-paste-info', 'Load the .xlsx first — download needs the original workbook.', 'err'); return; }
+  if (!LQ.sel.length) { info('lq-paste-info', 'Adjudicate a range first.', 'err'); return; }
+  const name = ($('lq-tab') && $('lq-tab').value) || LQ.workbook.SheetNames[0];
+  const ws = LQ.workbook.Sheets[name];
+  if (!ws) { info('lq-paste-info', 'Sheet tab not found.', 'err'); return; }
+  const iCol = LQ.header.length - 1, jCol = iCol + 1;   // column I (reviewer status) + new column J
+  const hi = LQ.hi || 0;
+  const setCell = (r, c, v) => {
+    const addr = XLSX.utils.encode_cell({ r, c });
+    if (v === '') { if (ws[addr]) ws[addr] = { t: 's', v: '' }; }   // clear (keep blank if never set)
+    else ws[addr] = { t: 's', v: String(v) };
+  };
+  let nAcc = 0;
+  LQ.sel.forEach((n) => {
+    const row = LQ.rows.find((x) => x.n === n), res = LQ.results[n];
+    if (!row) return;
+    const accepted = res ? lqReal(res) : false; if (accepted) nAcc++;
+    const rec = LQ.records[row.ri] || [];
+    const existingI = (rec[iCol] != null) ? String(rec[iCol]).trim() : '';
+    const r = hi + 1 + row.ri;                          // 0-based sheet row of this record
+    setCell(r, iCol, existingI || (accepted ? 'fixed' : ''));   // never overwrite an existing note
+    setCell(r, jCol, accepted ? 'agree' : '');
+  });
+  const range = XLSX.utils.decode_range(ws['!ref']);   // grow the used range to include column J
+  if (jCol > range.e.c) { range.e.c = jCol; ws['!ref'] = XLSX.utils.encode_range(range); }
+  const base = (LQ.fileName || 'lqa').replace(/\.xlsx?$/i, '');
+  const fname = `${base} (I=fixed J=agree).xlsx`;
+  XLSX.writeFile(LQ.workbook, fname);
+  info('lq-paste-info', `⬇ Downloaded "${fname}" — ${nAcc} accepted row(s) marked I="fixed" / J="agree" on tab "${name}". Existing column-I notes kept; other tabs untouched.`, 'good');
+}
 function lqOnFile(input) {
   const f = input.files && input.files[0]; if (!f) return;
   input.value = '';
@@ -3353,6 +3387,7 @@ async function init() {
   $('lq-copy-all').addEventListener('click', (e) => lqCopyAll(e.currentTarget));
   $('lq-copy-starling').addEventListener('click', (e) => lqCopyStarling(e.currentTarget));
   $('lq-copy-agree').addEventListener('click', (e) => lqCopyAgreeFixed(e.currentTarget));
+  $('lq-dl-agree').addEventListener('click', (e) => lqDownloadAgreeFixed(e.currentTarget));
   document.querySelectorAll('#lq-paste-card [data-col]').forEach((b) => b.addEventListener('click', () => lqCopyCol(b.dataset.col, b)));
 
   // Sheet → Starling write-back (Mode 3)
