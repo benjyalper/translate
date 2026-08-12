@@ -51,6 +51,9 @@ body {
 .lqc-vbtn.on { color: #fff; }
 .lqc-vbtn.on:first-child { background: var(--bad); }
 .lqc-vbtn.on:last-child { background: var(--good); }
+.lqc-agree { font: inherit; font-size: 10px; font-weight: 800; padding: 2px 9px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--dim); cursor: pointer; }
+.lqc-agree:hover { color: var(--ink); border-color: var(--good); }
+.lqc-agree.on { background: var(--good); border-color: var(--good); color: #fff; }
 .lqc-ovr { font-size: 9px; font-weight: 700; color: #fbbf24; background: rgba(217,119,6,.18); padding: 1px 6px; border-radius: 5px; }
 .lqc-warn { font-size: 9px; font-weight: 700; color: #fbbf24; background: rgba(217,119,6,.18); padding: 1px 6px; border-radius: 5px; }
 .lqc-key { font-family: ui-monospace, Menlo, monospace; font-size: 9px; color: var(--dim2); margin-left: auto; overflow-wrap: anywhere; max-width: 45%; text-align: right; }

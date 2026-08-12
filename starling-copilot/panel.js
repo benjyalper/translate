@@ -1014,7 +1014,7 @@ function lqLoad(preRows) {
   $('lq-map-card').hidden = false; $('lq-run-card').hidden = false;
   $('lq-review-card').hidden = true; $('lq-paste-card').hidden = true;
   $('lq-cards').innerHTML = ''; $('lq-legend').innerHTML = '';
-  info('lq-info', `Loaded ${LQ.rows.length} rows${LQ.langFiltered ? ` (Hebrew only — ${LQ.langFiltered} other-language rows hidden)` : ''} (header row ${hi + 1}). Check the mapping, then pick a range.`, 'good');
+  info('lq-info', `Loaded ${LQ.rows.length} rows${LQ.langFiltered ? ` (Hebrew only — ${LQ.langFiltered} other-language rows hidden)` : ''}${LQ.lvlFiltered ? ` (${(($('lq-level') && $('lq-level').value) || '')} only — ${LQ.lvlFiltered} other-level rows hidden)` : ''} (header row ${hi + 1}). Check the mapping, then pick a range.`, 'good');
 }
 function lqIsHe(v) { return /^he([_-]?il)?$|hebrew|עברית/i.test(String(v == null ? '' : v).trim()); }
 function lqBuildRows() {
@@ -1027,6 +1027,16 @@ function lqBuildRows() {
     const before = rows.length;
     rows = rows.filter((x) => lqIsHe(x.lang));
     LQ.langFiltered = before - rows.length;
+  }
+  // Optional error-level filter (opt-in): "All" keeps every row (the normal flow); pick e.g.
+  // "minor" to adjudicate only that severity. Matches the Level cell loosely (minor/major/critical).
+  const wantLvl = (($('lq-level') && $('lq-level').value) || 'all').toLowerCase();
+  LQ.lvlFiltered = 0;
+  if (wantLvl !== 'all' && m.level >= 0) {
+    const before = rows.length;
+    const re = new RegExp(wantLvl, 'i');
+    rows = rows.filter((x) => re.test(String(x.level || '')));
+    LQ.lvlFiltered = before - rows.length;
   }
   LQ.rows = rows.map((x, idx) => Object.assign({ n: idx + 1 }, x));
 }
@@ -1109,6 +1119,11 @@ function lqVerdict(r) { const v = r.verdict; if (v === 'valid' || v === 'invalid
 const LQ_CATS = ['Typo', 'Punctuation/Space/Tag/Formatting', 'Grammar and syntax', 'Mistranslation', 'Preferential change', 'Term mismatch', 'Semantic addition', 'Semantic omission', 'Inconsistency'];
 // A "real error to fix" = GPT's call, UNLESS you overrode Valid Yes/No on the card.
 function lqReal(r) { return r.validOverride ? r.validOverride === 'Yes' : lqVerdict(r) !== 'invalid'; }
+// Explicit per-row "Agree" flag (the ✓ Agree button). It drives column J ("agree") in the
+// download / paste-back. Defaults to the accepted verdict (lqReal) so the former flow is
+// unchanged until you click Agree; once set, r.agree wins. Column J = "agree" iff this is true.
+function lqAgreeState(r) { return (r && r.agree != null) ? !!r.agree : lqReal(r); }
+function lqSetAgree(n, on) { const r = LQ.results[n]; if (!r) return; r.agree = on; lqRenderCards(); }
 function lqValidYN(r) { if (r.validOverride) return r.validOverride; return (LQ.validYmeansReal ? lqReal(r) : !lqReal(r)) ? 'Yes' : 'No'; }
 function lqNaturalYN(r) { return (LQ.validYmeansReal ? (lqVerdict(r) !== 'invalid') : (lqVerdict(r) === 'invalid')) ? 'Yes' : 'No'; }
 function lqCountYN(yn) { return LQ.sel.filter((n) => { const r = LQ.results[n]; return r && lqValidYN(r) === yn; }).length; }
@@ -1157,6 +1172,10 @@ function lqCardHtml(n) {
   const vset = `<span class="lqc-vset" title="Valid (Yes/No) — flip it to correct GPT; the paste-back updates">` +
     `<button class="lqc-vbtn${yn === 'Yes' ? ' on' : ''}" type="button" data-set="Yes" data-n="${n}">Yes</button>` +
     `<button class="lqc-vbtn${yn === 'No' ? ' on' : ''}" type="button" data-set="No" data-n="${n}">No</button></span>`;
+  // Explicit Agree toggle → column J "agree" in the download / paste-back. Defaults to the accepted
+  // verdict so the former flow is unchanged; click to include/exclude this row from the "agree" set.
+  const agr = lqAgreeState(res);
+  const agBtn = `<button class="lqc-agree${agr ? ' on' : ''}" type="button" data-agree="${n}" title="Agree with the Correct target — writes &quot;agree&quot; into column J of the downloaded sheet (picked up by Sheet → Starling)">${agr ? '✓ Agreed' : 'Agree'}</button>`;
   const claim = (r.cat || r.comment) ? `<div class="lqc-claim"><b>${esc(r.cat || '')}</b>${r.comment ? ' — ' + esc(r.comment) : ''}</div>` : '';
   const changed = (real && res.corrected && res.corrected !== r.tgt);
   const cat = c.category ? `<div class="lqc-lbl">Category</div><span class="lqc-cat">${esc(c.category)}</span>` : '';
@@ -1169,10 +1188,10 @@ function lqCardHtml(n) {
   acts.push(`<button class="lqc-copy ghost" type="button" data-copy="${esc(yn)}">Copy ${esc(yn)}</button>`);
   if (c.comments) acts.push(`<button class="lqc-copy ghost" type="button" data-copy="${esc(c.comments)}">Copy comment</button>`);
   return `<div class="lqc v-${eff}" data-verdict="${eff}" data-n="${n}">
-    <div class="lqc-top"><span class="lqc-seg">#${n}</span><span class="lqc-badge b-${gv}" title="GPT's call">${gv}</span>${vset}${numWarn}${spWarn}${brWarn}${ovr}${lvl}${keyHtml}</div>
+    <div class="lqc-top"><span class="lqc-seg">#${n}</span><span class="lqc-badge b-${gv}" title="GPT's call">${gv}</span>${vset}${agBtn}${numWarn}${spWarn}${brWarn}${ovr}${lvl}${keyHtml}</div>
     ${r.src ? `<div class="lqc-lbl">Source</div><div class="lqc-src" dir="ltr">${hl(esc(r.src))}</div>` : ''}
     <div class="lqc-lbl">Current target</div><div class="lqc-tgt${changed ? ' old' : ''}" dir="rtl">${hl(esc(r.tgt))}</div>
-    ${r.ai ? `<div class="lqc-lbl">AI suggested</div><div class="lqc-tgt" dir="rtl">${hl(esc(r.ai))}</div>` : ''}
+    ${r.ai ? `<div class="lqc-lbl">${/correct\s*target/i.test((LQ.header[LQ.map.ai] || '')) ? 'Correct target' : 'AI suggested'}</div><div class="lqc-tgt" dir="rtl">${hl(esc(r.ai))}</div>` : ''}
     ${claim}${cat}${finalT}${comment}${rat}
     <div class="lqc-acts">${acts.join('')}</div>
   </div>`;
@@ -1182,6 +1201,7 @@ function lqRenderCards() {
   wrap.innerHTML = LQ.sel.map(lqCardHtml).join('');
   wrap.querySelectorAll('.lqc-copy').forEach((b) => b.addEventListener('click', () => panelCopy(b.getAttribute('data-copy'), b)));
   wrap.querySelectorAll('.lqc-vbtn').forEach((b) => b.addEventListener('click', () => lqSetOverride(+b.dataset.n, b.dataset.set)));
+  wrap.querySelectorAll('.lqc-agree').forEach((b) => b.addEventListener('click', () => lqSetAgree(+b.dataset.agree, !b.classList.contains('on'))));
   lqApplyFilter();
 }
 // Paste-back columns come from LQ.results (exact), not DOM attributes. They map to the
@@ -1232,7 +1252,7 @@ function lqCopyAgreeFixed(btn) {
   let nAcc = 0;
   const lines = LQ.sel.map((n) => {
     const r = LQ.rows.find((x) => x.n === n), res = LQ.results[n];
-    const accepted = res ? lqReal(res) : false;
+    const accepted = res ? lqAgreeState(res) : false;
     if (accepted) nAcc++;
     const rec = r && LQ.records[r.ri];
     const existingI = (rec && rec[iCol] != null) ? String(rec[iCol]).trim() : '';
@@ -1270,10 +1290,13 @@ async function lqDownloadAgreeFixed(btn) {
     if (!xml) throw new Error('sheet xml missing: ' + sheetPath);
     const iCol = LQ.header.length - 1, jCol = iCol + 1, hi = LQ.hi || 0;
     const iMap = {}, jMap = {}; let nAcc = 0, nFixed = 0;
+    // Header for the new column J so the Sheet → Starling section can auto-find the "agree" column
+    // on re-upload. Matches wbAutoMap's XBench branch (/validation feedback|agree|proofread/i).
+    jMap[hi + 1] = 'Validation feedback (from proofreader)';
     LQ.sel.forEach((n) => {
       const row = LQ.rows.find((x) => x.n === n), res = LQ.results[n];
       if (!row) return;
-      const accepted = res ? lqReal(res) : false; if (!accepted) return;
+      const accepted = res ? lqAgreeState(res) : false; if (!accepted) return;
       nAcc++;
       const rec = LQ.records[row.ri] || [];
       const existingI = (rec[iCol] != null) ? String(rec[iCol]).trim() : '';
@@ -1340,7 +1363,7 @@ function lqLoadSheet() {
 // RELOAD — the URL param only applies on a real load), open the task, read the
 // live segment, write the Final Translation, and proofread-confirm that one row.
 // It guards on source-match and shows live-vs-sheet before every write. NEVER submits.
-const WB = { header: [], records: [], map: {}, rows: [], queue: [], filter: 'todo', workbook: null, tabNames: [], engine: 'api', index: new Map(), indexTabs: [], lqa: false, sheetName: '', fileName: '', rawBytes: null };
+const WB = { header: [], records: [], map: {}, rows: [], queue: [], filter: 'todo', workbook: null, tabNames: [], engine: 'api', index: new Map(), indexTabs: [], lqa: false, xbench: false, sheetName: '', fileName: '', rawBytes: null };
 
 // Join normaliser for sheet-source ↔ live-source comparison. The API returns the TRUE
 // characters, and real content uses fullwidth punctuation ("Man United defender｜…") and
@@ -1521,13 +1544,22 @@ function wbIsOldLqaFormat(header) {
   const has = (re) => h.some((x) => re.test(x));
   return has(/suggested translation/) && has(/before translation|lqa comment|validation feedback/);
 }
+// XBench / CAT QA report exported from the ⚖️ Feishu LQA tab with per-card "Agree" (column J).
+// Columns: (lang) | SrcText | TgtText | CorrectTarget | ErrorType | ErrorLevel | ErrorComment |
+// keys | (reviewer status "fixed") | Validation feedback (from proofreader) ← "agree".
+// Writing an agreed row means pushing its CorrectTarget (the fix you agreed to) into Starling.
+function wbIsXbenchReport(header) {
+  const h = header.map((x) => String(x).toLowerCase());
+  const has = (re) => h.some((x) => re.test(x));
+  return has(/src\s*text/) && has(/tgt\s*text/) && has(/correct\s*target/);
+}
 // Is this an adjudicated LQA report at all? Broadened to also recognize the CURRENT TikTok
 // format — a "Valid (Y/N)" column plus a "Final Translation" column (what the linguist fills).
 // Drives WB.lqa (the ✏ Edit note→Column-I area + stamping); mapping still branches on format.
 function wbIsLqaReport(header) {
   const h = header.map((x) => String(x).toLowerCase());
   const has = (re) => h.some((x) => re.test(x));
-  return wbIsOldLqaFormat(header) || (has(/\bvalid\b/) && has(/final translation/));
+  return wbIsOldLqaFormat(header) || wbIsXbenchReport(header) || (has(/\bvalid\b/) && has(/final translation/));
 }
 // True if a workbook tab's own header is an LQA report AND it has at least one data row.
 // Used to auto-select the data tab on load (its name — e.g. "All" — matches no locale pattern).
@@ -1554,6 +1586,17 @@ function wbAutoMap(header) {
     map.note  = map.valid;                                // old template's Column-I note target
     map.lang  = find(/^lang(uage)?$/i);   // exact "Language"/"Lang" only — NOT "Validation feedback (from Language Leads)"
     map.updated = find(/updated on starling/i);           // usually absent on the old template → -1
+    return map;
+  }
+  if (wbIsXbenchReport(header)) {                          // ⚖️ Feishu LQA export → agree in column J
+    map.key   = find(/^keys?$|\bkeys?\b/i);               // "keys"
+    map.src   = find(/src\s*text|^source$|source/i);      // "SrcText"
+    map.tgt   = find(/tgt\s*text|^target$|target/i);      // "TgtText" (the current Hebrew)
+    map.final = find(/correct\s*target/i);                // "CorrectTarget" = the fix you agreed to
+    map.valid = find(/validation feedback|proofread|^agree$|\bagree\b/i);   // column J = "agree"
+    map.note  = map.valid;
+    map.lang  = find(/^lang(uage)?$/i);                   // header-less locale col (A) stays unmapped → he-only file
+    map.updated = -1;
     return map;
   }
   map.key = find(/^key$|\bkey\b|键|鍵/i);
@@ -1593,16 +1636,23 @@ function wbLoad() {
   if (!WB.records.length) { info('wb-info', 'Header found but no data rows below it.', 'err'); return; }
   WB.map = wbAutoMap(WB.header);
   WB.lqa = wbIsLqaReport(WB.header);
+  WB.xbench = wbIsXbenchReport(WB.header);   // ⚖️ Feishu LQA "agree" export → gate on column J
   WB.sheetName = WB.workbook ? (($('wb-tab').value) || WB.tabNames[0]) : '';
   wbBuildRowObjs(); wbRenderMap(); wbBuildIndex();
   $('wb-map-card').hidden = false; $('wb-build-card').hidden = false;
   $('wb-queue-card').hidden = true; $('wb-queue').innerHTML = ''; if ($('wb-log')) $('wb-log').textContent = '';
   if ($('wb-lqa-row')) $('wb-lqa-row').hidden = !WB.lqa;                 // "queue all with a fix" toggle
+  // XBench "agree" export → default to agree-only (queue just the rows you agreed to = column J).
+  // Interior-LQA reports keep the former default (queue every changed row, review each). Either
+  // way the toggle stays, so both flows remain selectable.
+  if (WB.xbench && $('wb-lqa-all')) $('wb-lqa-all').checked = false;
   if ($('wb-export')) $('wb-export').hidden = !(WB.lqa && WB.workbook);  // export needs the original .xlsx
   const idxNote = WB.index.size
     ? ` · cross-tab index: ${WB.index.size} keys from ${WB.indexTabs.join(', ')}`
     : ' · no cross-tab index (paste/CSV input — API engine will match against this tab only)';
-  const lqaNote = WB.lqa ? ' · 📋 LQA report detected — mapped Before→current, Suggested→fix, Column I→"agree".' : '';
+  const lqaNote = WB.xbench
+    ? ' · ⚖️ Feishu LQA export detected — key→keys, fix→CorrectTarget, gating on column J="agree" (untick the box below to queue every row instead).'
+    : (WB.lqa ? ' · 📋 LQA report detected — mapped Before→current, Suggested→fix, Column I→"agree".' : '');
   info('wb-info', `Loaded ${WB.rows.length} rows (header row ${hi + 1})${lqaNote}${idxNote}. Check the mapping, then build the queue.`, 'good');
 }
 function wbBuildRowObjs() {
@@ -3397,7 +3447,16 @@ async function init() {
     lqBuildRows(); lqRenderMap();
     $('lq-review-card').hidden = true; $('lq-paste-card').hidden = true;
     $('lq-cards').innerHTML = ''; $('lq-legend').innerHTML = '';
-    info('lq-info', `${LQ.rows.length} row(s)${LQ.langFiltered ? ` (Hebrew only, ${LQ.langFiltered} hidden)` : ''}.`, 'good');
+    info('lq-info', `${LQ.rows.length} row(s)${LQ.langFiltered ? ` (Hebrew only, ${LQ.langFiltered} hidden)` : ''}${LQ.lvlFiltered ? ` · ${($('lq-level') && $('lq-level').value) || ''} only, ${LQ.lvlFiltered} hidden` : ''}.`, 'good');
+  });
+  $('lq-level').addEventListener('change', () => {
+    if (!LQ.records.length) return;                 // nothing loaded yet
+    LQ.results = {}; LQ.sel = [];
+    lqBuildRows(); lqRenderMap();
+    $('lq-review-card').hidden = true; $('lq-paste-card').hidden = true;
+    $('lq-cards').innerHTML = ''; $('lq-legend').innerHTML = '';
+    const lv = ($('lq-level') && $('lq-level').value) || 'all';
+    info('lq-info', `${LQ.rows.length} row(s)${lv !== 'all' ? ` · ${lv} only${LQ.lvlFiltered ? `, ${LQ.lvlFiltered} hidden` : ''}` : ''}.`, 'good');
   });
   $('lq-run').addEventListener('click', lqRun);
   $('lq-valid-mean').addEventListener('change', (e) => { LQ.validYmeansReal = e.target.value === 'real'; if (LQ.sel.length) { lqRenderLegend(); lqRenderCards(); } });

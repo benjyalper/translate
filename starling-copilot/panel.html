@@ -256,6 +256,13 @@
           <option value="he" selected>Hebrew only (he)</option>
           <option value="all">All languages</option>
         </select>
+        <label class="lbl">Error level <span class="hint">adjudicate only one severity — e.g. minor. Leave on "All" for the normal flow.</span></label>
+        <select id="lq-level">
+          <option value="all" selected>All levels</option>
+          <option value="minor">Minor only</option>
+          <option value="major">Major only</option>
+          <option value="critical">Critical only</option>
+        </select>
         <button id="lq-load" class="btn" style="margin-top:8px">📥 Load rows</button>
         <div id="lq-info" class="info"></div>
       </section>
