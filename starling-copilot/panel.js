@@ -1245,39 +1245,56 @@ function lqCopyAgreeFixed(btn) {
   const cell = first ? ('I' + (first.ri + (LQ.hi || 0) + 2)) : 'column I';
   info('lq-paste-info', `Copied ${lines.length} rows · ${nAcc} accepted → I="fixed" / J="agree". Paste at cell ${cell} — it fills columns I and J. Existing column-I notes are kept.`, 'good');
 }
-// Same as above, but writes the values straight into the loaded workbook and downloads it — no
-// pasting. All tabs are preserved; every value is re-derived from the original load snapshot
-// (LQ.records) so re-downloading after changing verdicts stays correct.
-function lqDownloadAgreeFixed(btn) {
-  if (!LQ.workbook) { info('lq-paste-info', 'Load the .xlsx first — download needs the original workbook.', 'err'); return; }
+// Same as above, but writes the values into the ORIGINAL .xlsx bytes via zip-surgery (inject only
+// columns I and J into the target sheet's XML, copy every other zip entry verbatim) and downloads
+// it. Byte-identical to the original except the injected cells — no full re-serialize, so no
+// _x000d_ newline mangling / lost formatting, and untouched tabs stay untouched. Only ACCEPTED rows
+// are stamped; existing column-I notes are left alone (never injected over).
+async function lqDownloadAgreeFixed(btn) {
+  if (!LQ.rawBytes) { info('lq-paste-info', 'Load the .xlsx first — download needs the original file.', 'err'); return; }
   if (!LQ.sel.length) { info('lq-paste-info', 'Adjudicate a range first.', 'err'); return; }
-  const name = ($('lq-tab') && $('lq-tab').value) || LQ.workbook.SheetNames[0];
-  const ws = LQ.workbook.Sheets[name];
-  if (!ws) { info('lq-paste-info', 'Sheet tab not found.', 'err'); return; }
-  const iCol = LQ.header.length - 1, jCol = iCol + 1;   // column I (reviewer status) + new column J
-  const hi = LQ.hi || 0;
-  const setCell = (r, c, v) => {
-    const addr = XLSX.utils.encode_cell({ r, c });
-    if (v === '') { if (ws[addr]) ws[addr] = { t: 's', v: '' }; }   // clear (keep blank if never set)
-    else ws[addr] = { t: 's', v: String(v) };
-  };
-  let nAcc = 0;
-  LQ.sel.forEach((n) => {
-    const row = LQ.rows.find((x) => x.n === n), res = LQ.results[n];
-    if (!row) return;
-    const accepted = res ? lqReal(res) : false; if (accepted) nAcc++;
-    const rec = LQ.records[row.ri] || [];
-    const existingI = (rec[iCol] != null) ? String(rec[iCol]).trim() : '';
-    const r = hi + 1 + row.ri;                          // 0-based sheet row of this record
-    setCell(r, iCol, existingI || (accepted ? 'fixed' : ''));   // never overwrite an existing note
-    setCell(r, jCol, accepted ? 'agree' : '');
-  });
-  const range = XLSX.utils.decode_range(ws['!ref']);   // grow the used range to include column J
-  if (jCol > range.e.c) { range.e.c = jCol; ws['!ref'] = XLSX.utils.encode_range(range); }
-  const base = (LQ.fileName || 'lqa').replace(/\.xlsx?$/i, '');
-  const fname = `${base} (I=fixed J=agree).xlsx`;
-  XLSX.writeFile(LQ.workbook, fname);
-  info('lq-paste-info', `⬇ Downloaded "${fname}" — ${nAcc} accepted row(s) marked I="fixed" / J="agree" on tab "${name}". Existing column-I notes kept; other tabs untouched.`, 'good');
+  const tabName = ($('lq-tab') && $('lq-tab').value) || (LQ.workbook && LQ.workbook.SheetNames[0]) || '';
+  try {
+    const entries = zipEntries(LQ.rawBytes);
+    const byName = {}; for (const e of entries) byName[e.name] = e;
+    const getText = async (nm) => { const e = byName[nm]; if (!e) return null; const raw = e.method === 0 ? e.cdata : await zipInflateRaw(e.cdata); return new TextDecoder().decode(raw); };
+    const wbx = await getText('xl/workbook.xml'), rels = await getText('xl/_rels/workbook.xml.rels');
+    if (!wbx || !rels) throw new Error('workbook parts missing');
+    const ne = tabName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const ridM = wbx.match(new RegExp('<sheet[^>]*name="' + ne + '"[^>]*r:id="(rId\\d+)"')) || wbx.match(new RegExp('<sheet[^>]*r:id="(rId\\d+)"[^>]*name="' + ne + '"'));
+    if (!ridM) throw new Error('sheet "' + tabName + '" not in workbook.xml');
+    const tgtM = rels.match(new RegExp('Id="' + ridM[1] + '"[^>]*Target="([^"]+)"'));
+    if (!tgtM) throw new Error('sheet relationship not found');
+    const tgt = tgtM[1], sheetPath = tgt.charAt(0) === '/' ? tgt.slice(1) : (tgt.slice(0, 3) === 'xl/' ? tgt : 'xl/' + tgt);
+    let xml = await getText(sheetPath);
+    if (!xml) throw new Error('sheet xml missing: ' + sheetPath);
+    const iCol = LQ.header.length - 1, jCol = iCol + 1, hi = LQ.hi || 0;
+    const iMap = {}, jMap = {}; let nAcc = 0, nFixed = 0;
+    LQ.sel.forEach((n) => {
+      const row = LQ.rows.find((x) => x.n === n), res = LQ.results[n];
+      if (!row) return;
+      const accepted = res ? lqReal(res) : false; if (!accepted) return;
+      nAcc++;
+      const rec = LQ.records[row.ri] || [];
+      const existingI = (rec[iCol] != null) ? String(rec[iCol]).trim() : '';
+      const rowNum = hi + row.ri + 2;                    // 1-based sheet row of this record
+      if (!existingI) { iMap[rowNum] = 'fixed'; nFixed++; }   // only blank I cells — never touch a note
+      jMap[rowNum] = 'agree';
+    });
+    let total = 0;
+    { const r = injectCol(xml, zipColLetter(iCol), iMap); xml = r.xml; total += r.n; }
+    { const r = injectCol(xml, zipColLetter(jCol), jMap); xml = r.xml; total += r.n; }
+    xml = xml.replace(/(<dimension ref="[A-Z]+\d+:)([A-Z]+)(\d+"\s*\/?>)/, (m, a, endCol, b) => zipColGt(zipColLetter(jCol), endCol) ? a + zipColLetter(jCol) + b : m);
+    const nb = new TextEncoder().encode(xml), te = byName[sheetPath];
+    te.usize = nb.length; te.crc = crc32(nb); te.method = 8; te.cdata = await zipDeflateRaw(nb);
+    const out = zipBuild(entries);
+    const base = (LQ.fileName || 'lqa').replace(/\.xlsx?$/i, '');
+    const fname = `${base} (I=fixed J=agree).xlsx`;
+    const url = URL.createObjectURL(new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+    const a = document.createElement('a'); a.href = url; a.download = fname; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    info('lq-paste-info', `⬇ Downloaded "${fname}" — ${nAcc} accepted: J="agree", ${nFixed} newly marked I="fixed" (${total} cells). Byte-identical to the original except columns I/J; notes & other tabs untouched.`, 'good');
+  } catch (e) { info('lq-paste-info', 'Download failed: ' + ((e && e.message) || e), 'err'); }
 }
 function lqOnFile(input) {
   const f = input.files && input.files[0]; if (!f) return;
@@ -1287,7 +1304,7 @@ function lqOnFile(input) {
     r.onload = () => {
       try {
         const wb = XLSX.read(new Uint8Array(r.result), { type: 'array' });
-        LQ.workbook = wb; LQ.fileName = f.name;
+        LQ.workbook = wb; LQ.fileName = f.name; LQ.rawBytes = new Uint8Array(r.result);   // kept for style-preserving zip-surgery download
         const sel = $('lq-tab');
         sel.innerHTML = wb.SheetNames.map((n) => `<option>${esc(n)}</option>`).join('');
         const pick = wb.SheetNames.find((n) => wbTabIsLqaWithData(wb, n))    // real LQA columns + data

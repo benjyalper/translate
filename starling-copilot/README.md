@@ -151,9 +151,10 @@ Feishu sheets render to a `<canvas>` (cells aren't real HTML), so this **can't**
    **⬇ I+J: fixed / agree** writes `fixed` into column **I** and `agree` into column **J** for every
    **accepted** row — a two-column block you paste at the first adjudicated row's column I. Existing
    column-I notes are **preserved** (never overwritten); rejected rows stay blank. **📄 Download sheet
-   (I+J filled)** does the same write straight into the loaded `.xlsx` and downloads it (all tabs
-   kept) — no pasting; values are re-derived from the load snapshot, so re-downloading after changing
-   verdicts stays correct.
+   (I+J filled)** does the same write straight into the original `.xlsx` **via zip-surgery** — it
+   injects only columns I and J into the target sheet's XML and copies every other zip entry verbatim,
+   so the file is **byte-identical to the original except those cells** (all tabs, styles, and
+   embedded newlines intact — no `XLSX.writeFile` re-serialize). No pasting needed.
 
 Only the text columns go to GPT — **never the Feishu doc**. Keep shared-account credentials out.
 
