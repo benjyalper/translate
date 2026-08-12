@@ -3036,11 +3036,15 @@ function brainRefresh() {
   if ($('brain-rules-n')) $('brain-rules-n').textContent = rn;
   if ($('brain-gloss-n')) $('brain-gloss-n').textContent = gn;
   const list = $('brain-list'); if (!list) return;
-  const rowsR = (BRAIN.rules || []).map((r) => `<div class="bl-row"><button class="bl-del" data-kind="rule" data-id="${esc(r.id)}" title="Delete this rule">✕</button><span class="bi-cat">${esc(r.cat || 'misc')}</span><span class="bi-text" dir="auto">${esc(r.text)}</span></div>`).join('');
-  const rowsG = (BRAIN.glossary || []).map((g) => `<div class="bl-row"><button class="bl-del" data-kind="gloss" data-id="${esc(g.id)}" title="Delete this term">✕</button><span class="bi-text"><span dir="ltr">${esc(g.en)}</span> → <span dir="rtl">${esc(g.he)}</span>${g.note ? ` <span class="hint">(${esc(g.note)})</span>` : ''}</span></div>`).join('');
+  const q = (($('brain-search') && $('brain-search').value) || '').trim().toLowerCase();
+  const rMatch = (r) => !q || `${r.cat || ''} ${r.text || ''}`.toLowerCase().includes(q);
+  const gMatch = (g) => !q || `${g.en || ''} ${g.he || ''} ${g.note || ''}`.toLowerCase().includes(q);
+  const rowsR = (BRAIN.rules || []).filter(rMatch).map((r) => `<div class="bl-row"><button class="bl-del" data-kind="rule" data-id="${esc(r.id)}" title="Delete this rule">✕</button><span class="bi-cat">${esc(r.cat || 'misc')}</span><span class="bi-text" dir="auto">${esc(r.text)}</span></div>`).join('');
+  const rowsG = (BRAIN.glossary || []).filter(gMatch).map((g) => `<div class="bl-row"><button class="bl-del" data-kind="gloss" data-id="${esc(g.id)}" title="Delete this term">✕</button><span class="bi-text"><span dir="ltr">${esc(g.en)}</span> → <span dir="rtl">${esc(g.he)}</span>${g.note ? ` <span class="hint">(${esc(g.note)})</span>` : ''}</span></div>`).join('');
   list.innerHTML = (rowsR || rowsG)
     ? `${rowsR ? `<div class="brain-sec">Rules</div>${rowsR}` : ''}${rowsG ? `<div class="brain-sec">Glossary</div>${rowsG}` : ''}`
-    : '<div class="hint">No ingested rules yet — the built-in guide is still fully in effect.</div>';
+    : (q ? `<div class="hint">No rule or term matches “${esc(q)}”.</div>`
+         : '<div class="hint">No ingested rules yet — the built-in guide is still fully in effect.</div>');
   list.querySelectorAll('.bl-del').forEach((b) => b.addEventListener('click', async () => {
     const id = b.getAttribute('data-id'), kind = b.getAttribute('data-kind');
     if (kind === 'rule') BRAIN.rules = BRAIN.rules.filter((r) => String(r.id) !== id);
@@ -3269,6 +3273,7 @@ async function init() {
     tmInfo(TM.enabled ? 'On — remembered wording is applied to matching sources.' : 'Off — memory is kept but not applied to new translations.', '');
   });
   $('tm-search').addEventListener('input', (e) => tmRenderList(e.target.value));
+  $('brain-search').addEventListener('input', brainRefresh);
   if ($('tm-add')) $('tm-add').addEventListener('click', async () => {
     const src = ($('tm-add-src').value || '').trim(), tgt = ($('tm-add-tgt').value || '').trim();
     if (!src || !tgt) { tmInfo('Enter both a source and your target.', 'err'); return; }
