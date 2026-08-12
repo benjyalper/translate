@@ -147,6 +147,10 @@ Feishu sheets render to a `<canvas>` (cells aren't real HTML), so this **can't**
    **Valid** · **Category** (only when Valid=Y) · **Final Translation** (only for valid) · **Updated
    on Starling** (blank; you tick) · **Comments** (invalid reason, deduped). **⬇ Fill all 5 (TSV)**
    copies the whole block; **🐦 Copy valid fixes (Key→JSON)** hands corrections to Starling mode.
+   For **reviewer-status sheets** (e.g. XBench LQA reports with a trailing status column),
+   **⬇ I+J: fixed / agree** writes `fixed` into column **I** and `agree` into column **J** for every
+   **accepted** row — a two-column block you paste at the first adjudicated row's column I. Existing
+   column-I notes are **preserved** (never overwritten); rejected rows stay blank.
 
 Only the text columns go to GPT — **never the Feishu doc**. Keep shared-account credentials out.
 

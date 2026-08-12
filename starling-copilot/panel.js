@@ -1005,6 +1005,7 @@ function lqLoad(preRows) {
   if (hi < 0) hi = rows.findIndex((r) => r.some((c) => /source/i.test(c)) && r.some((c) => /target/i.test(c)));
   if (hi < 0) hi = rows.findIndex((r) => r.some((c) => /source|target|error/i.test(c)));
   if (hi < 0) hi = 0;
+  LQ.hi = hi;                                    // header row index — for pasting back at the right sheet row
   LQ.header = rows[hi].map((c) => String(c).trim());
   LQ.records = rows.slice(hi + 1).filter((r) => r.some((c) => String(c).trim().length));
   if (!LQ.records.length) { info('lq-info', 'Found a header but no data rows below it.', 'err'); return; }
@@ -1018,7 +1019,7 @@ function lqLoad(preRows) {
 function lqIsHe(v) { return /^he([_-]?il)?$|hebrew|עברית/i.test(String(v == null ? '' : v).trim()); }
 function lqBuildRows() {
   const m = LQ.map, g = (r, i) => (i >= 0 && i < r.length) ? String(r[i]).trim() : '';
-  let rows = LQ.records.map((r) => ({ lang: g(r, m.lang), src: g(r, m.src), tgt: g(r, m.tgt), ai: g(r, m.ai), cat: g(r, m.cat), level: g(r, m.level), comment: g(r, m.comment), key: g(r, m.key), valid: g(r, m.valid) }));
+  let rows = LQ.records.map((r, ri) => ({ ri, lang: g(r, m.lang), src: g(r, m.src), tgt: g(r, m.tgt), ai: g(r, m.ai), cat: g(r, m.cat), level: g(r, m.level), comment: g(r, m.comment), key: g(r, m.key), valid: g(r, m.valid) }));
   // The sync sheets stack he / jv / ko in one tab; default to Hebrew-only when a Language column exists.
   const wantHe = (($('lq-lang') && $('lq-lang').value) || 'he') === 'he';
   LQ.langFiltered = 0;
@@ -1220,6 +1221,29 @@ function lqCopyStarling(btn) {
   if (!Object.keys(map).length) { info('lq-paste-info', 'No valid rows with a Key + fix to hand off.', 'err'); return; }
   panelCopy(JSON.stringify(map, null, 2), btn);
   info('lq-paste-info', `Copied ${Object.keys(map).length} Key→fix entries.`, 'good');
+}
+// Two-column paste-back for reviewer status sheets (e.g. XBench LQA reports): for every ACCEPTED
+// row → column I "fixed" + column J "agree". Non-accepted rows keep whatever column I already holds
+// (your prior notes are never clobbered); column J stays blank. Paste the block at the first
+// adjudicated row's column I — it fills I and J together.
+function lqCopyAgreeFixed(btn) {
+  if (!LQ.sel.length) { info('lq-paste-info', 'Adjudicate a range first.', 'err'); return; }
+  const iCol = LQ.header.length - 1;             // the sheet's last column = the reviewer status column (I here)
+  let nAcc = 0;
+  const lines = LQ.sel.map((n) => {
+    const r = LQ.rows.find((x) => x.n === n), res = LQ.results[n];
+    const accepted = res ? lqReal(res) : false;
+    if (accepted) nAcc++;
+    const rec = r && LQ.records[r.ri];
+    const existingI = (rec && rec[iCol] != null) ? String(rec[iCol]).trim() : '';
+    const iVal = existingI || (accepted ? 'fixed' : '');   // never overwrite an existing note
+    const jVal = accepted ? 'agree' : '';
+    return lqTsvCell(iVal) + '\t' + lqTsvCell(jVal);
+  });
+  panelCopy(lines.join('\n'), btn);
+  const first = LQ.rows.find((x) => x.n === LQ.sel[0]);
+  const cell = first ? ('I' + (first.ri + (LQ.hi || 0) + 2)) : 'column I';
+  info('lq-paste-info', `Copied ${lines.length} rows · ${nAcc} accepted → I="fixed" / J="agree". Paste at cell ${cell} — it fills columns I and J. Existing column-I notes are kept.`, 'good');
 }
 function lqOnFile(input) {
   const f = input.files && input.files[0]; if (!f) return;
@@ -3328,6 +3352,7 @@ async function init() {
   $('lq-valid-mean').addEventListener('change', (e) => { LQ.validYmeansReal = e.target.value === 'real'; if (LQ.sel.length) { lqRenderLegend(); lqRenderCards(); } });
   $('lq-copy-all').addEventListener('click', (e) => lqCopyAll(e.currentTarget));
   $('lq-copy-starling').addEventListener('click', (e) => lqCopyStarling(e.currentTarget));
+  $('lq-copy-agree').addEventListener('click', (e) => lqCopyAgreeFixed(e.currentTarget));
   document.querySelectorAll('#lq-paste-card [data-col]').forEach((b) => b.addEventListener('click', () => lqCopyCol(b.dataset.col, b)));
 
   // Sheet → Starling write-back (Mode 3)
