@@ -995,7 +995,14 @@ function lqLoad(preRows) {
     rows = lqSplitTable(text, delim).filter((r) => r.length);
     if (!rows.length) { info('lq-info', 'Nothing parsed — check the format.', 'err'); return; }
   }
-  let hi = rows.findIndex((r) => r.some((c) => /source/i.test(c)) && r.some((c) => /target/i.test(c)));
+  // Find the header row by matching real header *labels* (incl. XBench SrcText/TgtText/CorrectTarget),
+  // anchored to whole cells — otherwise a data row whose ErrorComment mentions "source"/"target"
+  // (e.g. "The source phrase… the target translation…") gets mistaken for the header.
+  const looksHeader = (r) =>
+    r.some((c) => /^\s*(source|src\s*text)\s*$/i.test(c)) &&
+    r.some((c) => /^\s*(target|tgt\s*text|correct\s*target)\s*$/i.test(c));
+  let hi = rows.findIndex(looksHeader);
+  if (hi < 0) hi = rows.findIndex((r) => r.some((c) => /source/i.test(c)) && r.some((c) => /target/i.test(c)));
   if (hi < 0) hi = rows.findIndex((r) => r.some((c) => /source|target|error/i.test(c)));
   if (hi < 0) hi = 0;
   LQ.header = rows[hi].map((c) => String(c).trim());
