@@ -1086,19 +1086,29 @@ async function lqRun() {
   const model = $('model').value, plural = $('plural').checked;
   const byN = {}; LQ.rows.forEach((r) => byN[r.n] = r);
   $('lq-run').disabled = true;
-  let done = 0, failed = 0;
+  let done = 0, failed = 0, firstErr = '';
+  // Some newer models (gpt-5.x) reject a non-default temperature with a 400. Once we see that, drop
+  // the field for the rest of the run instead of failing every batch.
+  let dropTemp = false;
+  const callGpt = async (items) => {
+    const body = { model, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: lqSys(plural) }, { role: 'user', content: 'Adjudicate these items. Return one entry per item with the same "i".\n' + JSON.stringify({ items }) }] };
+    if (!dropTemp) body.temperature = 0.1;
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST', headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    });
+    const data = await resp.json();
+    if (!resp.ok) { const e = new Error(data.error && data.error.message || ('GPT error ' + resp.status)); e.status = resp.status; throw e; }
+    return data;
+  };
   try {
     for (let i = 0; i < sel.length; i += LQ_BATCH) {
       const slice = sel.slice(i, i + LQ_BATCH);
       info('lq-run-info', `⚖️ Adjudicating ${i + 1}–${Math.min(i + LQ_BATCH, sel.length)} of ${sel.length}…`);
       const items = slice.map((n, j) => { const r = byN[n]; return { i: j + 1, src: r.src, tgt: r.tgt, ai_suggested: r.ai, error_type: r.cat, error_level: r.level, error_comment: r.comment }; });
       try {
-        const resp = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST', headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model, temperature: 0.1, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: lqSys(plural) }, { role: 'user', content: 'Adjudicate these items. Return one entry per item with the same "i".\n' + JSON.stringify({ items }) }] })
-        });
-        const data = await resp.json();
-        if (!resp.ok) throw new Error(data.error && data.error.message || ('GPT error ' + resp.status));
+        let data;
+        try { data = await callGpt(items); }
+        catch (e1) { if (!dropTemp && /temperature/i.test(e1.message || '')) { dropTemp = true; data = await callGpt(items); } else throw e1; }
         const arr = JSON.parse(data.choices?.[0]?.message?.content || '{}').out || [];
         arr.forEach((o) => {
           const idx = (o.i | 0) - 1; if (idx < 0 || idx >= slice.length) return; const n = slice[idx]; const row = byN[n];
@@ -1106,13 +1116,13 @@ async function lqRun() {
           LQ.results[n] = { verdict: String(o.verdict || '').toLowerCase().trim(), category: String(o.category || '').trim(), corrected: corrected, reason: o.reason ? String(o.reason) : '', aiDiff: o.ai_diff_reason ? String(o.ai_diff_reason) : '', rationale: o.rationale ? String(o.rationale) : '', confidence: (typeof o.confidence === 'number' ? o.confidence : null) };
           done++;
         });
-      } catch (e) { failed += slice.length; log('lq batch @' + i + ' failed: ' + e.message); }
+      } catch (e) { failed += slice.length; if (!firstErr) firstErr = e.message || String(e); log('lq batch @' + i + ' failed: ' + e.message); }
       if (i + LQ_BATCH < sel.length) await new Promise((r) => setTimeout(r, 250));
     }
     lqDedupeReasons();
     LQ.filter = 'all'; lqRenderLegend(); lqRenderCards();
     $('lq-review-card').hidden = false; $('lq-paste-card').hidden = false;
-    info('lq-run-info', `✅ Adjudicated ${done} · ${lqCountYN('Yes')} valid · ${lqCountYN('No')} invalid` + (failed ? ` · ${failed} failed` : ''), failed ? 'err' : 'good');
+    info('lq-run-info', `✅ Adjudicated ${done} · ${lqCountYN('Yes')} valid · ${lqCountYN('No')} invalid` + (failed ? ` · ${failed} failed — ${firstErr || 'see console'}` : ''), failed ? 'err' : 'good');
   } finally { $('lq-run').disabled = false; }
 }
 function lqVerdict(r) { const v = r.verdict; if (v === 'valid' || v === 'invalid' || v === 'partial') return v; if (v === 'no' || v === 'false' || v === 'n') return 'invalid'; if (v === 'yes' || v === 'true' || v === 'y') return 'valid'; return 'valid'; }
