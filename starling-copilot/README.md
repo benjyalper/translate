@@ -152,15 +152,16 @@ Feishu sheets render to a `<canvas>` (cells aren't real HTML), so this **can't**
    on Starling** (blank; you tick) · **Comments** (invalid reason, deduped). **⬇ Fill all 5 (TSV)**
    copies the whole block; **🐦 Copy valid fixes (Key→JSON)** hands corrections to Starling mode.
    For **reviewer-status sheets** (e.g. XBench LQA reports with a trailing status column),
-   **⬇ Column J: agree** writes `agree` into column **J** for every **agreed** row — a single-column
-   block you paste at the first adjudicated row's column J. **Column I is left untouched** (your
-   reviewer-status notes are never overwritten); non-agreed rows stay blank. **📄 Download sheet
-   (J = agree)** does the same write straight into the original `.xlsx` **via zip-surgery** — it
-   injects only column J into the target sheet's XML and copies every other zip entry verbatim,
-   so the file is **byte-identical to the original except that column** (all tabs, styles, and
-   embedded newlines intact — no `XLSX.writeFile` re-serialize). It also stamps column J's header
-   (`Validation feedback (from proofreader)`) so **↩ Sheet → Starling** can find the agree column on
-   re-upload. No pasting needed.
+   **⬇ Column J: agree** writes `agree` into column **J** and the **agreed Final translation** into
+   column **K** for every **agreed** row — a two-column block you paste at the first adjudicated row's
+   column J. **Column I is left untouched** (your reviewer-status notes are never overwritten);
+   non-agreed rows stay blank in both columns. **📄 Download sheet (J = agree, K = final)** does the
+   same write straight into the original `.xlsx` **via zip-surgery** — it injects only columns J and K
+   into the target sheet's XML and copies every other zip entry verbatim, so the file is
+   **byte-identical to the original except those columns** (all tabs, styles, and embedded newlines
+   intact — no `XLSX.writeFile` re-serialize). It stamps the headers
+   (`Validation feedback (from proofreader)` on J, `Final translation` on K) so **↩ Sheet → Starling**
+   can find the agree column and the vetted final on re-upload. No pasting needed.
 
 **Round-trip into Starling.** The downloaded file is a self-contained hand-off: load it in **↩ Sheet →
 Starling**, which auto-detects the export (**key → `keys`, fix → `CorrectTarget`, gate on column J =
@@ -195,9 +196,10 @@ Key** — the step you were doing by hand.
 
 ### ⚖️ Feishu LQA "agree" export (XBench / CAT QA report)
 A third recognised shape: the `.xlsx` downloaded from **⚖️ Feishu LQA** (headers `SrcText` / `TgtText` /
-`CorrectTarget` / … / `keys`, plus the injected column J `Validation feedback (from proofreader)`). The
-loader detects it and maps **key → `keys`, current → `TgtText`, fix → `CorrectTarget`**, gating on
-**column J = `agree`**. Because the agree marks *are* your adjudication, it defaults the *"queue every
+`CorrectTarget` / … / `keys`, plus the injected columns J `Validation feedback (from proofreader)` and
+K `Final translation`). The loader detects it and maps **key → `keys`, current → `TgtText`, fix →
+`Final translation` (column K, the vetted final — falling back to `CorrectTarget` if K is absent)**,
+gating on **column J = `agree`**. Because the agree marks *are* your adjudication, it defaults the *"queue every
 row"* toggle **off** (agree-only) — untick nothing to write just the rows you agreed to, or re-tick it
 to queue every row with a `CorrectTarget`. Interior-LQA reports keep their former default (queue all,
 review each), so both flows stay selectable.
@@ -516,7 +518,7 @@ Default selectors are **unions** covering both editors; hidden measurement-clone
 | — | **🅜 memoQ** + **🐱 YiCAT** modes (editor-API / Tiptap write-back) |
 | 21 | Edge-whitespace now carried onto the **proposal** too — harvest re-attaches the source's edge space/newline and the panel mirror includes newlines, so copy/tagged/display paths keep the blue `·`/`↵` |
 | 22–35 | Chip vs. string-placeholder split + empty-target fill; numbered wrapping-tag (`O-/C-`) copy-by-hand; markdown **bold** preservation; **🧠 Style Brain** + **🧩 Consistency memory** (with manual-add); Sheet→Starling **sync-sheet** handling (restore-progress on *Updated on Starling*; write-back stamps *Updated on Starling* + *Comments*); **💰 Word count** pay-estimate tab; Feishu LQA **xlsx + tab picker** + **Language filter**; XBench **agree** paste-back (column J) & zip-surgery download |
-| — | *(panel-only, no CS bump)* Feishu LQA **Error-level filter** (opt-in, e.g. *Minor only*) + per-card **Agree** toggle → column **J** `agree`; download stamps J's header so **↩ Sheet → Starling** auto-detects the **XBench "agree" export** (key→`keys`, fix→`CorrectTarget`, gate on J) and queues **agree-only** — every prior flow stays the default/selectable |
+| — | *(panel-only, no CS bump)* Feishu LQA **Error-level filter** (opt-in, e.g. *Minor only*) + per-card **Agree** toggle → column **J** `agree` + column **K** *Final translation* (agreed rows only); column I untouched; download stamps J/K headers so **↩ Sheet → Starling** auto-detects the **XBench "agree" export** (key→`keys`, fix→column K *Final translation*→`CorrectTarget`, gate on J) and queues **agree-only** — every prior flow stays the default/selectable |
 
 ## Test the panel offline
 ```bash

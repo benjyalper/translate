@@ -1250,15 +1250,16 @@ function lqCopyAgreeFixed(btn) {
   if (!LQ.sel.length) { info('lq-paste-info', 'Adjudicate a range first.', 'err'); return; }
   let nAcc = 0;
   const lines = LQ.sel.map((n) => {
-    const res = LQ.results[n];
+    const row = LQ.rows.find((x) => x.n === n), res = LQ.results[n];
     const accepted = res ? lqAgreeState(res) : false;
     if (accepted) nAcc++;
-    return lqTsvCell(accepted ? 'agree' : '');
+    const finalT = accepted ? ((lqCells(res).final) || (row && row.ai) || (row && row.tgt) || '') : '';
+    return lqTsvCell(accepted ? 'agree' : '') + '\t' + lqTsvCell(finalT);   // column J, column K
   });
   panelCopy(lines.join('\n'), btn);
   const first = LQ.rows.find((x) => x.n === LQ.sel[0]);
   const cell = first ? ('J' + (first.ri + (LQ.hi || 0) + 2)) : 'column J';
-  info('lq-paste-info', `Copied ${lines.length} rows · ${nAcc} agreed → J="agree". Paste at cell ${cell}. Column I is left untouched.`, 'good');
+  info('lq-paste-info', `Copied ${lines.length} rows · ${nAcc} agreed → J="agree" + K=final translation. Paste at cell ${cell} — it fills columns J and K. Column I is left untouched.`, 'good');
 }
 // Same as above, but writes the values into the ORIGINAL .xlsx bytes via zip-surgery (inject only
 // columns I and J into the target sheet's XML, copy every other zip entry verbatim) and downloads
@@ -1283,11 +1284,13 @@ async function lqDownloadAgreeFixed(btn) {
     const tgt = tgtM[1], sheetPath = tgt.charAt(0) === '/' ? tgt.slice(1) : (tgt.slice(0, 3) === 'xl/' ? tgt : 'xl/' + tgt);
     let xml = await getText(sheetPath);
     if (!xml) throw new Error('sheet xml missing: ' + sheetPath);
-    const iCol = LQ.header.length - 1, jCol = iCol + 1, hi = LQ.hi || 0;
-    const jMap = {}; let nAcc = 0;
-    // Only column J is written ("agree"). Column I is left completely untouched. The J header lets the
-    // Sheet → Starling section auto-find the agree column on re-upload (wbAutoMap XBench branch).
+    const iCol = LQ.header.length - 1, jCol = iCol + 1, kCol = jCol + 1, hi = LQ.hi || 0;
+    const jMap = {}, kMap = {}; let nAcc = 0;
+    // Columns J ("agree") and K (the agreed Final translation) are the only things written; column I
+    // is left completely untouched. Their headers let the Sheet → Starling section auto-find the agree
+    // column and prefer the vetted final on re-upload (wbAutoMap XBench branch).
     jMap[hi + 1] = 'Validation feedback (from proofreader)';
+    kMap[hi + 1] = 'Final translation';
     LQ.sel.forEach((n) => {
       const row = LQ.rows.find((x) => x.n === n), res = LQ.results[n];
       if (!row) return;
@@ -1295,19 +1298,22 @@ async function lqDownloadAgreeFixed(btn) {
       nAcc++;
       const rowNum = hi + row.ri + 2;                    // 1-based sheet row of this record
       jMap[rowNum] = 'agree';
+      const c = lqCells(res);
+      kMap[rowNum] = c.final || row.ai || row.tgt;       // GPT's adjudicated final; fall back to Correct target, then current
     });
     let total = 0;
     { const r = injectCol(xml, zipColLetter(jCol), jMap); xml = r.xml; total += r.n; }
-    xml = xml.replace(/(<dimension ref="[A-Z]+\d+:)([A-Z]+)(\d+"\s*\/?>)/, (m, a, endCol, b) => zipColGt(zipColLetter(jCol), endCol) ? a + zipColLetter(jCol) + b : m);
+    { const r = injectCol(xml, zipColLetter(kCol), kMap); xml = r.xml; total += r.n; }
+    xml = xml.replace(/(<dimension ref="[A-Z]+\d+:)([A-Z]+)(\d+"\s*\/?>)/, (m, a, endCol, b) => zipColGt(zipColLetter(kCol), endCol) ? a + zipColLetter(kCol) + b : m);
     const nb = new TextEncoder().encode(xml), te = byName[sheetPath];
     te.usize = nb.length; te.crc = crc32(nb); te.method = 8; te.cdata = await zipDeflateRaw(nb);
     const out = zipBuild(entries);
     const base = (LQ.fileName || 'lqa').replace(/\.xlsx?$/i, '');
-    const fname = `${base} (J=agree).xlsx`;
+    const fname = `${base} (J=agree, K=final).xlsx`;
     const url = URL.createObjectURL(new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
     const a = document.createElement('a'); a.href = url; a.download = fname; document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 4000);
-    info('lq-paste-info', `⬇ Downloaded "${fname}" — ${nAcc} agreed → J="agree" (${total} cells). Byte-identical to the original except column J; column I, notes & other tabs untouched.`, 'good');
+    info('lq-paste-info', `⬇ Downloaded "${fname}" — ${nAcc} agreed → J="agree", K=final translation (${total} cells). Byte-identical to the original except columns J/K; column I, notes & other tabs untouched.`, 'good');
   } catch (e) { info('lq-paste-info', 'Download failed: ' + ((e && e.message) || e), 'err'); }
 }
 function lqOnFile(input) {
@@ -1583,7 +1589,8 @@ function wbAutoMap(header) {
     map.key   = find(/^keys?$|\bkeys?\b/i);               // "keys"
     map.src   = find(/src\s*text|^source$|source/i);      // "SrcText"
     map.tgt   = find(/tgt\s*text|^target$|target/i);      // "TgtText" (the current Hebrew)
-    map.final = find(/correct\s*target/i);                // "CorrectTarget" = the fix you agreed to
+    map.final = find(/final translation/i);               // column K = the vetted final (preferred)…
+    if (map.final < 0) map.final = find(/correct\s*target/i);   // …else fall back to "CorrectTarget"
     map.valid = find(/validation feedback|proofread|^agree$|\bagree\b/i);   // column J = "agree"
     map.note  = map.valid;
     map.lang  = find(/^lang(uage)?$/i);                   // header-less locale col (A) stays unmapped → he-only file
