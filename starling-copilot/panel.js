@@ -1662,7 +1662,7 @@ function wbLoad() {
     ? ` · cross-tab index: ${WB.index.size} keys from ${WB.indexTabs.join(', ')}`
     : ' · no cross-tab index (paste/CSV input — API engine will match against this tab only)';
   const lqaNote = WB.xbench
-    ? ' · ⚖️ Feishu LQA export detected — key→keys, fix→CorrectTarget, gating on column J="agree" (untick the box below to queue every row instead).'
+    ? ' · ⚖️ Feishu LQA export detected — key→keys, fix→Final translation (col K, else CorrectTarget), gating on column J="agree" (untick the box below to queue every row instead).'
     : (WB.lqa ? ' · 📋 LQA report detected — mapped Before→current, Suggested→fix, Column I→"agree".' : '');
   info('wb-info', `Loaded ${WB.rows.length} rows (header row ${hi + 1})${lqaNote}${idxNote}. Check the mapping, then build the queue.`, 'good');
 }
@@ -1829,7 +1829,11 @@ function wbColIFilledForKey(key) {
   //     Valid(Y/N) is filled for EVERY adjudicated row (Yes AND No), so it must NOT count as done —
   //     otherwise finishing adjudication makes the whole queue vanish. (bug fixed 2026-08-07)
   //   • old LQA report (no "Updated on Starling") → Column I (the agree/validation column) filled = done.
+  //   • ⚖️ Feishu LQA "agree" export → column J "agree" is the QUEUE GATE ("write this"), NOT a
+  //     done-marker, so it must never count as already-done — else the whole queue is pre-marked done
+  //     and loses its Search/Check/Write actions. Done-ness here comes only from recorded writes.
   const hasUpdated = WB.map.updated != null && WB.map.updated >= 0;
+  if (WB.xbench && !hasUpdated) return false;
   const colDone = hasUpdated ? WB.map.updated : WB.map.valid, colKey = WB.map.key;
   if (!ws || !ws['!ref'] || colDone == null || colDone < 0 || colKey == null || colKey < 0) return false;
   const range = XLSX.utils.decode_range(ws['!ref']);
