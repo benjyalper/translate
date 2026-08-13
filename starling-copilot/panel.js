@@ -952,6 +952,9 @@ async function doDiag() {
 const LQ = { header: [], records: [], map: {}, rows: [], sel: [], results: {}, filter: 'all', validYmeansReal: true, workbook: null, fileName: '' };
 const LQ_FIELDS = [['src', 'Source (EN)'], ['tgt', 'Current target'], ['ai', 'AI suggested'], ['cat', 'Error type'], ['level', 'Level'], ['comment', 'AI comment'], ['key', 'Key'], ['valid', 'Valid col'], ['lang', 'Language']];
 const LQ_BATCH = 8;
+// Learn-from-Starling harvest: pairs per distill call, and a cap on unique pairs sent to GPT.
+const HV_BATCH = 40, HV_CAP = 200;
+let HV = { pairs: [], taskId: '', taskName: '' };
 
 // RFC4180-ish parser — survives quoted, multi-line cells (Feishu Source spans lines).
 function lqSplitTable(text, delim) {
@@ -3246,7 +3249,7 @@ function brainRenderReview() {
 
 async function brainMerge() {
   if (!brainProposal) return;
-  const src = ($('brain-input').value.trim().slice(0, 48) || 'pasted doc').replace(/\s+/g, ' ');
+  const src = (brainProposal.sourceLabel || ($('brain-input').value.trim().slice(0, 48) || 'pasted doc')).replace(/\s+/g, ' ');
   const now = Date.now();
   const addR = brainProposal.rules.filter((x) => x.accept).concat(brainProposal.conflicts.filter((x) => x.accept));
   for (const x of addR) BRAIN.rules.push({ id: brainUid(), cat: x.cat || 'misc', text: x.text, source: src, ts: now });
@@ -3259,6 +3262,101 @@ async function brainMerge() {
   const n = addR.length + addG.length;
   brainProposal = null; $('brain-review').hidden = true; $('brain-input').value = ''; brainRefresh();
   brainInfo(`Merged ${n} item(s). Brain now has ${BRAIN.rules.length} rules · ${BRAIN.glossary.length} terms — active on the next Run.`, 'good');
+}
+
+// ---- LEARN FROM STARLING: harvest a submitted task → memory + distilled brain ----
+// Reads a task's segments via the page's window.__wb.apiTask (same-origin, your logged-in
+// session — no credentials handled here), keeps only proofread-confirmed pairs (status 3 =
+// the approved final, the source of truth), and (a) feeds them verbatim to Consistency memory
+// and/or (b) distills generalizable rules/terms — routed through the SAME review/merge flow,
+// with brain conflicts surfaced as decision tickets. No content.js change: apiTask already exists.
+function hvInfo(m, k) { info('hv-info', m, k); }
+function hvExtractId(s) { const m = String(s || '').match(/taskid=(\d+)/i) || String(s || '').match(/\b(\d{5,})\b/); return m ? m[1] : ''; }
+async function hvHarvest() {
+  let id = hvExtractId($('hv-task').value) || $('hv-task').value.trim();
+  if (!id) { try { const t = await wbActiveTab(); id = hvExtractId(t && t.url); } catch (e) {} }
+  if (!id) { hvInfo('Open a Starling task (its URL has taskid=…), or paste a task id / editor URL.', 'err'); return; }
+  $('hv-harvest').disabled = true; hvInfo('Reading task ' + id + '…');
+  try {
+    const res = await wbCall('API_TASK', { taskId: id });
+    if (!res || !res.ok) throw new Error((res && res.error) || 'read failed');
+    const rows = res.rows || [];
+    const pairs = [], seen = new Set();
+    let confirmed = 0;
+    for (const r of rows) {
+      if (r.status !== 3) continue;                 // proofread-confirmed only
+      confirmed++;
+      const src = String(r.source || '').trim(), tgt = String(r.target || '').trim();
+      if (!src || !tgt) continue;
+      const dk = src + '' + tgt; if (seen.has(dk)) continue; seen.add(dk);   // de-dupe identical pairs
+      pairs.push({ src, tgt, key: r.key || '' });
+    }
+    HV = { pairs, taskId: id, taskName: res.taskName || ('task ' + id) };
+    if (!pairs.length) { $('hv-actions').hidden = true; hvInfo(`Read ${rows.length} segments · ${confirmed} confirmed — none had both a source and target to learn from.`, 'err'); return; }
+    $('hv-actions').hidden = false;
+    hvInfo(`Harvested ${pairs.length} confirmed pair(s) (of ${rows.length} segments). Add them to memory, or distill rules & terms.`, 'good');
+  } catch (e) { $('hv-actions').hidden = true; hvInfo('Harvest failed: ' + (e.message || e), 'err'); }
+  finally { $('hv-harvest').disabled = false; }
+}
+async function hvToMemory() {
+  if (!HV.pairs.length) { hvInfo('Harvest a task first.', 'err'); return; }
+  let n = 0;
+  for (const p of HV.pairs) { if (tmRecordOne(p.src, p.tgt)) n++; }
+  await tmSave(); tmRefresh();
+  hvInfo(`Added ${n} pair(s) to Consistency memory (now ${tmCount()} strings). Approved wording auto-fills on matching sources.`, 'good');
+}
+function hvSys() {
+  return 'You learn TikTok Hebrew (he-IL) localization conventions from APPROVED en→he translation pairs — the submitted, proofread source of truth. Infer GENERALIZABLE, actionable conventions a translator/proofreader should reuse across future tasks: term mappings, register/tone (e.g. singular gender-neutral slash form vs plural), punctuation, placeholder/tag handling, brand casing. ' +
+    'Output COMPACT rules (≤ ~30 words each, imperative and specific), each categorized as one of: ' + BRAIN_CATS.join(' | ') + '. Put exact recurring EN→HE term equivalences in "glossary" (with a short "note" — the register or that it recurs). ' +
+    'Extract ONLY high-confidence patterns the pairs actually demonstrate — do NOT invent generic localization common sense, and do NOT restate anything already covered by the EXISTING BRAIN. ' +
+    'If a pattern the pairs demonstrate CONTRADICTS an existing brain rule or term, DO NOT silently override it: put it in "conflicts" with "conflictsWith" naming the clashing rule/term and cite the evidence from the pairs. ' +
+    'Keep Hebrew in Hebrew; never translate the rule text itself. Return ONLY JSON: {"rules":[{"cat":"…","text":"…"}],"glossary":[{"en":"…","he":"…","note":"…"}],"conflicts":[{"cat":"…","text":"…","conflictsWith":"…"}]}.';
+}
+async function hvDistill() {
+  const key = await store.get('key', '');
+  if (!key) { hvInfo('Add your OpenAI key in Settings first.', 'err'); $('settings').open = true; return; }
+  if (!HV.pairs.length) { hvInfo('Harvest a task first.', 'err'); return; }
+  const model = $('model').value;
+  const capped = HV.pairs.slice(0, HV_CAP);
+  const existing = ((BRAIN.rules || []).map((r) => '- [' + r.cat + '] ' + r.text).join('\n') + '\n' + (BRAIN.glossary || []).map((g) => '- "' + g.en + '" → "' + g.he + '"').join('\n')).trim();
+  const sys = hvSys();
+  const agg = { rules: [], glossary: [], conflicts: [] };
+  $('hv-distill').disabled = true; let dropTemp = false;
+  try {
+    for (let i = 0; i < capped.length; i += HV_BATCH) {
+      const chunk = capped.slice(i, i + HV_BATCH);
+      hvInfo(`Distilling ${i + 1}–${Math.min(i + HV_BATCH, capped.length)} of ${capped.length}…`);
+      const doc = chunk.map((p, j) => `${j + 1}. EN: ${p.src}\n   HE: ${p.tgt}`).join('\n');
+      const user = 'EXISTING BRAIN (already enforced — do NOT repeat; contradictions → "conflicts"):\n' + (existing || '(only the built-in base guide so far)') + '\n\nAPPROVED en→he PAIRS (source of truth):\n' + doc;
+      const callGpt = async () => {
+        const body = { model, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: sys }, { role: 'user', content: user }] };
+        if (!dropTemp) body.temperature = 0.1;
+        const r = await fetch('https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const data = await r.json();
+        if (!r.ok) throw new Error((data.error && data.error.message) || ('HTTP ' + r.status));
+        return data;
+      };
+      let data;
+      try { data = await callGpt(); }
+      catch (e1) { if (!dropTemp && /temperature/i.test(e1.message || '')) { dropTemp = true; data = await callGpt(); } else throw e1; }
+      let o = {}; try { o = JSON.parse(data.choices[0].message.content); } catch (e) { continue; }
+      (o.rules || []).forEach((x) => agg.rules.push(x));
+      (o.glossary || []).forEach((x) => agg.glossary.push(x));
+      (o.conflicts || []).forEach((x) => agg.conflicts.push(x));
+      if (i + HV_BATCH < capped.length) await new Promise((r) => setTimeout(r, 200));
+    }
+    // Reconcile across batches: dedupe candidate rules/terms/conflicts.
+    const seenR = new Set(), rules = [];
+    for (const x of agg.rules) { const t = String(x.text || '').trim(); const kk = (x.cat || '') + '|' + wbNorm(t).toLowerCase(); if (!t || seenR.has(kk)) continue; seenR.add(kk); rules.push({ cat: x.cat || 'misc', text: t, accept: true }); }
+    const seenG = new Set(), glossary = [];
+    for (const x of agg.glossary) { const en = String(x.en || '').trim(), he = String(x.he || '').trim(); if (!en || !he) continue; const kk = en.toLowerCase(); if (seenG.has(kk)) continue; seenG.add(kk); glossary.push({ en, he, note: String(x.note || '').trim(), accept: true }); }
+    const seenC = new Set(), conflicts = [];
+    for (const x of agg.conflicts) { const t = String(x.text || '').trim(); const kk = wbNorm(t).toLowerCase(); if (!t || seenC.has(kk)) continue; seenC.add(kk); conflicts.push({ cat: x.cat || 'misc', text: t, conflictsWith: String(x.conflictsWith || '').trim(), accept: false }); }
+    brainProposal = { rules, glossary, conflicts, sourceLabel: ('harvested: ' + HV.taskName).slice(0, 60) };
+    brainRenderReview(); $('brain-card').open = true; $('brain-review').scrollIntoView({ block: 'nearest' });
+    hvInfo(`Distilled ${rules.length} rule(s) · ${glossary.length} term(s)${conflicts.length ? ` · ⚠ ${conflicts.length} conflict ticket(s)` : ''} from ${capped.length} pair(s) — review & merge in the brain panel above.`, 'good');
+  } catch (e) { hvInfo('Distill failed: ' + (e.message || e), 'err'); }
+  finally { $('hv-distill').disabled = false; }
 }
 
 async function brainGrab() {
@@ -3376,6 +3474,9 @@ async function init() {
   await brainLoad(); brainRefresh();
   $('brain-distill').addEventListener('click', brainDistill);
   $('brain-grab').addEventListener('click', brainGrab);
+  if ($('hv-harvest')) $('hv-harvest').addEventListener('click', hvHarvest);
+  if ($('hv-to-mem')) $('hv-to-mem').addEventListener('click', hvToMemory);
+  if ($('hv-distill')) $('hv-distill').addEventListener('click', hvDistill);
   $('brain-export').addEventListener('click', brainExport);
   $('brain-import').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) brainImport(f); e.target.value = ''; });
   $('brain-clear').addEventListener('click', async () => {

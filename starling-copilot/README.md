@@ -426,6 +426,17 @@ re-explaining them each run.
 - **Import / export:** load a `.json` of the same shape to bulk-add (e.g. the duration-plural pack),
   or export the current brain.
 - **Applied** via `brainText()`, which serializes the brain into the system prompt for each card.
+- **📚 Learn from a Starling task** (Style-Brain block): open a **submitted** task and **⬇ Harvest** —
+  it reads every segment via `window.__wb.apiTask` (same-origin, your logged-in session) and keeps only
+  **proofread-confirmed** pairs (`status === 3`), the approved source of truth. Two actions: **➕ Add
+  pairs to memory** drops them straight into Consistency memory (exact, no GPT), and **🧠 Distill rules
+  & terms** batches the pairs through GPT (`HV_BATCH`/`HV_CAP`), extrapolating generalizable rules,
+  glossary terms, and tone — fed your existing brain so it won't repeat what's covered, and routing any
+  pattern that **contradicts** the brain into the **conflicts** bucket as a decision ticket (unticked).
+  Everything lands in the normal review→merge UI (`brainProposal` → `brainMerge`), tagged
+  `source: harvested: <taskName>`; nothing overwrites the brain without your approval. Needs no
+  `content.js` change — `apiTask` was already exposed. *(v1 = one open task; bulk over the my-task list
+  is the planned next step.)*
 
 ## 🧩 Consistency memory (source→target TM)
 
@@ -518,6 +529,8 @@ Default selectors are **unions** covering both editors; hidden measurement-clone
 | — | **🅜 memoQ** + **🐱 YiCAT** modes (editor-API / Tiptap write-back) |
 | 21 | Edge-whitespace now carried onto the **proposal** too — harvest re-attaches the source's edge space/newline and the panel mirror includes newlines, so copy/tagged/display paths keep the blue `·`/`↵` |
 | 22–35 | Chip vs. string-placeholder split + empty-target fill; numbered wrapping-tag (`O-/C-`) copy-by-hand; markdown **bold** preservation; **🧠 Style Brain** + **🧩 Consistency memory** (with manual-add); Sheet→Starling **sync-sheet** handling (restore-progress on *Updated on Starling*; write-back stamps *Updated on Starling* + *Comments*); **💰 Word count** pay-estimate tab; Feishu LQA **xlsx + tab picker** + **Language filter**; XBench **agree** paste-back (column J) & zip-surgery download |
+| — | *(panel-only, no CS bump)* **📚 Learn from a Starling task** — harvest a submitted task's proofread-confirmed pairs (`apiTask`, status 3) → add to Consistency memory + GPT-distill rules/terms/tone into the brain's review→merge flow, with brain conflicts raised as decision tickets |
+| — | *(panel-only, no CS bump)* Feishu LQA **run errors surfaced** + auto-retry without `temperature` when a model rejects it |
 | — | *(panel-only, no CS bump)* Feishu LQA **Error-level filter** (opt-in, e.g. *Minor only*) + per-card **Agree** toggle → column **J** `agree` + column **K** *Final translation* (agreed rows only); column I untouched; download stamps J/K headers so **↩ Sheet → Starling** auto-detects the **XBench "agree" export** (key→`keys`, fix→column K *Final translation*→`CorrectTarget`, gate on J) and queues **agree-only** — every prior flow stays the default/selectable |
 
 ## Test the panel offline

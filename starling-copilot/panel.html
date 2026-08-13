@@ -76,6 +76,19 @@
       </div>
       <div id="brain-info" class="info"></div>
       <div id="brain-review" class="brain-review" hidden></div>
+      <details class="sub" id="brain-harvest">
+        <summary>📚 Learn from a Starling task <span class="hint">— harvest approved translations</span></summary>
+        <p class="hint">Open a <b>submitted</b> task in Starling, then Harvest. Its proofread-confirmed source→target pairs are the source of truth: they go straight into <b>Consistency memory</b>, and can be distilled into new brain rules/terms. Anything that <b>conflicts</b> with your existing brain is raised as a decision ticket — nothing overwrites the brain without your review.</p>
+        <div class="row" style="gap:6px;margin-top:6px">
+          <input id="hv-task" type="text" placeholder="task id or editor URL — leave blank to use the open task" dir="ltr" style="flex:1;min-width:160px" />
+          <button id="hv-harvest" class="btn sm">⬇ Harvest</button>
+        </div>
+        <div id="hv-info" class="info"></div>
+        <div id="hv-actions" class="row" hidden style="gap:6px;margin-top:6px">
+          <button id="hv-to-mem" class="btn sm">➕ Add pairs to memory</button>
+          <button id="hv-distill" class="btn sm">🧠 Distill rules &amp; terms (review)</button>
+        </div>
+      </details>
       <details class="sub" id="brain-manual">
         <summary>➕ Add a rule / term manually</summary>
         <p class="hint">Type a rule (pick a category) or an EN→HE term and it's merged straight into the brain — no GPT, no doc needed. Active on the next Run.</p>
