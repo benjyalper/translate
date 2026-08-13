@@ -1242,28 +1242,23 @@ function lqCopyStarling(btn) {
   panelCopy(JSON.stringify(map, null, 2), btn);
   info('lq-paste-info', `Copied ${Object.keys(map).length} Key→fix entries.`, 'good');
 }
-// Two-column paste-back for reviewer status sheets (e.g. XBench LQA reports): for every ACCEPTED
-// row → column I "fixed" + column J "agree". Non-accepted rows keep whatever column I already holds
-// (your prior notes are never clobbered); column J stays blank. Paste the block at the first
-// adjudicated row's column I — it fills I and J together.
+// Single-column paste-back for reviewer status sheets (e.g. XBench LQA reports): for every AGREED
+// row → column J "agree". Non-agreed rows stay blank. Column I is left completely untouched (your
+// prior reviewer-status notes are never clobbered). Paste the block at the first adjudicated row's
+// column J.
 function lqCopyAgreeFixed(btn) {
   if (!LQ.sel.length) { info('lq-paste-info', 'Adjudicate a range first.', 'err'); return; }
-  const iCol = LQ.header.length - 1;             // the sheet's last column = the reviewer status column (I here)
   let nAcc = 0;
   const lines = LQ.sel.map((n) => {
-    const r = LQ.rows.find((x) => x.n === n), res = LQ.results[n];
+    const res = LQ.results[n];
     const accepted = res ? lqAgreeState(res) : false;
     if (accepted) nAcc++;
-    const rec = r && LQ.records[r.ri];
-    const existingI = (rec && rec[iCol] != null) ? String(rec[iCol]).trim() : '';
-    const iVal = existingI || (accepted ? 'fixed' : '');   // never overwrite an existing note
-    const jVal = accepted ? 'agree' : '';
-    return lqTsvCell(iVal) + '\t' + lqTsvCell(jVal);
+    return lqTsvCell(accepted ? 'agree' : '');
   });
   panelCopy(lines.join('\n'), btn);
   const first = LQ.rows.find((x) => x.n === LQ.sel[0]);
-  const cell = first ? ('I' + (first.ri + (LQ.hi || 0) + 2)) : 'column I';
-  info('lq-paste-info', `Copied ${lines.length} rows · ${nAcc} accepted → I="fixed" / J="agree". Paste at cell ${cell} — it fills columns I and J. Existing column-I notes are kept.`, 'good');
+  const cell = first ? ('J' + (first.ri + (LQ.hi || 0) + 2)) : 'column J';
+  info('lq-paste-info', `Copied ${lines.length} rows · ${nAcc} agreed → J="agree". Paste at cell ${cell}. Column I is left untouched.`, 'good');
 }
 // Same as above, but writes the values into the ORIGINAL .xlsx bytes via zip-surgery (inject only
 // columns I and J into the target sheet's XML, copy every other zip entry verbatim) and downloads
@@ -1289,34 +1284,30 @@ async function lqDownloadAgreeFixed(btn) {
     let xml = await getText(sheetPath);
     if (!xml) throw new Error('sheet xml missing: ' + sheetPath);
     const iCol = LQ.header.length - 1, jCol = iCol + 1, hi = LQ.hi || 0;
-    const iMap = {}, jMap = {}; let nAcc = 0, nFixed = 0;
-    // Header for the new column J so the Sheet → Starling section can auto-find the "agree" column
-    // on re-upload. Matches wbAutoMap's XBench branch (/validation feedback|agree|proofread/i).
+    const jMap = {}; let nAcc = 0;
+    // Only column J is written ("agree"). Column I is left completely untouched. The J header lets the
+    // Sheet → Starling section auto-find the agree column on re-upload (wbAutoMap XBench branch).
     jMap[hi + 1] = 'Validation feedback (from proofreader)';
     LQ.sel.forEach((n) => {
       const row = LQ.rows.find((x) => x.n === n), res = LQ.results[n];
       if (!row) return;
       const accepted = res ? lqAgreeState(res) : false; if (!accepted) return;
       nAcc++;
-      const rec = LQ.records[row.ri] || [];
-      const existingI = (rec[iCol] != null) ? String(rec[iCol]).trim() : '';
       const rowNum = hi + row.ri + 2;                    // 1-based sheet row of this record
-      if (!existingI) { iMap[rowNum] = 'fixed'; nFixed++; }   // only blank I cells — never touch a note
       jMap[rowNum] = 'agree';
     });
     let total = 0;
-    { const r = injectCol(xml, zipColLetter(iCol), iMap); xml = r.xml; total += r.n; }
     { const r = injectCol(xml, zipColLetter(jCol), jMap); xml = r.xml; total += r.n; }
     xml = xml.replace(/(<dimension ref="[A-Z]+\d+:)([A-Z]+)(\d+"\s*\/?>)/, (m, a, endCol, b) => zipColGt(zipColLetter(jCol), endCol) ? a + zipColLetter(jCol) + b : m);
     const nb = new TextEncoder().encode(xml), te = byName[sheetPath];
     te.usize = nb.length; te.crc = crc32(nb); te.method = 8; te.cdata = await zipDeflateRaw(nb);
     const out = zipBuild(entries);
     const base = (LQ.fileName || 'lqa').replace(/\.xlsx?$/i, '');
-    const fname = `${base} (I=fixed J=agree).xlsx`;
+    const fname = `${base} (J=agree).xlsx`;
     const url = URL.createObjectURL(new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
     const a = document.createElement('a'); a.href = url; a.download = fname; document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 4000);
-    info('lq-paste-info', `⬇ Downloaded "${fname}" — ${nAcc} accepted: J="agree", ${nFixed} newly marked I="fixed" (${total} cells). Byte-identical to the original except columns I/J; notes & other tabs untouched.`, 'good');
+    info('lq-paste-info', `⬇ Downloaded "${fname}" — ${nAcc} agreed → J="agree" (${total} cells). Byte-identical to the original except column J; column I, notes & other tabs untouched.`, 'good');
   } catch (e) { info('lq-paste-info', 'Download failed: ' + ((e && e.message) || e), 'err'); }
 }
 function lqOnFile(input) {

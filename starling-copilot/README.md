@@ -152,12 +152,12 @@ Feishu sheets render to a `<canvas>` (cells aren't real HTML), so this **can't**
    on Starling** (blank; you tick) · **Comments** (invalid reason, deduped). **⬇ Fill all 5 (TSV)**
    copies the whole block; **🐦 Copy valid fixes (Key→JSON)** hands corrections to Starling mode.
    For **reviewer-status sheets** (e.g. XBench LQA reports with a trailing status column),
-   **⬇ I+J: fixed / agree** writes `fixed` into column **I** and `agree` into column **J** for every
-   **agreed** row — a two-column block you paste at the first adjudicated row's column I. Existing
-   column-I notes are **preserved** (never overwritten); non-agreed rows stay blank. **📄 Download sheet
-   (I+J filled)** does the same write straight into the original `.xlsx` **via zip-surgery** — it
-   injects only columns I and J into the target sheet's XML and copies every other zip entry verbatim,
-   so the file is **byte-identical to the original except those cells** (all tabs, styles, and
+   **⬇ Column J: agree** writes `agree` into column **J** for every **agreed** row — a single-column
+   block you paste at the first adjudicated row's column J. **Column I is left untouched** (your
+   reviewer-status notes are never overwritten); non-agreed rows stay blank. **📄 Download sheet
+   (J = agree)** does the same write straight into the original `.xlsx` **via zip-surgery** — it
+   injects only column J into the target sheet's XML and copies every other zip entry verbatim,
+   so the file is **byte-identical to the original except that column** (all tabs, styles, and
    embedded newlines intact — no `XLSX.writeFile` re-serialize). It also stamps column J's header
    (`Validation feedback (from proofreader)`) so **↩ Sheet → Starling** can find the agree column on
    re-upload. No pasting needed.
@@ -515,7 +515,7 @@ Default selectors are **unions** covering both editors; hidden measurement-clone
 | — | **🌐 Crowdin mode** on API v2 (background proxy, detect/harvest/propose/enter) |
 | — | **🅜 memoQ** + **🐱 YiCAT** modes (editor-API / Tiptap write-back) |
 | 21 | Edge-whitespace now carried onto the **proposal** too — harvest re-attaches the source's edge space/newline and the panel mirror includes newlines, so copy/tagged/display paths keep the blue `·`/`↵` |
-| 22–35 | Chip vs. string-placeholder split + empty-target fill; numbered wrapping-tag (`O-/C-`) copy-by-hand; markdown **bold** preservation; **🧠 Style Brain** + **🧩 Consistency memory** (with manual-add); Sheet→Starling **sync-sheet** handling (restore-progress on *Updated on Starling*; write-back stamps *Updated on Starling* + *Comments*); **💰 Word count** pay-estimate tab; Feishu LQA **xlsx + tab picker** + **Language filter**; XBench **I+J fixed/agree** paste-back & zip-surgery download |
+| 22–35 | Chip vs. string-placeholder split + empty-target fill; numbered wrapping-tag (`O-/C-`) copy-by-hand; markdown **bold** preservation; **🧠 Style Brain** + **🧩 Consistency memory** (with manual-add); Sheet→Starling **sync-sheet** handling (restore-progress on *Updated on Starling*; write-back stamps *Updated on Starling* + *Comments*); **💰 Word count** pay-estimate tab; Feishu LQA **xlsx + tab picker** + **Language filter**; XBench **agree** paste-back (column J) & zip-surgery download |
 | — | *(panel-only, no CS bump)* Feishu LQA **Error-level filter** (opt-in, e.g. *Minor only*) + per-card **Agree** toggle → column **J** `agree`; download stamps J's header so **↩ Sheet → Starling** auto-detects the **XBench "agree" export** (key→`keys`, fix→`CorrectTarget`, gate on J) and queues **agree-only** — every prior flow stays the default/selectable |
 
 ## Test the panel offline
