@@ -246,7 +246,7 @@ function onXliffFile(input) {
       const all = parseXliff(r.result).filter((s) => s.seg !== '' && (s.src || s.tgt));
       if (!all.length) { info('harvest-info', 'No <trans-unit> segments found in that file.', 'err'); return; }
       const sel = parseSegSel($('seg-filter').value);
-      const segs = sel ? all.filter((s) => sel(s.seg)) : all;
+      const segs = sel ? all.filter((s) => sel(s)) : all;
       if (sel && !segs.length) { info('harvest-info', `No segments matched "${$('seg-filter').value.trim()}" (file has ${all.length}). Clear the box for all.`, 'err'); return; }
       state.segments = segs;
       const filtered = sel && segs.length !== all.length;
@@ -504,19 +504,36 @@ async function gptBatch(items, mode, key, model, plural, extraSys, tiktok) {
 }
 
 // ---- actions ---------------------------------------------------------------
-// Parse the "Only segments" box → a matcher fn, or null for ALL. Accepts "8",
-// "10-20", "5,8,12", "3-6,10". Junk tokens are ignored; empty/unparseable → all.
+// Parse the "Only segments" box → a matcher fn over a SEGMENT OBJECT, or null for ALL.
+//  • Numbers/ranges: "8", "10-20", "5,8,12", "3-6,10", "5 8 12".
+//  • Term(s): any non-numeric token is a case-insensitive text match against the segment's
+//    source / target / key (e.g. "Family Pairing" — harvest only segments mentioning it).
+// Split on COMMAS first so multi-word terms stay intact; quotes optional. Mix freely:
+// "1-4, Family Pairing, 6". Empty / "all" → null (everything).
 function parseSegSel(str) {
   const s = String(str == null ? '' : str).trim();
   if (!s || /^all$/i.test(s)) return null;
-  const nums = new Set(), ranges = [];
-  s.split(/[,\s]+/).filter(Boolean).forEach((tok) => {
+  const nums = new Set(), ranges = [], terms = [];
+  s.split(/[,;]+/).map((t) => t.trim()).filter(Boolean).forEach((tok) => {
+    const clean = tok.replace(/^["']+|["']+$/g, '').trim(); if (!clean) return;
     let m;
-    if ((m = tok.match(/^(\d+)\s*[-–]\s*(\d+)$/))) ranges.push([Math.min(+m[1], +m[2]), Math.max(+m[1], +m[2])]);
-    else if (/^\d+$/.test(tok)) nums.add(+tok);
+    if ((m = clean.match(/^(\d+)\s*[-–]\s*(\d+)$/))) { ranges.push([Math.min(+m[1], +m[2]), Math.max(+m[1], +m[2])]); return; }
+    if (/^\d+$/.test(clean)) { nums.add(+clean); return; }
+    const parts = clean.split(/\s+/);                                   // back-compat: "5 8 12" (space-sep numbers)
+    if (parts.length > 1 && parts.every((p) => /^\d+$/.test(p))) { parts.forEach((p) => nums.add(+p)); return; }
+    terms.push(clean.toLowerCase());                                    // otherwise it's a text term
   });
-  if (!nums.size && !ranges.length) return null;
-  return (seg) => { const n = parseInt(seg, 10); return !isNaN(n) && (nums.has(n) || ranges.some(([a, b]) => n >= a && n <= b)); };
+  if (!nums.size && !ranges.length && !terms.length) return null;
+  return (seg) => {
+    if (!seg || typeof seg !== 'object') return false;                 // matcher now takes the whole segment
+    const n = parseInt(seg.seg != null ? seg.seg : seg.rank, 10);
+    if (!isNaN(n) && (nums.has(n) || ranges.some(([a, b]) => n >= a && n <= b))) return true;
+    if (!terms.length) return false;
+    const bits = [seg.src, seg.source, seg.tgt, seg.target, seg.key, seg.fullSrc, seg.fullSource, seg.context];
+    for (const f of [seg.srcForms, seg.tgtForms]) if (f && typeof f === 'object') bits.push.apply(bits, Object.values(f));
+    const hay = bits.filter(Boolean).join('  ').toLowerCase();
+    return terms.some((t) => hay.includes(t));
+  };
 }
 
 async function doHarvest() {
@@ -527,7 +544,7 @@ async function doHarvest() {
     if (!r || !r.ok) throw new Error(r && r.error || 'harvest failed');
     const all = r.segments || [];
     const sel = parseSegSel($('seg-filter').value);
-    state.segments = sel ? all.filter((s) => sel(s.seg)) : all;
+    state.segments = sel ? all.filter((s) => sel(s)) : all;
     const filtered = sel && state.segments.length !== all.length;
     if (sel && !state.segments.length && all.length) {
       info('harvest-info', `No segments matched "${$('seg-filter').value.trim()}" (task has ${all.length}). Clear the box for all.`, 'err');
@@ -3095,7 +3112,7 @@ async function plScan() {
     let all = (r.plurals || []).map((s) => ({ rank: s.rank, key: s.key, srcForms: s.srcForms || {}, tgtForms: s.tgtForms || {}, forms: null, approved: false }));
     // Honor the "Only segments" box (rank = the displayed segment number).
     const sel = parseSegSel($('seg-filter').value);
-    PL.segs = sel ? all.filter((s) => sel(s.rank)) : all;
+    PL.segs = sel ? all.filter((s) => sel(s)) : all;
     if (sel && !PL.segs.length) {
       info('pl-info', `No plural segments matched "${$('seg-filter').value.trim()}" (task has ${all.length} plural segment(s)). Clear the box for all.`, 'err');
       plRender(); return;
