@@ -143,13 +143,35 @@ function numMismatch(src, out) {
 // exactly as in the source ("MX$67,000" stays "MX$67,000", never "$7,500" or "$67,000").
 const CUR_SYM = '$€£¥₩₪₹₽฿';
 function curAmounts(s) { return String(s == null ? '' : s).match(new RegExp('[A-Za-z]{0,3}[' + CUR_SYM + ']\\s?\\d[\\d.,]*\\d?|\\d[\\d.,]*\\d?\\s?[' + CUR_SYM + ']', 'g')) || []; }
-function amountIssue(src, out) { const o = String(out == null ? '' : out); for (const a of curAmounts(src)) if (!o.includes(a)) return a; return ''; }
+// A currency amount = a currency token (symbol, maybe with a 0-3 letter prefix like MX$) + a figure.
+// House convention flips the symbol to AFTER the number in Hebrew, so compare order-INSENSITIVELY:
+// same figure + same currency token, either side, counts as preserved (not a stale/altered value).
+function curSym(a) { return String(a).replace(/[\d.,\s]/g, ''); }        // the currency token ($, MX$, ₩…)
+function curFig(a) { return String(a).replace(/[^\d.,]/g, ''); }         // the digits + grouping
+function amountIssue(src, out) {
+  const o = String(out == null ? '' : out);
+  for (const a of curAmounts(src)) {
+    if (o.includes(a)) continue;                                          // present verbatim (source order)
+    const sym = curSym(a), fig = curFig(a);
+    if (sym && fig) {
+      const S = sym.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), F = fig.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      if (new RegExp('(?:' + S + '\\s?' + F + '|' + F + '\\s?' + S + ')').test(o)) continue;   // present in the other order → fine
+    }
+    return a;                                                             // genuinely missing / altered figure
+  }
+  return '';
+}
 function amountMismatch(src, out) { return numMismatch(src, out) || !!amountIssue(src, out); }
 // Auto-fix the common case: exactly one currency amount on each side that differ → drop the
 // source's amount verbatim into the target (position preserved). Multiple amounts → review-only.
 function fixAmounts(src, out) {
   const o = String(out == null ? '' : out), sa = curAmounts(src), oa = curAmounts(o);
-  if (sa.length === 1 && oa.length === 1 && sa[0] !== oa[0]) return o.replace(oa[0], sa[0]);
+  if (sa.length === 1 && oa.length === 1 && sa[0] !== oa[0]) {
+    // Only "restore" a genuinely different figure/currency (stale TM). If it's the SAME currency and
+    // figure with the symbol on the other side, that's the intended he-IL order — leave it alone.
+    if (curSym(sa[0]) === curSym(oa[0]) && curFig(sa[0]) === curFig(oa[0])) return o;
+    return o.replace(oa[0], sa[0]);
+  }
   return o;
 }
 // Normalize spacing — the usual Starling "Punctuation/Space" QA triggers: collapse repeated
@@ -464,7 +486,7 @@ function sysPrompt(mode, plural, tiktok) {
     '- Keep "TikTok" and other brand / product / feature names in Latin script — do not translate or transliterate them, and keep them EXACTLY as in the source including internal spaces and capitalization: "TikTok Lite" stays "TikTok Lite" (never "TikTok-Lite" or "TikTokLite"). When adding a Hebrew prefix to a Latin name use a maqaf between the prefix and the name (ב-TikTok Lite / וב-TikTok Lite), never inside the name.\n' +
     '- MARKDOWN EMPHASIS: keep every **bold** and *italic* marker from the source — same count, wrapping the SAME term (its Hebrew equivalent, or the Latin brand kept verbatim). If the source wraps a term in **…** the target MUST wrap the corresponding term in **…** too. Never drop the asterisks (a common failure) and never add new ones.\n' +
     '- PUNCTUATION: MIRROR the source\'s sentence-final full stop (.). If the English source ends with "." the Hebrew MUST end with "."; if the source does NOT end with "." the Hebrew must NOT end with ".". Never add or drop it independently. Keep "?", "!", "…" and all mid-sentence punctuation as the meaning requires.\n' +
-    '- NUMBERS & CURRENCY (do-not-translate): copy every number, amount, date and currency symbol from the SOURCE verbatim — the currency symbol and figure stay EXACTLY as written ("MX$67,000" stays "MX$67,000", "₩4,500,000" stays "₩4,500,000"). Never translate, convert, localize or reformat them, and never keep a different (stale TM) figure from the old target.\n' +
+    '- NUMBERS & CURRENCY (do-not-translate): keep every number, amount, date and currency symbol/code from the SOURCE — the SAME digits, the SAME currency and the SAME grouping ("67,000" stays "67,000", "MX$" stays "MX$", "₩" stays "₩"). Never translate, convert to another currency, localize or change the figure, and never keep a different (stale TM) figure from the old target. HEBREW POSITION: place the currency symbol or code AFTER the number for EVERY foreign currency — symbols ($, MX$, ₩, €, £, ₪, ฿, R$…) and letter codes (Rp, kr, zł…) alike — adjacent, no space: "Under $20" → "מתחת ל-20$" (never "$20"), "$100+" → "מעל ל-100$", "MX$67,000" → "67,000MX$", "₩4,500,000" → "4,500,000₩", "Rp150,000" → "150,000Rp". Only the symbol/code moves to follow the number (the he-IL number-formatting convention); the digits and currency identity stay exactly as in the source.\n' +
     '- HEBREW NUMBER POSITION for counted nouns (time units, people, items — any "{n} <noun>"): Hebrew places the number differently for 1 vs many. SINGULAR / CLDR-"one" form (count is exactly 1) → put the NOUN BEFORE the placeholder: "{s_num} hour" → "שעה {s_num}", "{s_num} day" → "יום {s_num}", "{s_num} min" → "דקה {s_num}", "1 person" → "אדם {s_number}" (mirrors שעה אחת / יום אחד / אדם אחד). PLURAL form → put the PLACEHOLDER FIRST with the plural noun: "{s_num} hours" → "{s_num} שעות", "{s_num} days" → "{s_num} ימים", "{s_num} people" → "{s_number} אנשים". Keep the {placeholder} byte-for-byte — only its POSITION changes. Compounds follow the same rule per noun, e.g. "{s_num} hour {s_num} min" → "שעה {s_num} ו-{s_num} דקות".\n' +
     '- STATUS-LABEL VERBS: translate English past-participle status labels as Hebrew VERB phrases, not noun phrases — "Last updated" → "עודכן לאחרונה" (NOT the noun "עדכון אחרון" / "עידכון אחרון", which also wrongly implies a final update), "Last modified" → "נערך לאחרונה", "Last edited" → "נערך לאחרונה", "Last synced" → "סונכרן לאחרונה", "Last seen" → "נצפה לאחרונה", "Last saved" → "נשמר לאחרונה". Keep any {placeholder}, its colon and position (e.g. "Last updated: {s_updateDate}" → "עודכן לאחרונה: {s_updateDate}").\n' +
     '- NO ADDITIONS: render ONLY what the source says. Never add names, facts, titles or clauses not present or implied in the source (e.g. do not insert a person\'s name like "דיוגו דאלוט" / "ראמי רביע" when the source has none). If the existing target contains such an addition, REMOVE it.\n' +
@@ -1091,7 +1113,7 @@ function lqSys(plural) {
     'Keep "TikTok" and brand / product / feature names in Latin script, EXACTLY as in "src" including internal spaces/capitalization ("TikTok Lite" stays "TikTok Lite", never "TikTok-Lite"/"TikTokLite"; a Hebrew prefix takes a maqaf before the name: ב-TikTok Lite). Keep EVERY placeholder / tag byte-for-byte and in order: {x}, {{x}}, %s, %1$s, <b>…</b>, <g id="1">…</g>, ①②③.\n' +
     brainText() + '\n' +
     'PUNCTUATION: MIRROR the English "src" sentence-final full stop (.). If "src" ends with "." then "corrected" MUST end with "."; if "src" does NOT end with "." then "corrected" must NOT end with ".". Never add or drop it independently. Keep "?", "!", "…" as the meaning requires.\n' +
-    'NUMBERS & CURRENCY (do-not-translate): "corrected" must copy every number, amount and currency symbol from "src" VERBATIM ("MX$67,000" stays "MX$67,000") — never translate/convert/reformat, never keep a different (stale TM) figure from "tgt". A differing figure IS a valid error → verdict "valid" and fix it.\n' +
+    'NUMBERS & CURRENCY (do-not-translate): "corrected" must keep every number, amount and currency symbol/code from "src" — same digits, same currency, same grouping — never translate/convert/localize/change the figure, and never keep a different (stale TM) figure from "tgt". A differing figure IS a valid error → verdict "valid" and fix it. HEBREW POSITION: the currency symbol/code goes AFTER the number for every foreign currency ($, MX$, ₩, €, £, Rp, R$, kr…): "$20"→"20$", "$100+"→"100$+", "MX$67,000"→"67,000MX$", "Rp150,000"→"150,000Rp". A target that puts the symbol BEFORE the number (e.g. "$20") when the figure is otherwise right is a positional error → "valid", fix the order only (do not treat the moved symbol as a changed amount).\n' +
     'ADDITIONS: if "tgt" contains a name, word or clause NOT present or implied in "src" (e.g. a player name like "ראמי רביע" the source omits), the Addition flag is VALID → verdict "valid" and "corrected" must REMOVE the added content. Never introduce content not in "src".\n' +
     'SPACING: "corrected" must have no space before "." "," ":" ";" "!" "?", no double spaces, and no leading/trailing spaces.\n' +
     'TERMINOLOGY SKEPTICISM: you do NOT have the project glossary / terminology reference. When the checker justifies an error ONLY by citing a "terminology reference", "approved target string", "terminology list" or "should remain in English" that you cannot see, do NOT assume it is correct — treat such unverifiable claims skeptically and lean "invalid" unless the Hebrew is independently wrong. Common English words/phrases ("for you", "tips", "settings", "learn more") are NOT brand names and are normally translated to Hebrew; only unmistakable product/feature proper nouns (e.g. TikTok, TikTok LIVE) must stay in Latin script. Note: standalone "LIVE" (the live-streaming feature/badge) is NOT kept in Latin — per the glossary it is translated to "שידור חי"; only the full product name "TikTok LIVE" stays in Latin.\n' +
