@@ -239,9 +239,20 @@ function boldIssue(src, out) {
   for (const span of spans) { const inner = span.slice(2, -2).trim(); if (inner && !o.includes('**' + inner + '**')) return inner; }
   return '';
 }
+// A trailing LITERAL "\n" escape (backslash + the letter n — not a real newline) is a formatting
+// token: mirror it from the source. If the source ends with one, keep/add it; if it does NOT, drop a
+// target-only trailing "\n" (a common GPT / stale-TM artifact that mirrorEdges can't see, since it's
+// text, not whitespace). Interior "\n" is left untouched — only the very end is normalized.
+function matchTrailingNL(src, out) {
+  const s = String(src == null ? '' : src), o = String(out == null ? '' : out);
+  const srcHas = /\\n[ \t]*$/.test(s), outHas = /\\n[ \t]*$/.test(o);
+  if (srcHas === outHas) return o;
+  if (outHas && !srcHas) return o.replace(/[ \t]*\\n[ \t]*$/, '');   // strip the spurious trailing \n
+  return o.replace(/[ \t]*$/, '') + (s.match(/\\n[ \t]*$/) || ['\\n'])[0];   // source has it → append
+}
 // Full output polish: fix internal spacing, restore brand spacing, restore **bold** markers,
-// mirror the source's full stop, then mirror the source's leading/trailing whitespace.
-function polish(src, out) { return mirrorEdges(src, matchTrailingPeriod(src, fixBold(src, fixAmounts(src, fixBrands(fixSpacing(out)))))); }
+// mirror a trailing literal "\n" escape and the source's full stop, then mirror leading/trailing whitespace.
+function polish(src, out) { return mirrorEdges(src, matchTrailingPeriod(src, matchTrailingNL(src, fixBold(src, fixAmounts(src, fixBrands(fixSpacing(out))))))); }
 
 // ---- optional XLIFF source (alternative to DOM harvest) --------------------
 const XLIFF_TAGGED = /<\/?(?:g|x|bpt|ept|ph|it|mrk|sub)\b|[OC]-\d+(?:-\d+)+|[①-⑳❶-➓⓪]/;
