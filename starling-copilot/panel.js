@@ -760,8 +760,16 @@ function renderReview() {
         updateRevCount();
       }
     });
-    // Tagged rows: re-render on blur so the per-part Copy blocks re-split from the edited text.
-    if (ed.classList.contains('has-tags')) ed.addEventListener('blur', () => renderReview());
+    // On blur, mirror the source's edge whitespace + trailing "\n" onto the edited text, so an
+    // accidental trailing space (Starling's blue "|") or newline left over from editing isn't written.
+    ed.addEventListener('blur', (e) => {
+      const card = e.target.closest('.rc'); if (!card) return;
+      const p = state.proposals[+card.dataset.i]; if (!p) return;
+      const norm = matchTrailingNL(p.src, mirrorEdges(p.src, p.next));
+      if (norm !== p.next) p.next = norm;
+      if (ed.classList.contains('has-tags')) renderReview();          // tagged: re-split the per-part Copy blocks
+      else if (ed.innerText !== norm) ed.textContent = norm;          // reflect the cleaned text
+    });
   });
   box.querySelectorAll('.rc-copy').forEach((b) => b.addEventListener('click', () => panelCopy(b.getAttribute('data-copy'), b)));
   box.querySelectorAll('.rc-write').forEach((b) => b.addEventListener('click', () => doWriteOne(+b.dataset.i, b)));
