@@ -391,7 +391,11 @@ function brainText() {
 // recurrences stay identical across tasks and sessions. It also aligns repeated
 // identical sources WITHIN one task. Grows from your own work; zero upkeep.
 let TM = { map: {}, updatedAt: 0 };
-async function tmLoad() { try { TM = await store.get('consistencyTM', { map: {}, enabled: true, updatedAt: 0 }); } catch (e) {} if (!TM || !TM.map) TM = { map: {}, enabled: true, updatedAt: 0 }; if (TM.enabled === undefined) TM.enabled = true; return TM; }
+async function tmLoad() { try { TM = await store.get('consistencyTM', { map: {}, enabled: true, updatedAt: 0 }); } catch (e) {} if (!TM || !TM.map) TM = { map: {}, enabled: true, updatedAt: 0 }; if (TM.enabled === undefined) TM.enabled = true;
+  // One-time: turn Consistency memory OFF by default (user request). The data is kept; re-enable any
+  // time with the "Apply remembered wording" toggle. Runs once, then the toggle state is respected.
+  if (!TM.defaultOffMigrated) { TM.enabled = false; TM.defaultOffMigrated = true; try { await store.set({ consistencyTM: TM }); } catch (e) {} }
+  return TM; }
 async function tmSave() { TM.updatedAt = Date.now(); try { await store.set({ consistencyTM: TM }); } catch (e) {} }
 function tmCount() { return TM && TM.map ? Object.keys(TM.map).length : 0; }
 function tmKey(src) { return wbFold(String(src == null ? '' : src)); }   // normalise quotes/dashes/spaces/fullwidth; case kept
@@ -3405,8 +3409,11 @@ async function brainImport(file) {
 
 // ---- Consistency memory: UI glue ----
 function tmRefresh() {
-  const b = $('tm-badge'); if (b) b.textContent = tmCount() ? `· ${tmCount()} string${tmCount() === 1 ? '' : 's'}` : '· empty';
-  const t = $('tm-toggle'); if (t) t.checked = !!(TM && TM.enabled);
+  const on = !!(TM && TM.enabled);
+  const b = $('tm-badge'); if (b) b.textContent = (tmCount() ? `· ${tmCount()} string${tmCount() === 1 ? '' : 's'}` : '· empty') + (on ? '' : ' · off');
+  const t = $('tm-toggle'); if (t) t.checked = on;
+  const card = $('tm-card'); if (card) card.classList.toggle('tm-off', !on);
+  const st = $('tm-state'); if (st) st.textContent = on ? '' : '— disabled (data kept; tick to re-enable)';
   const n = $('tm-count-n'); if (n) n.textContent = tmCount();
   tmRenderList($('tm-search') ? $('tm-search').value : '');
 }
@@ -3514,7 +3521,7 @@ async function init() {
   $('tm-export').addEventListener('click', tmExport);
   $('tm-import').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) tmImport(f); e.target.value = ''; });
   $('tm-toggle').addEventListener('change', async (e) => {
-    TM.enabled = e.target.checked; await tmSave();
+    TM.enabled = e.target.checked; await tmSave(); tmRefresh();
     tmInfo(TM.enabled ? 'On — remembered wording is applied to matching sources.' : 'Off — memory is kept but not applied to new translations.', '');
   });
   $('tm-search').addEventListener('input', (e) => tmRenderList(e.target.value));
@@ -3529,7 +3536,7 @@ async function init() {
   });
   $('tm-clear').addEventListener('click', async () => {
     if (!confirm('Forget every remembered string? This can\'t be undone.')) return;
-    TM = { map: {}, enabled: TM.enabled, updatedAt: 0 }; await tmSave(); tmRefresh(); tmInfo('Memory cleared.', '');
+    TM = { map: {}, enabled: TM.enabled, updatedAt: 0, defaultOffMigrated: true }; await tmSave(); tmRefresh(); tmInfo('Memory cleared.', '');
   });
 
   $('harvest').addEventListener('click', doHarvest);
