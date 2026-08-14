@@ -705,12 +705,13 @@ function renderReview() {
     const control = (p.manual
       ? `<span class="rc-manual" title="Has tags/chips — paste it by hand between them; auto-write would break the tags.">✋ paste by hand</span>`
       : `<label><input type="checkbox" class="rc-cb" ${p.approved ? 'checked' : ''}/> apply</label>`) + buttons;
-    const newRow = p.manual
-      ? `<div class="rc-new ro" dir="rtl">${hl(esc(p.next))}</div>`
-      : `<div class="rc-new" dir="rtl" contenteditable="true" spellcheck="false">${esc(p.next)}</div>`;
+    // Every target is editable. Tagged/chip ("manual") rows carry the raw tokens so you can edit the
+    // text too, and get a blur-refresh so their per-part Copy blocks re-split from your edit.
+    const newRow = `<div class="rc-new${p.manual ? ' has-tags' : ''}" dir="rtl" contenteditable="true" spellcheck="false">${esc(p.next)}</div>`;
     return `<div class="rc${p.tagged ? ' tagged' : ''}${p.manual ? ' manual' : ''}${changed ? '' : ' unchanged'}" data-i="${idx}">
       <div class="rc-top">
         <span class="rc-seg">#${esc(p.seg)}</span>
+        <span class="rc-edited"${p.edited ? '' : ' hidden'} title="You edited this suggestion — your text is what gets written / copied.">✎ edited</span>
         ${p.tmOverride ? `<span class="rc-warn" style="background:#7a5c0a" title="Memory has a DIFFERENT wording than GPT for this exact source. Set to your remembered version but left UNCHECKED — confirm it, or edit the text if the memory is wrong (writing your fix updates the memory). GPT proposed: ${esc(p.tmPrev || '')}">🧠 memory — review</span>`
           : p.tm ? '<span class="rc-warn" style="background:#0c4a6e" title="Matches a source you translated before — already consistent with your previous wording.">🧠 memory</span>' : ''}
         ${p.dedupe && !p.tm ? '<span class="rc-warn" style="background:#0c4a6e" title="This exact source appears more than once in this task — aligned to one wording for consistency.">🧠 same-as-above</span>' : ''}
@@ -736,9 +737,21 @@ function renderReview() {
   box.querySelectorAll('.rc-cb').forEach((cb) => cb.addEventListener('change', (e) => {
     const i = +e.target.closest('.rc').dataset.i; state.proposals[i].approved = e.target.checked; updateRevCount();
   }));
-  box.querySelectorAll('.rc-new[contenteditable]').forEach((ed) => ed.addEventListener('input', (e) => {
-    const i = +e.target.closest('.rc').dataset.i; state.proposals[i].next = e.target.innerText;
-  }));
+  box.querySelectorAll('.rc-new[contenteditable]').forEach((ed) => {
+    ed.addEventListener('input', (e) => {
+      const card = e.target.closest('.rc'), i = +card.dataset.i, p = state.proposals[i];
+      p.next = e.target.innerText;
+      p.edited = true;
+      const badge = card.querySelector('.rc-edited'); if (badge) badge.hidden = false;
+      if (!p.manual && !p.approved) {                 // editing a suggestion = intent to apply it
+        p.approved = true;
+        const cb = card.querySelector('.rc-cb'); if (cb) cb.checked = true;
+        updateRevCount();
+      }
+    });
+    // Tagged rows: re-render on blur so the per-part Copy blocks re-split from the edited text.
+    if (ed.classList.contains('has-tags')) ed.addEventListener('blur', () => renderReview());
+  });
   box.querySelectorAll('.rc-copy').forEach((b) => b.addEventListener('click', () => panelCopy(b.getAttribute('data-copy'), b)));
   box.querySelectorAll('.rc-write').forEach((b) => b.addEventListener('click', () => doWriteOne(+b.dataset.i, b)));
   updateRevCount();

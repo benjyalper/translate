@@ -163,8 +163,10 @@ textarea { font-family: ui-monospace, Menlo, Consolas, monospace; resize: vertic
 .btn.danger { color: #d98a8a; }
 .rc-old { font-size: 12px; color: #b4879b; direction: rtl; text-align: right; text-decoration: line-through; text-decoration-color: #6b3450; overflow-wrap: anywhere; }
 .rc-new { font-size: 13.5px; color: var(--ink); direction: rtl; text-align: right; overflow-wrap: anywhere; }
-.rc-new[contenteditable] { outline: none; border-radius: 5px; padding: 2px 4px; }
-.rc-new[contenteditable]:focus { background: rgba(79,70,229,.14); }
+.rc-new[contenteditable] { outline: none; border: 1px dashed var(--border); border-radius: 5px; padding: 3px 6px; cursor: text; transition: border-color .12s, background .12s; }
+.rc-new[contenteditable]:hover { border-color: #6366f1; }
+.rc-new[contenteditable]:focus { background: rgba(79,70,229,.14); border: 1px solid #6366f1; }
+.rc-edited { font-size: 9px; font-weight: 700; color: #a5b4fc; background: rgba(79,70,229,.16); padding: 1px 6px; border-radius: 5px; }
 .rc-new.ro { color: var(--dim); }
 .rc.manual { box-shadow: inset 3px 0 0 var(--warn); }
 .rc-manual { font-size: 10px; font-weight: 700; color: #fbbf24; background: rgba(217,119,6,.18); padding: 2px 7px; border-radius: 6px; white-space: nowrap; }
