@@ -3718,8 +3718,16 @@ async function init() {
   if ($('hv-distill')) $('hv-distill').addEventListener('click', hvDistill);
   $('brain-export').addEventListener('click', brainExport);
   $('brain-import').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) brainImport(f); e.target.value = ''; });
+  // Password gate for the two destructive "Clear" buttons — guards against an accidental wipe of
+  // the brain / memory you've built up. Local-only (your own extension data); not auth against any service.
+  const clearPass = (what) => {
+    const p = prompt(`Enter your password to clear ${what}.\nThis erases everything you've accumulated and can't be undone.`);
+    if (p == null) return false;                                   // cancelled
+    if (p !== 'benjytrans') { alert('Wrong password — nothing was cleared.'); return false; }
+    return true;
+  };
   $('brain-clear').addEventListener('click', async () => {
-    if (!confirm('Remove all ingested rules and glossary terms? The built-in guide stays in effect.')) return;
+    if (!clearPass('all ingested rules & glossary terms (the built-in guide stays)')) return;
     BRAIN.rules = []; BRAIN.glossary = []; await brainSave(); brainRefresh(); brainInfo('Cleared — back to the built-in guide only.', '');
   });
 
@@ -3775,7 +3783,7 @@ async function init() {
     tmInfo(`${existed ? 'Updated' : 'Remembered'} — "${src}" → "${tgt}". ${tmCount()} string(s).`, 'good');
   });
   $('tm-clear').addEventListener('click', async () => {
-    if (!confirm('Forget every remembered string? This can\'t be undone.')) return;
+    if (!clearPass('every remembered string in the Consistency memory')) return;
     TM = { map: {}, enabled: TM.enabled, updatedAt: 0, defaultOffMigrated: true }; await tmSave(); tmRefresh(); tmInfo('Memory cleared.', '');
   });
 
