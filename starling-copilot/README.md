@@ -575,6 +575,7 @@ Default selectors are **unions** covering both editors; hidden measurement-clone
 | — | *(panel-only, no CS bump)* **⚠ Conflict adjudicator** — a colliding **glossary term** (same EN → different HE) or **remembered source** (same source → different target) is parked in an orange card instead of silently overwriting ("newest wins" retired); **Keep current / Use new** deletes the unpicked wording. Fires from the learn flow, brain **merge**, and the manual *Add term* / *Remember* fields |
 | — | *(panel-only, no CS bump)* **Password-gated Clear** — clearing the Style Brain or Consistency memory now prompts for a password (`clearPass`) before wiping |
 | — | *(panel-only, no CS bump)* **Consistency memory now seeds tagged/copy-by-hand segments** — the remembered target fills the per-part Copy text (still never auto-written), guarded by a tag signature (`tmTagSig`) so it only substitutes when the stored target carries the same `①…①`/`O-`/`C-` tokens as the source |
+| — | *(panel-only, no CS bump)* **Built-in guide (`STYLE_GUIDE`) hardened** — three house rules baked into the shared guide (reaches both 🐦 Starling and ⚖️ Feishu via `brainText()`): (1) slash form short-vs-long (same-stem → גלה/י, שתף/י; different spelling → בדוק/בדקי, אמור/אמרי, with the "בדוק/י→בדוקי" misread test); (2) **TikTok = DNT** (always Latin, maqaf prefix ב-TikTok); (3) currency symbol/code AFTER the number (20$, 40£, 1,000Rp). *(Number "k"-expansion and "+/-" range suffixes deferred — still under review.)* |
 
 ## Test the panel offline
 ```bash
