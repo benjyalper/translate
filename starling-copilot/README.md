@@ -477,6 +477,13 @@ fact so the same string always lands the same way.
 - **How it overrides:** after GPT proposes, `tmApply` swaps in the remembered target when the source
   matches. When the remembered target **differs** from GPT's, the row's **🧠 memory — review**
   checkbox is left **unticked** so you eyeball the swap before writing.
+- **Tagged / copy-by-hand segments:** memory now seeds these too — the remembered wording lands in the
+  per-part **Copy** text (it's still never auto-written; tagged rows stay copy-by-hand). Guarded by a
+  **tag signature** (`tmTagSig` over `①…①` / `O-`/`C-` tokens): the stored target is only substituted
+  when it carries the **same tag tokens in the same order** as the source, so the per-part splitter
+  stays aligned — otherwise GPT's tag-carrying output is kept. Plain chip/placeholder segments
+  (e.g. `{s_prizeName}`) have an empty signature and always qualify. (Intra-run alignment still skips
+  manual rows.)
 - **Add manually:** the Consistency-memory block takes a **source** + **target** → **add**
   (`tmRecordOne`). Writes also record what you confirmed, so the memory grows as you work.
 - **Toggle:** the memory can be enabled/disabled without clearing it.
@@ -566,6 +573,8 @@ Default selectors are **unions** covering both editors; hidden measurement-clone
 | — | *(panel-only, no CS bump)* Feishu LQA **Error-level filter** (opt-in, e.g. *Minor only*) + per-card **Agree** toggle → column **J** `agree` + column **K** *Final translation* (agreed rows only); column I untouched; download stamps J/K headers so **↩ Sheet → Starling** auto-detects the **XBench "agree" export** (key→`keys`, fix→column K *Final translation*→`CorrectTarget`, gate on J) and queues **agree-only** — every prior flow stays the default/selectable |
 | — | *(panel-only, no CS bump)* **🧠 Learn from validated rows** in Feishu LQA — collects your **Valid = Yes** rows (fix = *Final*/*AI*) across sheet tabs → **→ Consistency memory** (source→approved-fix) and **→ Distill brain** (contrastive *WRONG* vs *CORRECT* + *why* → generalizable rules & EN→HE term pairs, via the brain review→merge flow). Maps the **Final Translation** column (col K) for auto-detect |
 | — | *(panel-only, no CS bump)* **⚠ Conflict adjudicator** — a colliding **glossary term** (same EN → different HE) or **remembered source** (same source → different target) is parked in an orange card instead of silently overwriting ("newest wins" retired); **Keep current / Use new** deletes the unpicked wording. Fires from the learn flow, brain **merge**, and the manual *Add term* / *Remember* fields |
+| — | *(panel-only, no CS bump)* **Password-gated Clear** — clearing the Style Brain or Consistency memory now prompts for a password (`clearPass`) before wiping |
+| — | *(panel-only, no CS bump)* **Consistency memory now seeds tagged/copy-by-hand segments** — the remembered target fills the per-part Copy text (still never auto-written), guarded by a tag signature (`tmTagSig`) so it only substitutes when the stored target carries the same `①…①`/`O-`/`C-` tokens as the source |
 
 ## Test the panel offline
 ```bash

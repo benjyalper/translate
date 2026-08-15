@@ -307,6 +307,11 @@ function splitParts(t) {
 // copy-by-hand, exactly like a DOM chip. (Not caught by the {x}/%s/<g> detector.)
 const TAG_TOK = /[OC]-\d+(?:-\d+)+|[①-⑳❶-➓⓪]/;              // NO /g — used with .test()
 function hasTags(s) { return TAG_TOK.test(String(s == null ? '' : s)); }
+// Ordered signature of a string's copy-by-hand tag tokens (①…① / O-/C- pairs). Used to guard
+// applying Consistency memory to tagged segments: only substitute the stored target when it carries
+// the SAME tag tokens in the same order as the source, so the per-part Copy splitter still lines up.
+const TAG_TOK_G = /[OC]-\d+(?:-\d+)+|[①-⑳❶-➓⓪]/g;
+function tmTagSig(s) { return (String(s == null ? '' : s).match(TAG_TOK_G) || []).join('|'); }
 // Split a target into the text runs that sit BETWEEN its tag tokens, so each run
 // can be copied and pasted between the matching ①…① without touching the tags.
 // Returns [{id, text}] (id = the innermost open-tag number seen before the run),
@@ -457,15 +462,19 @@ function tmApply(proposals) {
   if (!TM || !TM.enabled) return;   // enforcement switched off in Settings
   // 1) cross-task/session memory — prior wording is offered over a fresh GPT suggestion.
   for (const p of proposals) {
-    if (p.manual) continue;
     const hit = tmLookup(p.src);
     if (!hit) continue;
+    // Tagged/chip ("manual") segments are copy-by-hand, never auto-written — but we STILL seed their
+    // suggestion from memory so the remembered wording lands in the per-part Copy text. Guard: only when
+    // the stored target carries the SAME tag tokens as the source, so the ①…① splitter stays aligned;
+    // otherwise (e.g. a plain-text memory for a bullet-list segment) keep GPT's tag-carrying output.
+    if (p.manual && tmTagSig(hit.tgt) !== tmTagSig(p.src)) continue;
     if (wbFold(hit.tgt) !== wbFold(p.next)) {
       p.tmPrev = p.next;           // what GPT proposed this time
       p.next = hit.tgt;            // your previous, endorsed wording
       p.tm = true; p.tmOverride = true;
-      p.approved = false;          // memory DIFFERS from GPT → leave UNCHECKED so you confirm;
-                                   // a remembered mistake can never re-apply itself silently.
+      p.approved = false;          // memory DIFFERS from GPT → leave UNCHECKED so you confirm (manual is
+                                   // never auto-written regardless); a remembered mistake never re-applies silently.
     } else {
       p.tm = true;                 // GPT already matches memory → badge as consistent
     }
