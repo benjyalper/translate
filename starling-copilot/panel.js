@@ -1025,7 +1025,7 @@ async function doDiag() {
 // CSV instead of scraping, then GPT-5.4 decides whether each AI-flagged error is
 // real. Reuses esc/hl/panelCopy and the shared key/model/plural settings.
 const LQ = { header: [], records: [], map: {}, rows: [], sel: [], results: {}, filter: 'all', validYmeansReal: true, workbook: null, fileName: '' };
-const LQ_FIELDS = [['src', 'Source (EN)'], ['tgt', 'Current target'], ['ai', 'AI suggested'], ['cat', 'Error type'], ['level', 'Level'], ['comment', 'AI comment'], ['key', 'Key'], ['valid', 'Valid col'], ['lang', 'Language']];
+const LQ_FIELDS = [['src', 'Source (EN)'], ['tgt', 'Current target'], ['ai', 'AI suggested'], ['cat', 'Error type'], ['level', 'Level'], ['comment', 'AI comment'], ['key', 'Key'], ['valid', 'Valid col'], ['final', 'Final (approved)'], ['lang', 'Language']];
 const LQ_BATCH = 8;
 // Learn-from-Starling harvest: pairs per distill call, and a cap on unique pairs sent to GPT.
 const HV_BATCH = 40, HV_CAP = 200;
@@ -1057,6 +1057,7 @@ function lqAutoMap(header) {
   map.comment = find(/comment|说明|說明|备注|備註|reason/i);
   map.key = find(/^keys?$|\bkeys?\b|键|鍵/i);                  // "Key" or "keys"
   map.valid = find(/valid/i);
+  map.final = find(/final\s*translation|\bfinal\b/i);   // "Final Translation (Only for valid issues)" — the human-approved fix (col K)
   return map;
 }
 function lqLoad(preRows) {
@@ -1090,6 +1091,7 @@ function lqLoad(preRows) {
   LQ.map = lqAutoMap(LQ.header);
   lqBuildRows(); lqRenderMap();
   $('lq-map-card').hidden = false; $('lq-run-card').hidden = false;
+  if ($('lq-learn-card')) $('lq-learn-card').hidden = false;
   $('lq-review-card').hidden = true; $('lq-paste-card').hidden = true;
   $('lq-cards').innerHTML = ''; $('lq-legend').innerHTML = '';
   info('lq-info', `Loaded ${LQ.rows.length} rows${LQ.langFiltered ? ` (Hebrew only — ${LQ.langFiltered} other-language rows hidden)` : ''}${LQ.lvlFiltered ? ` (${(($('lq-level') && $('lq-level').value) || '')} only — ${LQ.lvlFiltered} other-level rows hidden)` : ''} (header row ${hi + 1}). Check the mapping, then pick a range.`, 'good');
@@ -1097,7 +1099,7 @@ function lqLoad(preRows) {
 function lqIsHe(v) { return /^he([_-]?il)?$|hebrew|עברית/i.test(String(v == null ? '' : v).trim()); }
 function lqBuildRows() {
   const m = LQ.map, g = (r, i) => (i >= 0 && i < r.length) ? String(r[i]).trim() : '';
-  let rows = LQ.records.map((r, ri) => ({ ri, lang: g(r, m.lang), src: g(r, m.src), tgt: g(r, m.tgt), ai: g(r, m.ai), cat: g(r, m.cat), level: g(r, m.level), comment: g(r, m.comment), key: g(r, m.key), valid: g(r, m.valid) }));
+  let rows = LQ.records.map((r, ri) => ({ ri, lang: g(r, m.lang), src: g(r, m.src), tgt: g(r, m.tgt), ai: g(r, m.ai), cat: g(r, m.cat), level: g(r, m.level), comment: g(r, m.comment), key: g(r, m.key), valid: g(r, m.valid), final: g(r, m.final) }));
   // The sync sheets stack he / jv / ko in one tab; default to Hebrew-only when a Language column exists.
   const wantHe = (($('lq-lang') && $('lq-lang').value) || 'he') === 'he';
   LQ.langFiltered = 0;
@@ -3333,14 +3335,18 @@ async function brainMerge() {
   const addR = brainProposal.rules.filter((x) => x.accept).concat(brainProposal.conflicts.filter((x) => x.accept));
   for (const x of addR) BRAIN.rules.push({ id: brainUid(), cat: x.cat || 'misc', text: x.text, source: src, ts: now });
   const addG = brainProposal.glossary.filter((x) => x.accept);
+  const clashes = [];
   for (const x of addG) {
-    BRAIN.glossary = BRAIN.glossary.filter((g) => g.en.toLowerCase() !== x.en.toLowerCase());   // newest wins
+    const clash = (BRAIN.glossary || []).find((g) => (g.en || '').toLowerCase() === x.en.toLowerCase() && wbFold(g.he) !== wbFold(x.he));
+    if (clash) { clashes.push({ kind: 'gloss', en: x.en, oldVal: clash.he, newVal: x.he, note: x.note, source: src }); continue; }  // don't overwrite a different term silently
+    BRAIN.glossary = BRAIN.glossary.filter((g) => g.en.toLowerCase() !== x.en.toLowerCase());   // same-en refresh / re-note
     BRAIN.glossary.push({ id: brainUid(), en: x.en, he: x.he, note: x.note, source: src, ts: now });
   }
   await brainSave();
-  const n = addR.length + addG.length;
+  const n = addR.length + (addG.length - clashes.length);
   brainProposal = null; $('brain-review').hidden = true; $('brain-input').value = ''; brainRefresh();
-  brainInfo(`Merged ${n} item(s). Brain now has ${BRAIN.rules.length} rules · ${BRAIN.glossary.length} terms — active on the next Run.`, 'good');
+  if (clashes.length) confAdd(clashes);
+  brainInfo(`Merged ${n} item(s). Brain now has ${BRAIN.rules.length} rules · ${BRAIN.glossary.length} terms — active on the next Run.` + (clashes.length ? ` ⚠ ${clashes.length} term(s) clash with an existing entry — resolve them in the orange ⚠ panel.` : ''), clashes.length ? 'err' : 'good');
 }
 
 // ---- LEARN FROM STARLING: harvest a submitted task → memory + distilled brain ----
@@ -3436,6 +3442,157 @@ async function hvDistill() {
     hvInfo(`Distilled ${rules.length} rule(s) · ${glossary.length} term(s)${conflicts.length ? ` · ⚠ ${conflicts.length} conflict ticket(s)` : ''} from ${capped.length} pair(s) — review & merge in the brain panel above.`, 'good');
   } catch (e) { hvInfo('Distill failed: ' + (e.message || e), 'err'); }
   finally { $('hv-distill').disabled = false; }
+}
+
+// ---- LEARN FROM A VALIDATED AI-CHECK SHEET (Feishu "Valid = Yes" rows) → memory + brain ----
+// The sheet is ALREADY human-adjudicated: the "Valid (Y/N)" column is YOUR call and "Final
+// Translation" YOUR fix. Every Valid=Yes row is therefore a CONFIRMED past mistake plus its
+// approved correction — the richest learning signal we have. We (a) store source→final in
+// Consistency memory (exact-match prevention) and (b) distill the CONTRASTIVE wrong-vs-right
+// (+ the reviewer reason) into generalizable brain rules/terms. Accumulates across sheet tabs
+// so you can add 8.7 sync, then 8.12 sync, then teach once. Honors the Hebrew + level filters.
+const LRN_BATCH = 25, LRN_CAP = 400;
+let LRN = { rows: [] };   // {src, wrong, final, comment, etype, key, sheet}
+function lrnInfo(m, k) { info('lq-learn-info', m, k || ''); }
+function lrnYes(v) { return /^(y|yes|valid|true|1|כן|✓|v)$/i.test(String(v == null ? '' : v).trim()); }
+function lrnSheetName() { return (($('lq-tab') && $('lq-tab').value) || LQ.fileName || 'sheet'); }
+function lrnAdd() {
+  if (!LQ.rows || !LQ.rows.length) { lrnInfo('Load a sheet first (Step 1).', 'err'); return; }
+  if (!(LQ.map.valid >= 0)) { lrnInfo('No "Valid" column is mapped — set it in Step 2 (column mapping).', 'err'); return; }
+  const sheet = lrnSheetName();
+  let added = 0, nofix = 0;
+  const seen = new Set(LRN.rows.map((r) => wbFold(r.src) + '⇢' + wbFold(r.final)));
+  for (const r of LQ.rows) {
+    if (!lrnYes(r.valid)) continue;                              // only the rows YOU marked Valid = Yes
+    const src = (r.src || '').trim();
+    const final = (r.final || r.ai || '').trim();               // your approved fix (col K), or the AI suggestion it accepted
+    if (!src || !final) { nofix++; continue; }
+    const dk = wbFold(src) + '⇢' + wbFold(final);
+    if (seen.has(dk)) continue; seen.add(dk);
+    LRN.rows.push({ src, wrong: (r.tgt || '').trim(), final, comment: (r.comment || '').trim(), etype: (r.cat || '').trim(), key: (r.key || '').trim(), sheet });
+    added++;
+  }
+  lrnRefresh();
+  lrnInfo(`Added ${added} validated correction(s) from "${sheet}"${nofix ? ` · ${nofix} valid row(s) had no Final/AI fix (skipped)` : ''}. Learn-set: ${LRN.rows.length}. Switch tabs to add more, or teach below.`, added ? 'good' : '');
+}
+function lrnClear() { LRN = { rows: [] }; lrnRefresh(); lrnInfo('Learn-set cleared.', ''); }
+function lrnRefresh() {
+  const n = LRN.rows.length, sheets = new Set(LRN.rows.map((r) => r.sheet)).size;
+  if ($('lq-learn-state')) $('lq-learn-state').textContent = n ? `Learn-set: ${n} validated correction(s) from ${sheets} sheet(s).` : 'Learn-set is empty.';
+  if ($('lq-learn-mem')) $('lq-learn-mem').disabled = !n;
+  if ($('lq-learn-distill')) $('lq-learn-distill').disabled = !n;
+}
+async function lrnToMemory() {
+  if (!LRN.rows.length) { lrnInfo('Add validated rows first.', 'err'); return; }
+  let wrote = 0; const clashes = [];
+  for (const r of LRN.rows) {
+    const k = tmKey(r.src); if (!k) continue;
+    const prev = TM.map[k];
+    if (prev && wbFold(prev.tgt) !== wbFold(r.final)) {
+      clashes.push({ kind: 'mem', label: r.src, srcKey: k, src: r.src, oldVal: prev.tgt, newVal: r.final });   // don't overwrite silently
+    } else if (tmRecordOne(r.src, r.final)) wrote++;
+  }
+  await tmSave(); tmRefresh();
+  if (clashes.length) { confAdd(clashes); lrnInfo(`Stored ${wrote} correction(s). ⚠ ${clashes.length} clash with a different remembered target — resolve them in the orange ⚠ panel.`, 'err'); }
+  else lrnInfo(`Stored ${wrote} correction(s) in Consistency memory (now ${tmCount()} strings). The approved fix auto-fills whenever that source recurs.`, 'good');
+}
+function lrnSys() {
+  return 'You improve a TikTok English→Hebrew (he-IL) localization brain by learning from CONFIRMED past mistakes. ' +
+    'Each item is a segment a proofreader marked as a REAL error: "src" (English), "wrong" (the rejected Hebrew a machine/GPT produced), "correct" (the approved Hebrew fix), and optionally "why" (the reviewer/checker reason). ' +
+    'Infer GENERALIZABLE, reusable conventions that would have PREVENTED the mistake — never anything specific to one string. Prefer: exact EN→HE term mappings (when "correct" fixes a wrong word choice) and short imperative rules (register, punctuation, translate-vs-keep-in-Latin, translating country/region names, placeholder/number handling). ' +
+    'Put term equivalences in "glossary" (en, he, short note); put everything else in "rules" (≤ ~30 words each, categorized as one of: ' + BRAIN_CATS.join(' | ') + '). ' +
+    'Extract ONLY high-confidence patterns that several items or a clear reason support. Do NOT restate anything already in the EXISTING BRAIN. If a pattern CONTRADICTS an existing brain rule/term, put it in "conflicts" with "conflictsWith" naming the clash — never silently override. ' +
+    'Keep Hebrew in Hebrew; never translate the rule text. Return ONLY JSON: {"rules":[{"cat":"…","text":"…"}],"glossary":[{"en":"…","he":"…","note":"…"}],"conflicts":[{"cat":"…","text":"…","conflictsWith":"…"}]}.';
+}
+async function lrnDistill() {
+  const key = await store.get('key', '');
+  if (!key) { lrnInfo('Add your OpenAI key in Settings first.', 'err'); $('settings').open = true; return; }
+  if (!LRN.rows.length) { lrnInfo('Add validated rows first.', 'err'); return; }
+  const model = $('model').value;
+  const capped = LRN.rows.slice(0, LRN_CAP);
+  const existing = ((BRAIN.rules || []).map((r) => '- [' + r.cat + '] ' + r.text).join('\n') + '\n' + (BRAIN.glossary || []).map((g) => '- "' + g.en + '" → "' + g.he + '"').join('\n')).trim();
+  const sys = lrnSys();
+  const agg = { rules: [], glossary: [], conflicts: [] };
+  if ($('lq-learn-distill')) $('lq-learn-distill').disabled = true; let dropTemp = false;
+  try {
+    for (let i = 0; i < capped.length; i += LRN_BATCH) {
+      const chunk = capped.slice(i, i + LRN_BATCH);
+      lrnInfo(`Distilling ${i + 1}–${Math.min(i + LRN_BATCH, capped.length)} of ${capped.length}…`);
+      const doc = chunk.map((p, j) => `${j + 1}. EN: ${p.src}\n   WRONG: ${p.wrong}\n   CORRECT: ${p.final}${p.comment ? `\n   WHY: ${p.comment}` : ''}`).join('\n');
+      const user = 'EXISTING BRAIN (already enforced — do NOT repeat; contradictions → "conflicts"):\n' + (existing || '(only the built-in base guide so far)') + '\n\nCONFIRMED MISTAKES TO LEARN FROM:\n' + doc;
+      const callGpt = async () => {
+        const body = { model, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: sys }, { role: 'user', content: user }] };
+        if (!dropTemp) body.temperature = 0.1;
+        const rr = await fetch('https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const data = await rr.json();
+        if (!rr.ok) throw new Error((data.error && data.error.message) || ('HTTP ' + rr.status));
+        return data;
+      };
+      let data;
+      try { data = await callGpt(); }
+      catch (e1) { if (!dropTemp && /temperature/i.test(e1.message || '')) { dropTemp = true; data = await callGpt(); } else throw e1; }
+      let o = {}; try { o = JSON.parse(data.choices[0].message.content); } catch (e) { continue; }
+      (o.rules || []).forEach((x) => agg.rules.push(x));
+      (o.glossary || []).forEach((x) => agg.glossary.push(x));
+      (o.conflicts || []).forEach((x) => agg.conflicts.push(x));
+      if (i + LRN_BATCH < capped.length) await new Promise((r) => setTimeout(r, 200));
+    }
+    const seenR = new Set(), rules = [];
+    for (const x of agg.rules) { const t = String(x.text || '').trim(); const kk = (x.cat || '') + '|' + wbNorm(t).toLowerCase(); if (!t || seenR.has(kk)) continue; seenR.add(kk); rules.push({ cat: x.cat || 'misc', text: t, accept: true }); }
+    const seenG = new Set(), glossary = [];
+    for (const x of agg.glossary) { const en = String(x.en || '').trim(), he = String(x.he || '').trim(); if (!en || !he) continue; const kk = en.toLowerCase(); if (seenG.has(kk)) continue; seenG.add(kk); glossary.push({ en, he, note: String(x.note || '').trim(), accept: true }); }
+    const seenC = new Set(), conflicts = [];
+    for (const x of agg.conflicts) { const t = String(x.text || '').trim(); const kk = wbNorm(t).toLowerCase(); if (!t || seenC.has(kk)) continue; seenC.add(kk); conflicts.push({ cat: x.cat || 'misc', text: t, conflictsWith: String(x.conflictsWith || '').trim(), accept: false }); }
+    brainProposal = { rules, glossary, conflicts, sourceLabel: ('AI-check: ' + lrnSheetName()).slice(0, 60) };
+    brainRenderReview(); if ($('brain-card')) $('brain-card').open = true; if ($('brain-review')) $('brain-review').scrollIntoView({ block: 'nearest' });
+    lrnInfo(`Distilled ${rules.length} rule(s) · ${glossary.length} term(s)${conflicts.length ? ` · ⚠ ${conflicts.length} conflict ticket(s)` : ''} from ${capped.length} correction(s) — review & merge in 🧠 Style Brain above.`, 'good');
+  } catch (e) { lrnInfo('Distill failed: ' + (e.message || e), 'err'); }
+  finally { if ($('lq-learn-distill')) $('lq-learn-distill').disabled = false; }
+}
+
+// ---- CONFLICT ADJUDICATOR (orange ⚠) ---------------------------------------
+// A glossary term or a remembered source can hold only ONE target. When a NEW pairing collides
+// with a stored one (same EN term → different HE, or same source → different memory target), we
+// do NOT silently overwrite (the old behaviour, "newest wins"): the clash is parked here and shown
+// as an orange ⚠ card. You pick the wording to keep on the spot — the one you don't pick is deleted.
+// Fed by: lrnToMemory (memory), brainMerge (distilled glossary), and the manual add fields.
+let CONF = [];   // {kind:'mem'|'gloss', label?, en?, note?, source?, srcKey?, src?, oldVal, newVal}
+function confInfo(m, k) { info('conf-info', m, k || ''); }
+function confAdd(items) { for (const it of items) CONF.push(it); confRender(); }
+function confRender() {
+  const box = $('conf-card'); if (!box) return;
+  if (!CONF.length) { box.hidden = true; if ($('conf-list')) $('conf-list').innerHTML = ''; if ($('conf-count')) $('conf-count').textContent = ''; return; }
+  box.hidden = false; box.open = true;
+  const rows = CONF.map((c, i) => {
+    const head = c.kind === 'mem'
+      ? `<span dir="ltr">${esc(c.label)}</span> <span class="hint">— remembered source</span>`
+      : `<span dir="ltr">${esc(c.en)}</span> <span class="hint">— glossary term</span>`;
+    return `<div class="conf-item">
+      <div class="conf-head">⚠ ${head}</div>
+      <div class="conf-opt"><button class="btn xs" data-i="${i}" data-keep="old">Keep current</button><span class="conf-val" dir="auto">${esc(c.oldVal)}</span></div>
+      <div class="conf-opt"><button class="btn xs" data-i="${i}" data-keep="new">Use new</button><span class="conf-val" dir="auto">${esc(c.newVal)}</span></div>
+    </div>`;
+  }).join('');
+  if ($('conf-list')) $('conf-list').innerHTML = rows;
+  if ($('conf-count')) $('conf-count').textContent = `· ${CONF.length}`;
+  box.querySelectorAll('#conf-list button[data-keep]').forEach((b) => b.addEventListener('click', () => confResolve(+b.getAttribute('data-i'), b.getAttribute('data-keep'))));
+}
+async function confResolve(i, keep) {
+  const c = CONF[i]; if (!c) return;
+  if (c.kind === 'mem') {
+    if (keep === 'new') { TM.map[c.srcKey] = { src: c.src, tgt: c.newVal, ts: Date.now(), n: 1 }; await tmSave(); tmRefresh(); }
+    // keep === 'old' → leave memory as is; the unselected new string is simply dropped
+  } else {   // glossary
+    if (keep === 'new') {
+      BRAIN.glossary = (BRAIN.glossary || []).filter((g) => (g.en || '').toLowerCase() !== c.en.toLowerCase());
+      BRAIN.glossary.push({ id: brainUid(), en: c.en, he: c.newVal, note: c.note || '', source: c.source || 'adjudicated', ts: Date.now() });
+      await brainSave(); brainRefresh();
+    }
+    // keep === 'old' → existing brain term stays; the unselected new one is dropped
+  }
+  CONF.splice(i, 1); confRender();
+  confInfo(CONF.length ? (keep === 'new' ? 'Kept the new wording — previous deleted. ' + CONF.length + ' conflict(s) left.' : 'Kept the current wording — new one discarded. ' + CONF.length + ' left.')
+    : (keep === 'new' ? 'Kept the new wording — previous deleted. All conflicts resolved.' : 'Kept the current wording — new one discarded. All conflicts resolved.'), 'good');
 }
 
 async function brainGrab() {
@@ -3581,7 +3738,13 @@ async function init() {
   if ($('bm-add-term')) $('bm-add-term').addEventListener('click', async () => {
     const en = ($('bm-en').value || '').trim(), he = ($('bm-he').value || '').trim(), note = ($('bm-note').value || '').trim();
     if (!en || !he) { bmInfo('Both EN and HE are required for a term.', 'err'); return; }
-    BRAIN.glossary = BRAIN.glossary.filter((g) => (g.en || '').toLowerCase() !== en.toLowerCase());   // newest wins
+    const clash = (BRAIN.glossary || []).find((g) => (g.en || '').toLowerCase() === en.toLowerCase() && wbFold(g.he) !== wbFold(he));
+    if (clash) {   // same EN already maps to a DIFFERENT HE → adjudicate instead of silently overwriting
+      confAdd([{ kind: 'gloss', en, oldVal: clash.he, newVal: he, note, source: 'manual' }]);
+      $('bm-en').value = ''; $('bm-he').value = ''; $('bm-note').value = '';
+      bmInfo(`"${en}" already maps to a different term — resolve the orange ⚠ conflict below.`, 'err'); return;
+    }
+    BRAIN.glossary = BRAIN.glossary.filter((g) => (g.en || '').toLowerCase() !== en.toLowerCase());   // same-en refresh
     BRAIN.glossary.push({ id: brainUid(), en, he, note, source: 'manual', ts: Date.now() });
     await brainSave(); brainRefresh(); $('bm-en').value = ''; $('bm-he').value = ''; $('bm-note').value = '';
     bmInfo(`Added term "${en}" → "${he}". Brain: ${BRAIN.rules.length} rules · ${BRAIN.glossary.length} terms.`, 'good');
@@ -3600,7 +3763,13 @@ async function init() {
   if ($('tm-add')) $('tm-add').addEventListener('click', async () => {
     const src = ($('tm-add-src').value || '').trim(), tgt = ($('tm-add-tgt').value || '').trim();
     if (!src || !tgt) { tmInfo('Enter both a source and your target.', 'err'); return; }
-    const existed = !!tmLookup(src);
+    const prev = tmLookup(src);
+    if (prev && wbFold(prev.tgt) !== wbFold(tgt)) {   // same source already remembered with a DIFFERENT target → adjudicate
+      confAdd([{ kind: 'mem', label: src, srcKey: tmKey(src), src, oldVal: prev.tgt, newVal: tgt }]);
+      $('tm-add-src').value = ''; $('tm-add-tgt').value = '';
+      tmInfo(`"${src}" is already remembered with a different target — resolve the orange ⚠ conflict below.`, 'err'); return;
+    }
+    const existed = !!prev;
     tmRecordOne(src, tgt); await tmSave(); tmRefresh();
     $('tm-add-src').value = ''; $('tm-add-tgt').value = '';
     tmInfo(`${existed ? 'Updated' : 'Remembered'} — "${src}" → "${tgt}". ${tmCount()} string(s).`, 'good');
@@ -3656,6 +3825,10 @@ async function init() {
   $('lq-copy-agree').addEventListener('click', (e) => lqCopyAgreeFixed(e.currentTarget));
   $('lq-dl-agree').addEventListener('click', (e) => lqDownloadAgreeFixed(e.currentTarget));
   document.querySelectorAll('#lq-paste-card [data-col]').forEach((b) => b.addEventListener('click', () => lqCopyCol(b.dataset.col, b)));
+  if ($('lq-learn-add')) $('lq-learn-add').addEventListener('click', lrnAdd);
+  if ($('lq-learn-clear')) $('lq-learn-clear').addEventListener('click', lrnClear);
+  if ($('lq-learn-mem')) $('lq-learn-mem').addEventListener('click', lrnToMemory);
+  if ($('lq-learn-distill')) $('lq-learn-distill').addEventListener('click', lrnDistill);
 
   // Sheet → Starling write-back (Mode 3)
   $('mode-wb').addEventListener('click', () => setMode('wb'));

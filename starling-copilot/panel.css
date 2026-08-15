@@ -156,6 +156,15 @@ textarea { font-family: ui-monospace, Menlo, Consolas, monospace; resize: vertic
 .brain-item.gloss .bi-text { direction: rtl; text-align: right; }
 .brain-item.conflict { border-color: #7a5c0a; background: rgba(122,92,10,.14); }
 .brain-item.conflict .bi-cat { color: #d6b24e; border-color: #7a5c0a; }
+/* Conflict adjudicator (orange ⚠) */
+#conf-card { border-color: var(--warn); }
+#conf-card > summary { color: var(--warn); }
+.conf-list { display: flex; flex-direction: column; gap: 8px; margin: 8px 0; }
+.conf-item { border: 1px solid var(--warn); border-radius: 8px; padding: 8px 10px; background: rgba(217,119,6,.12); }
+.conf-head { font-weight: 600; margin-bottom: 6px; overflow-wrap: anywhere; }
+.conf-opt { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.conf-opt .conf-val { flex: 1; overflow-wrap: anywhere; }
+.conf-opt .btn.xs { flex: 0 0 auto; min-width: 84px; }
 .brain-sec { font-size: 11px; color: var(--dim); margin: 6px 0 2px; font-weight: 600; }
 .brain-list { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; max-height: 260px; overflow-y: auto; }
 .brain-list .bl-row { display: flex; gap: 6px; align-items: flex-start; font-size: 11.5px; }

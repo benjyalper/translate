@@ -141,6 +141,13 @@
       </div>
     </details>
 
+    <details class="card" id="conf-card" hidden>
+      <summary>⚠ Conflicts to resolve <span id="conf-count" class="hint"></span></summary>
+      <p class="hint">A glossary term or a remembered source can hold only <b>one</b> target. When a new pairing clashes with a stored one, it's parked here instead of silently overwriting. Pick the wording to keep — <b>the one you don't pick is deleted</b>.</p>
+      <div id="conf-list" class="conf-list"></div>
+      <div id="conf-info" class="info"></div>
+    </details>
+
     <div id="view-starling">
     <!-- STEP 1 · HARVEST -->
     <section class="card">
@@ -325,6 +332,22 @@
           <button class="btn sm" id="lq-dl-agree" title="Download the loaded .xlsx with column J=&quot;agree&quot; filled for every agreed row (column I untouched, all tabs preserved). No pasting needed.">📄 Download sheet (J = agree)</button>
         </div>
         <div id="lq-paste-info" class="info"></div>
+      </section>
+
+      <!-- LEARN FROM VALIDATED ROWS · teach the brain & memory from your Valid=Yes marks -->
+      <section class="card" id="lq-learn-card" hidden>
+        <div class="step"><span class="num">🧠</span> Learn from validated rows</div>
+        <div class="hint">Teach from the rows you marked <b>Valid = Yes</b> (respects the Hebrew + level filters above). Each is a confirmed GPT mistake plus your fix — the best learning signal. Load <b>8.7 sync</b> → Add; switch the Sheet-tab to <b>8.12 sync</b> → Add; then teach once. Anything that clashes with a stored term/memory is raised as an orange ⚠ conflict — nothing overwrites without you.</div>
+        <div class="row" style="margin-top:8px;gap:6px">
+          <button id="lq-learn-add" class="btn sm">➕ Add this sheet's validated rows</button>
+          <button id="lq-learn-clear" class="btn sm ghost">Clear learn-set</button>
+        </div>
+        <div id="lq-learn-state" class="hint" style="margin:6px 0">Learn-set is empty.</div>
+        <div class="row" style="gap:6px">
+          <button id="lq-learn-mem" class="btn sm" disabled title="Store each source → your approved fix, so the corrected wording auto-fills whenever that exact source recurs">→ Consistency memory</button>
+          <button id="lq-learn-distill" class="btn sm" disabled title="Distill generalizable rules & term pairs from the wrong-vs-right corrections, then review before merging into the Style Brain">→ Distill brain (rules &amp; terms)</button>
+        </div>
+        <div id="lq-learn-info" class="info"></div>
       </section>
 
       <details class="card help">

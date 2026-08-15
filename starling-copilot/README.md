@@ -171,6 +171,35 @@ the Key→JSON hand-off are unchanged.
 
 Only the text columns go to GPT — **never the Feishu doc**. Keep shared-account credentials out.
 
+### 🧠 Learn from validated rows (teach the brain & memory)
+
+A sync/AI-check sheet you've already worked is **ground truth**: the **Valid = Yes** column is your
+call and **Final Translation** your fix, so every valid row is a *confirmed* MT/GPT mistake **plus**
+its approved correction — the best learning signal there is. After **Load rows**, a **🧠 Learn from
+validated rows** card appears (honours the **Hebrew** + **level** filters above):
+
+1. **➕ Add this sheet's validated rows** collects every **Valid = Yes** row (fix = *Final*, or the
+   *AI suggested* it accepted). It **accumulates** across tabs — Add on `8.7 sync`, switch the
+   Sheet-tab to `8.12 sync`, Add again — deduped by source+fix.
+2. **→ Consistency memory** stores each **source → your approved fix**, so the corrected wording
+   auto-fills whenever that exact source recurs (exact-match, no GPT).
+3. **→ Distill brain (rules & terms)** feeds GPT the **contrastive** `WRONG` vs `CORRECT` (+ the
+   reviewer *why*) in batches and extracts **generalizable** rules (register, punctuation,
+   translate country/region names, keep-in-Latin…) and **EN→HE term pairs** (e.g. *Cast* → להק,
+   *Follow back* → לעקוב בחזרה) — routed through the Style-Brain **review → merge** flow so you vet
+   everything first. Nothing here re-runs the adjudication; it reads the human marks you already made.
+
+### ⚠ Conflict adjudicator (orange)
+
+A glossary term or a remembered source can hold only **one** target. Whenever a *new* pairing would
+overwrite a *different* stored one — same **EN term → different HE**, or same **source → different
+memory target** — it is **not** silently replaced (the old "newest wins"). It's parked in an orange
+**⚠ Conflicts to resolve** card with both wordings and **Keep current / Use new** buttons: you pick on
+the spot and **the one you don't pick is deleted**. This fires from *→ Consistency memory*, from a
+Style-Brain **merge**, and from the manual *Add term* / *Remember* fields. (Running the learn flow on
+real sheets already surfaces genuine clashes — e.g. *Ask your guardian…* rendered both with **הורה**
+and **אפוטרופוס/ית**, or *Terms and Conditions* as **תנאים וההגבלות** vs **תנאים והתניות** — for you to settle once.)
+
 ---
 
 ## ↩ Sheet → Starling mode (write-back)
@@ -535,6 +564,8 @@ Default selectors are **unions** covering both editors; hidden measurement-clone
 | — | *(panel-only, no CS bump)* **📚 Learn from a Starling task** — harvest a submitted task's proofread-confirmed pairs (`apiTask`, status 3) → add to Consistency memory + GPT-distill rules/terms/tone into the brain's review→merge flow, with brain conflicts raised as decision tickets |
 | — | *(panel-only, no CS bump)* Feishu LQA **run errors surfaced** + auto-retry without `temperature` when a model rejects it |
 | — | *(panel-only, no CS bump)* Feishu LQA **Error-level filter** (opt-in, e.g. *Minor only*) + per-card **Agree** toggle → column **J** `agree` + column **K** *Final translation* (agreed rows only); column I untouched; download stamps J/K headers so **↩ Sheet → Starling** auto-detects the **XBench "agree" export** (key→`keys`, fix→column K *Final translation*→`CorrectTarget`, gate on J) and queues **agree-only** — every prior flow stays the default/selectable |
+| — | *(panel-only, no CS bump)* **🧠 Learn from validated rows** in Feishu LQA — collects your **Valid = Yes** rows (fix = *Final*/*AI*) across sheet tabs → **→ Consistency memory** (source→approved-fix) and **→ Distill brain** (contrastive *WRONG* vs *CORRECT* + *why* → generalizable rules & EN→HE term pairs, via the brain review→merge flow). Maps the **Final Translation** column (col K) for auto-detect |
+| — | *(panel-only, no CS bump)* **⚠ Conflict adjudicator** — a colliding **glossary term** (same EN → different HE) or **remembered source** (same source → different target) is parked in an orange card instead of silently overwriting ("newest wins" retired); **Keep current / Use new** deletes the unpicked wording. Fires from the learn flow, brain **merge**, and the manual *Add term* / *Remember* fields |
 
 ## Test the panel offline
 ```bash
