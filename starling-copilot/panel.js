@@ -413,6 +413,7 @@ async function brainLoad() { try { BRAIN = await store.get('styleBrain', { rules
 async function brainSave() { BRAIN.updatedAt = Date.now(); try { await store.set({ styleBrain: BRAIN }); } catch (e) {} }
 function brainText() {
   let s = STYLE_GUIDE;
+  s += lockText();   // MANDATORY locked terms — sit at the top so they outrank the ingested rules/glossary below
   const rules = (BRAIN && BRAIN.rules) || [], gloss = (BRAIN && BRAIN.glossary) || [];
   if (rules.length) {
     s += '- ADDITIONAL HOUSE RULES (distilled from official style docs — follow these too; if one contradicts a rule above, the more specific / more recent one wins):\n';
@@ -496,6 +497,60 @@ function tmApply(proposals) {
         p.approved = !p.manual && p.next !== String(p.old);
       }
     }
+  }
+}
+
+// ---- LOCKED TERMS: a "must" glossary (mandatory EN→HE) --------------------
+// Two-tier enforcement, chosen by the user as FLAG-ONLY (never auto-edits, so it
+// can't corrupt Hebrew inflection):
+//   1) PROMPT tier — lockText() injects each term into the GPT system prompt with
+//      hard "NON-NEGOTIABLE" wording (reaches 🐦 Starling + ⚖️ Feishu via brainText()).
+//   2) POST-CHECK tier — after a Run, lockCheck() scans each proposal: if a locked
+//      EN term is in the source but its required HE is missing from the target, the
+//      row gets a red "🔒 locked" flag so it can't ship unnoticed. You fix it by hand.
+// Stored in chrome.storage as { terms:[{id,en,he,note,ts}], updatedAt }.
+let LOCK = { terms: [], updatedAt: 0 };
+async function lockLoad() { try { LOCK = await store.get('lockedTerms', { terms: [], updatedAt: 0 }); } catch (e) {} if (!LOCK || !LOCK.terms) LOCK = { terms: [], updatedAt: 0 }; return LOCK; }
+async function lockSave() { LOCK.updatedAt = Date.now(); try { await store.set({ lockedTerms: LOCK }); } catch (e) {} }
+function lockCount() { return LOCK && LOCK.terms ? LOCK.terms.length : 0; }
+function lockEsc(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+// The locked block for the GPT prompt (empty when no terms, so it costs nothing).
+function lockText() {
+  const terms = (LOCK && LOCK.terms) || [];
+  if (!terms.length) return '';
+  let s = '- LOCKED TERMS (MANDATORY — NON-NEGOTIABLE): each source term below MUST be rendered with EXACTLY the Hebrew given. You may ONLY attach a Hebrew prefix (ב/ל/ה/מ/ו/ש/כ — with a maqaf before a Latin term, e.g. ב-TikTok) and let it inflect for grammar; NEVER substitute a synonym, reorder its words, or reword it. This OVERRIDES any other glossary or house rule.\n';
+  for (const t of terms) s += '  • "' + t.en + '" → "' + t.he + '"' + (t.note ? ' — ' + t.note : '') + '\n';
+  return s;
+}
+// Is the locked EN term present in the source (boundary-aware, case-insensitive)?
+function lockSrcHas(src, en) {
+  const e = String(en == null ? '' : en).trim(); if (!e) return false;
+  try { return new RegExp('(?<![A-Za-z0-9])' + lockEsc(e) + '(?![A-Za-z0-9])', 'i').test(String(src == null ? '' : src)); }
+  catch (_) { return String(src == null ? '' : src).toLowerCase().includes(e.toLowerCase()); }
+}
+// Does the target contain the required HE? Allow a fused prefix (the term still appears
+// verbatim after ב/ל/מ/ו/ש/כ) and the definite-ה dropping after a prefix (ההגדרות→בהגדרות).
+function lockTgtHas(tgt, he) {
+  const h = String(he == null ? '' : he).trim(); if (!h) return true;
+  const t = wbFold(String(tgt == null ? '' : tgt));
+  const cands = [wbFold(h)];
+  if (h[0] === 'ה') cands.push(wbFold(h.slice(1)));   // definite article may fuse into a prefix
+  return cands.some((c) => c && t.includes(c));
+}
+// Which locked terms are required by the source but missing from the target.
+function lockViolations(src, tgt) {
+  const terms = (LOCK && LOCK.terms) || []; if (!terms.length) return [];
+  const out = [];
+  for (const t of terms) { if (lockSrcHas(src, t.en) && !lockTgtHas(tgt, t.he)) out.push(t); }
+  return out;
+}
+// Tag every proposal with p.lockMiss = ["EN → HE", …] (or null) for the review badge.
+function lockCheck(proposals) {
+  const terms = (LOCK && LOCK.terms) || [];
+  for (const p of proposals) {
+    if (!terms.length) { p.lockMiss = null; continue; }
+    const v = lockViolations(p.src, p.next);
+    p.lockMiss = v.length ? v.map((t) => t.en + ' → ' + t.he) : null;
   }
 }
 
@@ -676,6 +731,7 @@ async function doGpt() {
       }
     }
     tmApply(proposals);   // enforce your remembered wording on exact-source recurrences
+    lockCheck(proposals); // flag rows where a MANDATORY locked term is missing from the target
     state.proposals = proposals;
     const changed = proposals.filter((p) => p.next !== p.old).length;
     const tmN = proposals.filter((p) => p.tm || p.dedupe).length;
@@ -745,6 +801,7 @@ function renderReview() {
         ${brandIssue(p.src, p.next) ? `<span class="rc-warn" title="A product name from the source (${esc(brandIssue(p.src, p.next))}) isn't kept verbatim — check the brand spelling/spacing.">⚠ brand</span>` : ''}
         ${boldIssue(p.src, p.next) ? `<span class="rc-warn" title="Markdown **bold** from the source (**${esc(boldIssue(p.src, p.next))}**) isn't wrapped in the target — the asterisks were dropped. Add ** around the matching term.">⚠ bold</span>` : ''}
         ${p.flag ? `<span class="rc-warn" title="${esc(p.flag)}" style="background:#7a5c0a">⚠ register</span>` : ''}
+        ${p.lockMiss ? `<span class="rc-warn" style="background:#b91c1c" title="MANDATORY locked term missing from the target — must be rendered exactly (a prefix is OK): ${esc(p.lockMiss.join(' · '))}. Fix the Hebrew, then this clears.">🔒 locked term</span>` : ''}
         <div class="rc-ctl">${control}</div>
       </div>
       ${p.src ? `<div class="rc-src" dir="ltr">${hl(esc(p.src))}</div>` : ''}
@@ -779,7 +836,11 @@ function renderReview() {
       const p = state.proposals[+card.dataset.i]; if (!p) return;
       const norm = matchTrailingNL(p.src, mirrorEdges(p.src, p.next));
       if (norm !== p.next) p.next = norm;
-      if (ed.classList.contains('has-tags')) renderReview();          // tagged: re-split the per-part Copy blocks
+      // Re-run the locked-term check on the edited text so the 🔒 flag clears (or re-appears) live.
+      const wasMiss = p.lockMiss ? p.lockMiss.join('|') : '';
+      const v = lockViolations(p.src, p.next); p.lockMiss = v.length ? v.map((t) => t.en + ' → ' + t.he) : null;
+      const nowMiss = p.lockMiss ? p.lockMiss.join('|') : '';
+      if (ed.classList.contains('has-tags') || wasMiss !== nowMiss) renderReview();   // re-split parts and/or refresh the badge
       else if (ed.innerText !== norm) ed.textContent = norm;          // reflect the cleaned text
     });
   });
@@ -3689,6 +3750,49 @@ async function tmImport(file) {
   } catch (e) { tmInfo('Import failed: ' + e.message, 'err'); }
 }
 
+// ---- LOCKED TERMS UI ------------------------------------------------------
+function lockInfo(msg, cls) { const el = $('lock-info'); if (el) { el.textContent = msg || ''; el.className = 'info' + (cls ? ' ' + cls : ''); } }
+function lockRefresh() {
+  const b = $('lock-badge'); if (b) b.textContent = lockCount() ? `· ${lockCount()} term${lockCount() === 1 ? '' : 's'}` : '· empty';
+  const n = $('lock-count-n'); if (n) n.textContent = lockCount();
+  lockRenderList($('lock-search') ? $('lock-search').value : '');
+}
+function lockRenderList(filter) {
+  const box = $('lock-list'); if (!box) return;
+  const q = (filter || '').toLowerCase().trim();
+  const rows = (LOCK.terms || [])
+    .filter((t) => !q || (t.en || '').toLowerCase().includes(q) || (t.he || '').toLowerCase().includes(q) || (t.note || '').toLowerCase().includes(q))
+    .sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  box.innerHTML = rows.length
+    ? rows.map((t) => `<div class="bl-row"><button class="bl-del" data-lid="${esc(t.id)}" title="Remove this locked term">✕</button><span class="bi-text"><span dir="ltr">${esc(t.en)}</span> → <span dir="rtl">${esc(t.he)}</span>${t.note ? ` <span class="hint">— ${esc(t.note)}</span>` : ''}</span></div>`).join('')
+    : '<div class="hint">No locked terms yet — add one above.</div>';
+  box.querySelectorAll('.bl-del').forEach((btn) => btn.addEventListener('click', async () => {
+    const id = btn.getAttribute('data-lid'); LOCK.terms = (LOCK.terms || []).filter((t) => String(t.id) !== id);
+    await lockSave(); lockRefresh(); lockInfo('Removed 1 locked term.', '');
+  }));
+}
+function lockExport() {
+  const blob = new Blob([JSON.stringify(LOCK, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'locked-terms-' + new Date().toISOString().slice(0, 10) + '.json'; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+async function lockImport(file) {
+  try {
+    const o = JSON.parse(await file.text());
+    const arr = o && Array.isArray(o.terms) ? o.terms : (Array.isArray(o) ? o : null);
+    if (!arr) throw new Error('not a locked-terms JSON.');
+    let n = 0;
+    for (const t of arr) {
+      const en = String(t.en || '').trim(), he = String(t.he || '').trim(); if (!en || !he) continue;
+      LOCK.terms = (LOCK.terms || []).filter((x) => (x.en || '').toLowerCase() !== en.toLowerCase());
+      LOCK.terms.push({ id: brainUid(), en, he, note: String(t.note || '').trim(), ts: Date.now() }); n++;
+    }
+    await lockSave(); lockRefresh();
+    lockInfo(`Imported ${n} locked term(s) — ${lockCount()} total.`, 'good');
+  } catch (e) { lockInfo('Import failed: ' + e.message, 'err'); }
+}
+
 async function init() {
   $('key').value = await store.get('key', '');
   $('model').value = await store.get('model', 'gpt-5.4');
@@ -3797,6 +3901,26 @@ async function init() {
   $('tm-clear').addEventListener('click', async () => {
     if (!clearPass('every remembered string in the Consistency memory')) return;
     TM = { map: {}, enabled: TM.enabled, updatedAt: 0, defaultOffMigrated: true }; await tmSave(); tmRefresh(); tmInfo('Memory cleared.', '');
+  });
+
+  // Locked terms (mandatory "must" glossary)
+  await lockLoad(); lockRefresh();
+  if ($('lock-add')) $('lock-add').addEventListener('click', async () => {
+    const en = ($('lock-en').value || '').trim(), he = ($('lock-he').value || '').trim(), note = ($('lock-note').value || '').trim();
+    if (!en || !he) { lockInfo('Both EN and HE are required for a locked term.', 'err'); return; }
+    const existed = (LOCK.terms || []).some((t) => (t.en || '').toLowerCase() === en.toLowerCase());
+    LOCK.terms = (LOCK.terms || []).filter((t) => (t.en || '').toLowerCase() !== en.toLowerCase());   // same-EN refresh (last write wins)
+    LOCK.terms.push({ id: brainUid(), en, he, note, ts: Date.now() });
+    await lockSave(); lockRefresh();
+    $('lock-en').value = ''; $('lock-he').value = ''; $('lock-note').value = '';
+    lockInfo(`${existed ? 'Updated' : 'Locked'} "${en}" → "${he}". ${lockCount()} term(s) — mandatory on the next Run.`, 'good');
+  });
+  if ($('lock-export')) $('lock-export').addEventListener('click', lockExport);
+  if ($('lock-import')) $('lock-import').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) lockImport(f); e.target.value = ''; });
+  if ($('lock-search')) $('lock-search').addEventListener('input', (e) => lockRenderList(e.target.value));
+  if ($('lock-clear')) $('lock-clear').addEventListener('click', async () => {
+    if (!clearPass('every locked term')) return;
+    LOCK = { terms: [], updatedAt: 0 }; await lockSave(); lockRefresh(); lockInfo('All locked terms cleared.', '');
   });
 
   $('harvest').addEventListener('click', doHarvest);
