@@ -554,6 +554,61 @@ function lockCheck(proposals) {
   }
 }
 
+// ---- AUTO-FIX: deterministic post-GPT rewriter ("smart scanner") -----------
+// A curated dictionary of locked Hebrew corrections applied to every target AFTER
+// the GPT run (and after memory/locked-term checks) — e.g. a plural imperative GPT
+// still returned is rewritten to your singular gender-slash form: שלמו→שלם/י,
+// הצטרפו→הצטרף/י, נסו→נסה/י … It is a DICTIONARY, not auto-morphology, because Hebrew
+// imperatives are irregular (נסו→נסה/י, not נס/י) — you lock in both sides so each fix
+// is correct by construction. Whole-word (Hebrew-boundary) match, an optional leading
+// ו is preserved (והצטרפו→והצטרף/י). Every change is badged ✎ auto-fixed and reversible
+// by editing the row. Stored as { rules:[{id,from,to,note,ts}], enabled, seeded, updatedAt }.
+const HEB_L = 'א-ת';
+const FIX_SEED = [
+  { from: 'שלמו', to: 'שלם/י' }, { from: 'הצטרפו', to: 'הצטרף/י' }, { from: 'נסו', to: 'נסה/י' },
+  { from: 'חכו', to: 'חכה/י' }, { from: 'היכנסו', to: 'היכנס/י' }, { from: 'בדקו', to: 'בדוק/בדקי' },
+];
+let FIX = { rules: [], enabled: true, seeded: false, updatedAt: 0 };
+async function fixLoad() {
+  try { FIX = await store.get('autoFix', { rules: [], enabled: true, seeded: false, updatedAt: 0 }); } catch (e) {}
+  if (!FIX || !FIX.rules) FIX = { rules: [], enabled: true, seeded: false, updatedAt: 0 };
+  if (FIX.enabled === undefined) FIX.enabled = true;
+  if (!FIX.seeded) {   // first ever load → seed the user's starter corrections (stays cleared if they clear it later)
+    FIX.seeded = true;
+    for (const s of FIX_SEED) FIX.rules.push({ id: fixUid(), from: s.from, to: s.to, note: '', ts: Date.now() });
+    try { await store.set({ autoFix: FIX }); } catch (e) {}
+  }
+  return FIX;
+}
+async function fixSave() { FIX.updatedAt = Date.now(); try { await store.set({ autoFix: FIX }); } catch (e) {} }
+function fixCount() { return FIX && FIX.rules ? FIX.rules.length : 0; }
+function fixUid() { return 'fx' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
+function fixEsc(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+// Apply every enabled rule to one string. Returns { text, changes:[{from,to}] }.
+function fixApplyText(text) {
+  let s = String(text == null ? '' : text); const changes = [];
+  for (const r of (FIX.rules || [])) {
+    const from = String(r.from == null ? '' : r.from).trim(), to = String(r.to == null ? '' : r.to);
+    if (!from || !to) continue;
+    let re; try { re = new RegExp('(^|[^' + HEB_L + '])(ו?)(' + fixEsc(from) + ')(?![' + HEB_L + '])', 'g'); } catch (_) { continue; }
+    s = s.replace(re, (m, pre, vav, w) => { changes.push({ from, to }); return pre + vav + to; });
+  }
+  return { text: s, changes };
+}
+// Rewrite every proposal's target in place; badge what changed. Never auto-approves a
+// memory-override row (that one is intentionally left for your review).
+function fixApply(proposals) {
+  if (!FIX || !FIX.enabled || !(FIX.rules || []).length) return;
+  for (const p of proposals) {
+    const res = fixApplyText(p.next);
+    if (res.text !== p.next) {
+      p.fixPrev = p.next; p.next = res.text;
+      const seen = new Set(); p.fixApplied = res.changes.filter((c) => { const k = c.from + '⇢' + c.to; if (seen.has(k)) return false; seen.add(k); return true; }).map((c) => c.from + ' → ' + c.to);
+      if (!p.manual && !p.tmOverride && p.next !== String(p.old)) p.approved = true;
+    }
+  }
+}
+
 // ---- GPT: system prompt (identical policy to the admin Copy Deck tool) ------
 // tiktok=true appends the TikTok Hebrew Style Guide (Starling / Feishu). Omit it for memoQ/Crowdin/YiCAT.
 function sysPrompt(mode, plural, tiktok) {
@@ -575,7 +630,7 @@ function sysPrompt(mode, plural, tiktok) {
     '  • "fullSource" = the COMPLETE source string when "src" is only a split fragment of it. Use it to understand the fragment in context, but translate ONLY the "src" fragment — do NOT translate, add, or repeat the rest of "fullSource".\n' +
     (plural
       ? '- FORM OF ADDRESS: Hebrew MUST be in לשון רבים — plural, gender-neutral forms (e.g. הצטרפו, שלמו, לחצו, קראו ואשרו) — never masculine singular and never slash forms like שלם/י.\n'
-      : '- FORM OF ADDRESS: use the SINGULAR, gender-neutral second person with a slash for both genders (לחץ/י, את/ה, בחר/י). Put the final letter (אות סופית) BEFORE the slash. If the masculine and feminine suffixes differ, write BOTH words in full to avoid a malformed feminine (התחל/התחילי, not התחל/י). Use the imperative when the source is imperative. Do NOT use the plural form of address and do NOT use masculine-singular alone.\n') +
+      : '- FORM OF ADDRESS: use the SINGULAR, gender-neutral second person with a slash for both genders (לחץ/י, את/ה, בחר/י). Put the final letter (אות סופית) BEFORE the slash. If the masculine and feminine suffixes differ, write BOTH words in full to avoid a malformed feminine (התחל/התחילי, not התחל/י). Use the imperative when the source is imperative. NEVER use the plural form of address (לשון רבים) and NEVER use masculine-singular alone — even when the source number/gender is ambiguous, DEFAULT to this singular gender-slash form. Convert any plural imperative to it: הצטרפו→הצטרף/י, נסו→נסה/י, חכו→חכה/י, היכנסו→היכנס/י, שלמו→שלם/י, לחצו→לחץ/י, קראו→קרא/י; and when the stem differs write both words IN FULL: בדקו→בדוק/בדקי, אמרו→אמור/אמרי, שמרו→שמור/שמרי.\n') +
     (tiktok ? brainText() : '') +
     '- Return ONLY the JSON object requested. No commentary, no markdown, no code fences.';
   if (mode === 'translate') return base + '\nTASK: Translate each item\'s English "src" into natural, idiomatic Hebrew.';
@@ -731,7 +786,8 @@ async function doGpt() {
       }
     }
     tmApply(proposals);   // enforce your remembered wording on exact-source recurrences
-    lockCheck(proposals); // flag rows where a MANDATORY locked term is missing from the target
+    fixApply(proposals);  // deterministic post-GPT rewrites (plural imperative → your singular slash form, etc.)
+    lockCheck(proposals); // flag rows where a MANDATORY locked term is missing from the target (sees the fixed text)
     state.proposals = proposals;
     const changed = proposals.filter((p) => p.next !== p.old).length;
     const tmN = proposals.filter((p) => p.tm || p.dedupe).length;
@@ -802,6 +858,7 @@ function renderReview() {
         ${boldIssue(p.src, p.next) ? `<span class="rc-warn" title="Markdown **bold** from the source (**${esc(boldIssue(p.src, p.next))}**) isn't wrapped in the target — the asterisks were dropped. Add ** around the matching term.">⚠ bold</span>` : ''}
         ${p.flag ? `<span class="rc-warn" title="${esc(p.flag)}" style="background:#7a5c0a">⚠ register</span>` : ''}
         ${p.lockMiss ? `<span class="rc-warn" style="background:#b91c1c" title="MANDATORY locked term missing from the target — must be rendered exactly (a prefix is OK): ${esc(p.lockMiss.join(' · '))}. Fix the Hebrew, then this clears.">🔒 locked term</span>` : ''}
+        ${p.fixApplied ? `<span class="rc-warn" style="background:#0e7490" title="Auto-corrected by your locked 🩹 Auto-fix rules: ${esc(p.fixApplied.join(' · '))}. Edit the text to revert.">✎ auto-fixed</span>` : ''}
         <div class="rc-ctl">${control}</div>
       </div>
       ${p.src ? `<div class="rc-src" dir="ltr">${hl(esc(p.src))}</div>` : ''}
@@ -3793,6 +3850,52 @@ async function lockImport(file) {
   } catch (e) { lockInfo('Import failed: ' + e.message, 'err'); }
 }
 
+// ---- AUTO-FIX UI ----------------------------------------------------------
+function fixInfo(msg, cls) { const el = $('fx-info'); if (el) { el.textContent = msg || ''; el.className = 'info' + (cls ? ' ' + cls : ''); } }
+function fixRefresh() {
+  const on = !!(FIX && FIX.enabled);
+  const b = $('fx-badge'); if (b) b.textContent = (fixCount() ? `· ${fixCount()} rule${fixCount() === 1 ? '' : 's'}` : '· empty') + (on ? '' : ' · off');
+  const t = $('fx-toggle'); if (t) t.checked = on;
+  const st = $('fx-state'); if (st) st.textContent = on ? '' : '— disabled (rules kept; tick to re-enable)';
+  const n = $('fx-count-n'); if (n) n.textContent = fixCount();
+  fixRenderList($('fx-search') ? $('fx-search').value : '');
+}
+function fixRenderList(filter) {
+  const box = $('fx-list'); if (!box) return;
+  const q = (filter || '').toLowerCase().trim();
+  const rows = (FIX.rules || [])
+    .filter((r) => !q || (r.from || '').toLowerCase().includes(q) || (r.to || '').toLowerCase().includes(q) || (r.note || '').toLowerCase().includes(q))
+    .sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  box.innerHTML = rows.length
+    ? rows.map((r) => `<div class="bl-row"><button class="bl-del" data-fid="${esc(r.id)}" title="Remove this auto-fix rule">✕</button><span class="bi-text"><span dir="rtl">${esc(r.from)}</span> → <span dir="rtl">${esc(r.to)}</span>${r.note ? ` <span class="hint">— ${esc(r.note)}</span>` : ''}</span></div>`).join('')
+    : '<div class="hint">No auto-fix rules — add one above.</div>';
+  box.querySelectorAll('.bl-del').forEach((btn) => btn.addEventListener('click', async () => {
+    const id = btn.getAttribute('data-fid'); FIX.rules = (FIX.rules || []).filter((r) => String(r.id) !== id);
+    await fixSave(); fixRefresh(); fixInfo('Removed 1 rule.', '');
+  }));
+}
+function fixExport() {
+  const blob = new Blob([JSON.stringify(FIX, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'auto-fix-rules-' + new Date().toISOString().slice(0, 10) + '.json'; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+async function fixImport(file) {
+  try {
+    const o = JSON.parse(await file.text());
+    const arr = o && Array.isArray(o.rules) ? o.rules : (Array.isArray(o) ? o : null);
+    if (!arr) throw new Error('not an auto-fix JSON.');
+    let n = 0;
+    for (const r of arr) {
+      const from = String(r.from || '').trim(), to = String(r.to || '').trim(); if (!from || !to) continue;
+      FIX.rules = (FIX.rules || []).filter((x) => (x.from || '') !== from);
+      FIX.rules.push({ id: fixUid(), from, to, note: String(r.note || '').trim(), ts: Date.now() }); n++;
+    }
+    await fixSave(); fixRefresh();
+    fixInfo(`Imported ${n} rule(s) — ${fixCount()} total.`, 'good');
+  } catch (e) { fixInfo('Import failed: ' + e.message, 'err'); }
+}
+
 async function init() {
   $('key').value = await store.get('key', '');
   $('model').value = await store.get('model', 'gpt-5.4');
@@ -3921,6 +4024,31 @@ async function init() {
   if ($('lock-clear')) $('lock-clear').addEventListener('click', async () => {
     if (!clearPass('every locked term')) return;
     LOCK = { terms: [], updatedAt: 0 }; await lockSave(); lockRefresh(); lockInfo('All locked terms cleared.', '');
+  });
+
+  // Auto-fix (deterministic post-GPT rewrites)
+  await fixLoad(); fixRefresh();
+  if ($('fx-add')) $('fx-add').addEventListener('click', async () => {
+    const from = ($('fx-from').value || '').trim(), to = ($('fx-to').value || '').trim(), note = ($('fx-note').value || '').trim();
+    if (!from || !to) { fixInfo('Both the word GPT returns and your replacement are required.', 'err'); return; }
+    if (from === to) { fixInfo('The replacement is identical to the source — nothing to fix.', 'err'); return; }
+    const existed = (FIX.rules || []).some((r) => (r.from || '') === from);
+    FIX.rules = (FIX.rules || []).filter((r) => (r.from || '') !== from);   // same-source refresh (last write wins)
+    FIX.rules.push({ id: fixUid(), from, to, note, ts: Date.now() });
+    await fixSave(); fixRefresh();
+    $('fx-from').value = ''; $('fx-to').value = ''; $('fx-note').value = '';
+    fixInfo(`${existed ? 'Updated' : 'Added'} "${from}" → "${to}". ${fixCount()} rule(s) — active on the next Run.`, 'good');
+  });
+  if ($('fx-toggle')) $('fx-toggle').addEventListener('change', async (e) => {
+    FIX.enabled = e.target.checked; await fixSave(); fixRefresh();
+    fixInfo(FIX.enabled ? 'On — targets are auto-corrected after each Run.' : 'Off — rules kept but not applied.', '');
+  });
+  if ($('fx-export')) $('fx-export').addEventListener('click', fixExport);
+  if ($('fx-import')) $('fx-import').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) fixImport(f); e.target.value = ''; });
+  if ($('fx-search')) $('fx-search').addEventListener('input', (e) => fixRenderList(e.target.value));
+  if ($('fx-clear')) $('fx-clear').addEventListener('click', async () => {
+    if (!clearPass('every auto-fix rule')) return;
+    FIX = { rules: [], enabled: FIX.enabled, seeded: true, updatedAt: 0 }; await fixSave(); fixRefresh(); fixInfo('All auto-fix rules cleared.', '');
   });
 
   $('harvest').addEventListener('click', doHarvest);

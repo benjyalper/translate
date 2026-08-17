@@ -14,10 +14,12 @@ panel:
 | **🐱 YiCAT** | Harvest a YiCAT (self-hosted Tmxmall) task via its segment API → GPT-5.4 cards → **copy** each proposal, or opt-in **auto-write** through YiCAT's own in-cell editor (verified). |
 | **💰 Word count** | Sum the **weighted word count** across your Starling *My tasks* and price it (× your editing rate), with a per-status breakdown and the number of tasks summed. |
 
-Three cross-cutting aids apply across the CAT modes: a **🧠 Style Brain** (house-style rules +
+Cross-cutting aids apply across the CAT modes: a **🧠 Style Brain** (house-style rules +
 glossary you can grow), a **🧩 Consistency memory** (a source→target TM that overrides GPT
-post-hoc), and **🔒 Locked terms** (a *mandatory* EN→HE glossary — sent to GPT as non-negotiable,
-then any segment missing the required Hebrew is flagged 🔒 after a Run). All three are documented below.
+post-hoc), **🔒 Locked terms** (a *mandatory* EN→HE glossary — sent to GPT as non-negotiable,
+then any segment missing the required Hebrew is flagged 🔒 after a Run), and **🩹 Auto-fix** (a
+deterministic post-GPT rewriter that auto-corrects the target to locked Hebrew fixes — e.g. a
+plural imperative GPT returned → your singular gender-slash, שלמו→שלם/י). All are documented below.
 
 Everything runs in **your** logged-in browser with **your** OpenAI key. No server. **The tool never
 submits/approves** on any platform — it stops at the point where a human decision is required.
@@ -577,6 +579,7 @@ Default selectors are **unions** covering both editors; hidden measurement-clone
 | — | *(panel-only, no CS bump)* **Password-gated Clear** — clearing the Style Brain or Consistency memory now prompts for a password (`clearPass`) before wiping |
 | — | *(panel-only, no CS bump)* **Consistency memory now seeds tagged/copy-by-hand segments** — the remembered target fills the per-part Copy text (still never auto-written), guarded by a tag signature (`tmTagSig`) so it only substitutes when the stored target carries the same `①…①`/`O-`/`C-` tokens as the source |
 | — | *(panel-only, no CS bump)* **Built-in guide (`STYLE_GUIDE`) hardened** — three house rules baked into the shared guide (reaches both 🐦 Starling and ⚖️ Feishu via `brainText()`): (1) slash form short-vs-long (same-stem → גלה/י, שתף/י; different spelling → בדוק/בדקי, אמור/אמרי, with the "בדוק/י→בדוקי" misread test); (2) **TikTok = DNT** (always Latin, maqaf prefix ב-TikTok); (3) currency symbol/code AFTER the number (20$, 40£, 1,000Rp). *(Number "k"-expansion and "+/-" range suffixes deferred — still under review.)* |
+| — | *(panel-only, no CS bump)* **🩹 Auto-fix — deterministic post-GPT rewriter ("smart scanner").** A curated dictionary (`FIX`, stored as `autoFix`) of locked Hebrew corrections applied to every target **after** the Run (order: `tmApply` → `fixApply` → `lockCheck`), reaching both 🐦 Starling and ⚖️ Feishu. Main use: a plural imperative GPT still returned → your singular gender-slash (`שלמו→שלם/י`, `הצטרפו→הצטרף/י`, irregulars `נסו→נסה/י`, long-form `בדקו→בדוק/בדקי`). **Dictionary, not auto-morphology** (you lock both sides, so irregular verbs stay correct). Whole-word Hebrew match (`[א-ת]` boundaries; a leading `ו` is preserved: `והצטרפו→והצטרף/י`; won't touch inner-word `הצטרפות` or prefix-glued `בהצטרפו`). **Auto-applied** and badged **✎ auto-fixed** in Review (tooltip lists the changes), reversible by editing the row; never auto-approves a memory-override row. Enable toggle + add/import/export/password-gated clear; seeded on first load with the six starters. Prompt also hardened to default ambiguous number/gender to the singular gender-slash and never לשון רבים |
 | — | *(panel-only, no CS bump)* **🔒 Locked terms — a mandatory "must" glossary.** A third list (`LOCK`, stored as `lockedTerms`) of EN→HE pairs enforced two ways: **(1) prompt tier** — `lockText()` injects them at the TOP of `brainText()` as **NON-NEGOTIABLE** (GPT may only add a Hebrew prefix), reaching both 🐦 Starling and ⚖️ Feishu; **(2) post-check tier (flag-only)** — after a Run, `lockCheck()` scans each proposal and any segment whose source contains the term but whose target is **missing** the required Hebrew gets a red **🔒 locked term** badge. It **never auto-edits** (so it can't corrupt Hebrew inflection); the match allows a fused prefix and the definite-ה drop (ההגדרות→בהגדרות), boundary-aware EN detection, and the flag clears live when you fix the row (blur re-check). Add / import / export / password-gated clear in the new **🔒 Locked terms** card |
 
 ## Test the panel offline
