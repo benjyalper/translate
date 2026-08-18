@@ -1,7 +1,7 @@
 {
   "$schema_note": "Source of truth for the admin tools map. ADMIN_TOOLS_MAP.md mirrors this. Line numbers are 1-based and refer to admin.html unless otherwise specified.",
   "live_url": "https://translate-production-4ac8.up.railway.app/admin.html",
-  "password_var": { "file": "admin.html", "line": 2319, "name": "ADMIN_PW" },
+  "password_var": { "file": "admin.html", "line": 2613, "name": "ADMIN_PW" },
   "files": {
     "ui": "admin.html",
     "backend": "transcriber/server.js",

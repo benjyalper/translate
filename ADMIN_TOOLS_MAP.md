@@ -52,7 +52,7 @@ The admin page detects `localhost` vs Railway and either calls the Node API dire
 
 ---
 
-## 3. The 20 tools
+## 3. The 21 tools
 
 Tools are grouped by type:
 
@@ -271,6 +271,8 @@ End-to-end tool for Starling (ByteDance CAT) tasks: drop a **raw exported XLIFF*
 - **Workflow:** Benjy exports the task XLIFF from Starling → drops the **raw** file here → clicks **Proofread** or **Translate** (GPT-5.4, placeholders/tags/HTML preserved) → copies segment-by-segment into Starling. (Claude can still hand over a pre-built deck for the tagged segments it takes in the browser.)
 
 ---
+
+> The **TikTok LQA Adjudicator** (Feishu AI-check sheet → GPT-5.4 valid/invalid + corrected target) lives in the **Starling Copilot extension** (`starling-copilot/`, ⚖️ Feishu LQA mode), **not** in admin.html — it was prototyped here and then removed to keep a single source of truth.
 
 ## 5. Backend API reference (`transcriber/server.js`)
 

@@ -1,6 +1,6 @@
 {
   "schema": "adar1-knowledge-base/v1",
-  "generated": "2026-06-17",
+  "generated": "2026-07-15",
   "datasets": [
     {
       "id": "tiktok-feature-briefing",
@@ -1461,6 +1461,307 @@
           "localization_notes": "Part of these keys were synced to SmartCat for translation last Friday, Sept 6th. Review those already translated keys starting with dm_aiGroupShot_.",
           "summary": "The AI Group Shot feature allows users to create AI-blended images with multiple participants in chats.",
           "key_prefix": "dm_aiGroupShot_"
+        }
+      ]
+    },
+    {
+      "id": "netflix-theatrical-ops",
+      "title": "Netflix Theatrical — Operating Procedures (Linguistic)",
+      "source_file": "[Netflix- Theatrical] Operating Procedures for Resources - Linguistic.pdf",
+      "record_type": "operating_procedures",
+      "records": [
+        {
+          "title": "Overview & Services",
+          "category": "Workflow",
+          "pages": [
+            4,
+            5
+          ],
+          "sync_date": null,
+          "key_prefix": "",
+          "summary": "Wordbank localizes Netflix theatrical trailers/artwork; linguists do subtitling, on-screen text, artwork translation, and LQA2.",
+          "content": "Since 2022 Wordbank localizes Netflix theatrical marketing (AV + Print/Digital) for limited theatrical/awards runs. Linguist services: (1) AV Trailer Localization — subtitle translation in Nikse Subtitle Edit, delivered as an SRT (full theatrical, teaser, cutdown); (2) Dialogue Linguistic Review (Dubs) — review translated actor dialogue vs the English SRT source, using frame.io; (3) On-Screen Text — localize on-screen text and suggest forced narratives via provided Google Sheets; (4) Marketing Assets — Key Artwork (print) and digital banners via Google Sheets; (5) Quality Assurance (LQA2) — mid-process and final in-country QA. A given project may include all of these content types or just one or two — proceed based on which files are provided.",
+          "notes": "Goal each trailer: match the look, feel and 'creative intent' of the original."
+        },
+        {
+          "title": "Allocation & Jira Tickets",
+          "category": "Workflow",
+          "pages": [
+            5,
+            7
+          ],
+          "sync_date": null,
+          "key_prefix": "",
+          "summary": "Work is assigned via Jira tickets; set up notifications and read project-specific notes at the top of the ticket.",
+          "content": "You are assigned tickets in Jira; ensure notifications are on. Use the Theatrical Jira Training Deck to learn the interface. Jira is where you find: due/delivery dates, CTA and asset info, collaborators, next steps/ticket transitions, and tickets assigned to you. Any project-specific notes appear at the top of your Jira ticket or in a static doc in your AV language folder (no more trailer-to-trailer briefs this year).",
+          "notes": ""
+        },
+        {
+          "title": "Project Deadlines",
+          "category": "Workflow",
+          "pages": [
+            6
+          ],
+          "sync_date": null,
+          "key_prefix": "",
+          "summary": "0.5-day (24h) turnaround per task; request extensions or reassignment from the Project Coordinator on the ticket.",
+          "content": "On assignment you have a 0.5-day window to complete a task; the exact submission date/time is confirmed by the Production Coordinator at kick-off. If you need an extension, contact the Project Coordinator listed on the ticket with a clear reason for the delay, or state your preference to have the task reassigned.",
+          "notes": ""
+        },
+        {
+          "title": "General Instructions & Shared-Server Rules",
+          "category": "General",
+          "pages": [
+            6,
+            7
+          ],
+          "sync_date": null,
+          "key_prefix": "",
+          "summary": "Work only in your language folder, never delete master files, version by copy-and-rename, and don't touch software logins/security settings.",
+          "content": "Before starting, read all instructions and reference material (subtitle guidelines CHANGED from last year). You work on Wordbank servers (installation/login instructions came from ITS). IMPORTANT: (1) work only within your assigned language folders in the shared master folder; (2) never delete content, especially master files — others may depend on footage, .srt's, project files, reviews, finals; (3) to change an already-delivered file, make a COPY and save it as a new version, then notify via the Jira ticket. Versioning example: BRDO_Experience30_FR_v1.prproj → _v2.prproj. (4) Do not edit logins, security settings, phone numbers or MFA on server software/plug-ins even if prompted — contact the team if it blocks you.",
+          "notes": ""
+        },
+        {
+          "title": "Reference Materials (Netflix Guidelines)",
+          "category": "Reference",
+          "pages": [
+            6,
+            20
+          ],
+          "sync_date": null,
+          "key_prefix": "",
+          "summary": "Follow the Netflix Subtitle & Bug Guidelines, Language Style Guides, and your language's Timed Text Style Guide before any task.",
+          "content": "Before beginning any task, review all Netflix reference materials (they may have changed since last year): (1) Netflix Subtitle & Bug Guidelines; (2) Language Style Guides; (3) Timed Text Style Guides — find your language in the list and follow it (numbers, dialogue, italics, CPL/CPS, forced-narrative rules, etc.). Note: subtitle guidelines changed from last year.",
+          "notes": "The Timed Text Style Guide is the authoritative source for CPL/CPS limits per language."
+        },
+        {
+          "title": "TEP & LQA2 — Task Summary",
+          "category": "Workflow",
+          "pages": [
+            7
+          ],
+          "sync_date": null,
+          "key_prefix": "",
+          "summary": "TEP = create the localized .srt in Subtitle Edit + localize OST/FN in the Google Sheet; LQA2 = in-format review of the finished trailer, flagged via frame.io.",
+          "content": "Summary of the two Linguistic AV tasks. TEP (Translation, Editing, Proofreading): create a localized .srt within Nikse Subtitle Edit from the provided source script or .srt, AND localize On-Screen Text and forced narratives in the Google Sheet linked on the Jira ticket. LQA2 (Linguistic Quality Assurance 2): perform an in-format review of the localized trailers AFTER the Video Editors create them; flag any required updates via the provided frame.io link per asset, in the specified format, for review by the PM and Video Editors. During LQA2 do NOT generate a supplemental .srt or modify the Google Sheet.",
+          "notes": ""
+        },
+        {
+          "title": "TEP Setup — Subtitle Edit & Files Provided",
+          "category": "TEP",
+          "pages": [
+            7,
+            8
+          ],
+          "sync_date": null,
+          "key_prefix": "",
+          "summary": "Set Subtitle Edit to your language's Netflix presets; the PC provides EN SRT, Text Doc.xlsx, trailer URL, EN frame.io reference, and the localized CTA.",
+          "content": "Before translating, download Subtitle Edit and set all configs to the Netflix Subtitle pre-sets (see the 'SUBTITLE EDIT - How to' doc; set the correct built-in Netflix subtitle presets for your language). Japanese/Korean: Wordbank should provide a PDF preset config to import — if missing, contact the PM immediately. The Production Coordinator provides in the Jira ticket: (1) English SRT file; (2) Text Doc.xlsx; (3) URL to the English trailer; (4) EN Reference Trailer frame.io link; (5) Localized CTA (theatrical release date) — pre-approved by Netflix, do not change unless there's an error. Pre-work steps: watch the English trailer and review the script/.srt; download the EN SRT and open the linked Text Doc (GFX) sheet; import the EN .srt and open the Subtitle Edit URL from the Jira ticket into Subtitle Edit.",
+          "notes": ""
+        },
+        {
+          "title": "TEP — Subtitle Translation Rules",
+          "category": "TEP",
+          "pages": [
+            8,
+            9
+          ],
+          "sync_date": null,
+          "key_prefix": "",
+          "summary": "Deliver an accurately timed/formatted SRT; keep cues short within CPL/CPS; prefer creative interpretation over literal; you may have no spotting list.",
+          "content": "Translate, edit and proofread the dialogue/subtitles and deliver an accurately timed and formatted .SRT following standard subtitling practice for your language. Refer to your language-specific Timed Text Style Guidelines for numbers, dialogue, italics, and CPL/CPS. Keep subtitles short and within character limits while still reflecting the feeling of the source. Creative interpretation is preferred to literal translation: you may truncate (e.g. 'It's so nice to see you' → 'Nice to see you') and interpret slang by intent (e.g. Nimona's 'Metal…' before a fight means 'hardcore/brutal', not the literal metal). No spotting list is provided — you may need to work without a reference SRT; an English script is provided when possible.",
+          "notes": ""
+        },
+        {
+          "title": "TEP — On-Screen Text: Graphic Cards (GFX)",
+          "category": "TEP",
+          "pages": [
+            9
+          ],
+          "sync_date": null,
+          "key_prefix": "",
+          "summary": "Translate GFX (designed/animated on-screen text) in the linked Google Sheet; add color/position/italics/size to the Notes row; skip cards Netflix already localized.",
+          "content": "On-Screen Text is localized in the Text Doc (Google Sheet) linked under the Web-Links section of the Jira ticket. Graphic Cards (GFX): on-screen text that has a design or animation; your translations are handed to the video editors to apply the effects. If a localized word/phrase should be a certain color, position, italics, or size to match the source, add that to the 'Notes' row in the sheet. Sometimes Netflix provides the localized GFX cards — you may see them in the source trailer but find no space for them on the Google Sheet; you do not need to translate those.",
+          "notes": ""
+        },
+        {
+          "title": "TEP — On-Screen Text: Forced Narrative (FN)",
+          "category": "TEP",
+          "pages": [
+            10,
+            16
+          ],
+          "sync_date": null,
+          "key_prefix": "",
+          "summary": "FN is plot-pertinent on-screen text (e.g. a newspaper 'FUGITIVE WANTED') translated in the same Google Sheet as GFX; review-quotes now show as graphics — add formatting notes.",
+          "content": "Forced Narrative (FN) is on-screen text that must be localized because it is pertinent to the plot; it is separate from subtitles and Graphic Card text (e.g. a newspaper reading 'FUGITIVE WANTED'). Review quotes from publications: Netflix has moved away from using 'Forced Narrative' for review quotes — these now show as graphics, so add notes on formatting (color, font, size, sentence case, etc.). More FN guidelines per language are in the Timed Text Style Guides. Translate all FN text in the SAME Google Sheet that contains the GFX card text (linked in the Description section at the top of the Jira ticket). Example: the translation of 'Ruthless' (from a critic's review) appears on screen in black/white capitals. FNs usually appear at the bottom of the screen but may move to the top if they overlap subtitles.",
+          "notes": ""
+        },
+        {
+          "title": "TEP — Call To Action (CTA) Rules",
+          "category": "TEP",
+          "pages": [
+            10,
+            17,
+            18
+          ],
+          "sync_date": null,
+          "key_prefix": "",
+          "summary": "Netflix provides CTA translations — do NOT translate unless the PM asks; disregard the source CTA; the correct CTA is in the Jira description.",
+          "content": "Call To Action (CTA): Netflix provides CTA translations — DO NOT translate unless specifically requested by the PM. In 2025 CTAs include Month and Date, e.g. 'In Select Theaters December 19'. Disregard the CTA in the source trailer (source may include a date + 'And on Netflix' — not needed for Theatrical). The correct CTA translation is in the Jira description box. PRE CTA = the film's release date, e.g. 'IN SELECT THEATERS JANUARY 5'. POST CTA tells viewers it's now watchable, e.g. 'NOW PLAYING IN SELECT THEATERS'. Dates/formats are localized and pre-approved by Netflix — do not change unless incorrect. Spanish example for 'In Select Theaters October 23'.",
+          "notes": ""
+        },
+        {
+          "title": "Film Festival Names — Do Not Translate",
+          "category": "TEP",
+          "pages": [
+            16
+          ],
+          "sync_date": null,
+          "key_prefix": "",
+          "summary": "Well-known global festivals/organizations stay in the original language (Venice, Toronto International, Sundance Film Festival).",
+          "content": "'Film Festival Florals': well-known global organizations/entities should NOT be translated and are kept in the original language, e.g. Venice Film Festival, Toronto International Film Festival, Sundance Film Festival.",
+          "notes": ""
+        },
+        {
+          "title": "TEP Delivery Checklist & File Naming",
+          "category": "TEP",
+          "pages": [
+            10,
+            11
+          ],
+          "sync_date": null,
+          "key_prefix": "",
+          "summary": "Proof the SRT and sheet, fix CPS/CPL flags, export the SRT named with version + language code, upload to the Jira parent ticket, then transition TEP → VE and tag the editor.",
+          "content": "Once TEP is done: (1) check the .srt is free from objective linguistic errors (spelling, grammar); (2) ensure all GFX/FN text is translated completely and error-free; (3) ensure formatting notes are relevant and complete (color/size/bold/italics to match source); (4) fix any CPS/CPL errors flagged by Subtitle Edit as best as possible (short assets mean it won't always be possible); (5) export the localized SRT from Subtitle Edit including the version number and language code in the filename, e.g. IT_KOWUD_CONFESSIONS_30_CUTDOWN; (6) upload the translated .srt (drag and drop) into the attachments section of the Jira PARENT ticket; (7) add your translations to the linked Google Sheet and leave it as is; (8) transition the parent ticket from TEP to VE and, in a comment, @-tag the assigned VE: 'TEP/translation is complete and ready for VE.'",
+          "notes": "STOP after TEP — LQA2 happens only after the Video Editors build the localized trailer."
+        },
+        {
+          "title": "LQA2 — Scope & What to Check",
+          "category": "LQA2",
+          "pages": [
+            11,
+            12,
+            13
+          ],
+          "sync_date": null,
+          "key_prefix": "",
+          "summary": "Review every localized format (16x9, 9x16, 4x5, 1x1 SUB/DUB) in the Smart Checklist against the English source: subtitles, GFX, FN, CTA, and dubbing.",
+          "content": "LQA2 starts AFTER the Video Editors edit the trailer with subtitles, GFX, and CTA; you are re-tagged in the Jira ticket. Review ALL localized aspect ratios/formats (16x9, 9x16, 4x5, 1x1 SUB and/or DUB) listed in the Smart Checklist to ensure they are translation-error-free and that audio/graphic effects match the EN trailer. Cross-reference the localized .srt (in attachments) and the GFX Text Doc (weblinks) against the English source. Check per file: (a) Subtitles — displayed properly per Netflix guidelines, no objective linguistic errors, no overlap/early cut-off/timing/formatting errors; (b) Graphic Cards — localized properly, no linguistic errors, match source color/position/formatting/animation/size (for Netflix-provided GFX only call out objective errors); (c) Forced Narrative — localized properly, no linguistic errors, no overlap/conflict with GFX or subtitles, timed correctly (usually review quotes); (d) CTA — localized and correct vs the Jira Description box; (e) Dubbing — matches the actor's speech/subtitles; dubs were recorded by a different vendor and cannot be changed, so accept as-is but flag major objective issues: cut-off audio, mismatched audio, anything overtly offensive.",
+          "notes": "If errors are found, create an OQA report. DO NOT create a v2 .srt or edit the Google Sheet — they won't be referenced."
+        },
+        {
+          "title": "LQA2 — Flagging Format & Delivery (Pass/Fail)",
+          "category": "LQA2",
+          "pages": [
+            13,
+            14,
+            15
+          ],
+          "sync_date": null,
+          "key_prefix": "",
+          "summary": "Flag errors in frame.io at the timestamp as 'Please change XX to XX', set each format Pass/Fail, then transition the ticket and tag the right person.",
+          "content": "Deliver LQA2 depending on pass/fail. FAIL: do NOT create a new .srt or edit the Google Sheet. In the comment section to the right of the trailer screen, add comments AT THE TIMESTAMP where the error appears using the exact format: 'Please change XX to XX' (this clear, direct format is required so editors can act; unclear comments get sent back). After watching all Smart-Checklist formats, use the 'In Progress' drop-down per format to mark passed/failed LQA2; change the main Jira drop-down from LQA2 to VE; @-tag the assigned Video Editor noting which assets failed. PASS: mark Pass per asset; change the main drop-down from LQA2 to Tech QA; comment 'All assets passed LQA2, Ready for QA.' When done, add any notes and tag the Production Coordinator.",
+          "notes": "Same flag format is used for artwork: 'Change XXX to XXX'."
+        },
+        {
+          "title": "LQA2 for Recycled Content",
+          "category": "LQA2",
+          "pages": [
+            15
+          ],
+          "sync_date": null,
+          "key_prefix": "",
+          "summary": "Recycled (producer-localized, pre-QCed) content: pass as-is, flag only major objective issues, make no preferential changes.",
+          "content": "'Recycled content' is material Netflix's producer already localized and pre-QCed. Wordbank committed to one QC round: in most cases pass as-is, but flag major objective issues only — incorrect line break, misspelling, missing subtitle, audio/video sync issues, cut-off audio, anything overtly offensive in the dub. Some material may already be in market, so you must NOT make preferential changes or suggestions to the translations.",
+          "notes": ""
+        },
+        {
+          "title": "Artwork — Translation Task",
+          "category": "Artwork",
+          "pages": [
+            19,
+            20
+          ],
+          "sync_date": null,
+          "key_prefix": "",
+          "summary": "Artwork tickets (turquoise camera icon) provide a 2-column EN/blank table; translate the right column, then transition to Artwork Design and tag the Designer.",
+          "content": "Artwork tickets are marked in Jira with a turquoise camera icon and titled by artwork type (Key Art, Teaser, Vertical, Horizontal, Quad). You translate taglines/text (often just a handful of words) for posters, digital banners, ticket buttons, etc. The PC tags you in a comment and provides a 2-column table (EN text left, blank column right). Steps: (1) copy the table; (2) paste it in a comment; (3) enter your translation in the right column; (4) transition the Jira ticket to Artwork Design and tag the assigned Designer that the asset is 'ready for design.'",
+          "notes": ""
+        },
+        {
+          "title": "Artwork — In-Format Review (LQA2)",
+          "category": "Artwork",
+          "pages": [
+            20
+          ],
+          "sync_date": null,
+          "key_prefix": "",
+          "summary": "Check localized art for missing text, mistranslations, incorrect line-breaks, and name inconsistencies; flag as 'Change XXX to XXX' or comment 'LQA2 Pass'.",
+          "content": "For artwork LQA2 the PC tags you to check the translated text on the art. Check for: missing text, mistranslations, incorrect line-breaks, and inconsistencies for any actor/organization names. If errors: in a comment add all errors using 'Change XXX to XXX', transition the ticket back to Artwork Design, and tag the assigned Designer to 'please see errors flagged'. (Jira won't let you tag a non-assignee, so transition first.) If no errors: comment 'LQA2 Pass' and transition to 'Ready for VanDam Upload.'",
+          "notes": ""
+        },
+        {
+          "title": "Rates — AV Trailer Assets",
+          "category": "Rates",
+          "pages": [
+            21
+          ],
+          "sync_date": null,
+          "key_prefix": "",
+          "summary": "Flat fee per asset: Main Full $85/$65/$25, :30 $17/$13/$10, :15 $15/$10/$10, Teaser $34/$26/$10 (translation / QA / in-format QA).",
+          "content": "Payment is a flat rate per asset completed to standard (USD or equivalent). Reference service rates: ~$0.15/word translation, $10/min subtitling, $0.10/word QA. AV Asset flat rates (Subtitle translation / Subtitle QA / Subtitle in-format QA): Trailer Main Full (~400 words + 2.5 min) = $85 / $65 / $25; Main :30 (~80 words + 0.5 min) = $17 / $13 / $10; Main :15 (~40 words + 0.25 min) = $15 / $10 / $10; Teaser (~160 words + 1 min) = $34 / $26 / $10.",
+          "notes": "The recruiting email quoted different flat fees (e.g. TEP Teaser $60; QA Full Trailer $25) — confirm the applicable rate card with the PM per project."
+        },
+        {
+          "title": "Rates — Digital & Artwork; POs & Invoicing",
+          "category": "Rates",
+          "pages": [
+            21,
+            22
+          ],
+          "sync_date": null,
+          "key_prefix": "",
+          "summary": "Digital banners and artwork (<25 words): $15 translation / $10 in-format QA; POs raised the last Tuesday monthly; invoices via WordXtra.",
+          "content": "Digital Assets (Banner 300x250 / 300x600 / 970x250, all <25 words): Translation $15, In-Format QA $10. Artwork Assets (Key Art Main Vertical/Horizontal, Teaser Vertical/Horizontal, Quad, all <25 words): Translation $15, In-Format QA $10. Flat-rate structure may change but not without prior discussion. Purchase Orders are raised by Preproduction on the last Tuesday of every month. See 'Invoicing and Payment Procedures.docx'.",
+          "notes": ""
+        },
+        {
+          "title": "Tech & Systems",
+          "category": "Tech & Systems",
+          "pages": [
+            22,
+            23
+          ],
+          "sync_date": null,
+          "key_prefix": "",
+          "summary": "Jira (tickets), WordXtra (invoices, wordxtra.net), Nikse Subtitle Edit (TEP .srt), frame.io (LQA2 annotations), Google Sheets (GFX translations).",
+          "content": "Systems used: JIRA — asset management / ticket allocation (unique login and filters; added per project). WORDXTRA (www.wordxtra.net) — online tool where resources submit and download invoices. NIKSE SUBTITLE EDIT — used to create/edit/proofread the .srt in the TEP step. FRAME.IO — cloud collaboration for frame-accurate annotations on the video timeline; used in the LQA2 step (integrates with Premiere Pro / Final Cut Pro). SHEETS — cloud spreadsheet for entering GFX translations. Project files for Linguistic AV: EN .srt, GFX Text Doc, Subtitle Edit pre-signed URL, EN reference trailer frame.io.",
+          "notes": ""
+        },
+        {
+          "title": "Security — High Security Tier 1",
+          "category": "Security",
+          "pages": [
+            23
+          ],
+          "sync_date": null,
+          "key_prefix": "",
+          "summary": "This is High Security Tier 1 content; you've passed the required screening (Master Protocol, High Security Questionnaire, Security Training) and must keep data safe.",
+          "content": "This work is classified High Security - Tier 1; keeping the data safe is the top priority. Active workers have already passed the mandatory screening gates: Master Protocol Alignment (Wordbank_Master_Security_Protocols v1.1), the High Security Questionnaire (with computer/setup adjustments), and Security Awareness Training plus its quiz.",
+          "notes": "Confidential pre-release Netflix content — do not move it off the secure server or route it through unapproved third-party tools."
+        },
+        {
+          "title": "Who To Contact",
+          "category": "Contacts",
+          "pages": [
+            23
+          ],
+          "sync_date": null,
+          "key_prefix": "",
+          "summary": "Availability→preproduction@, Nutshell/security→production@ & security@, WordXtra/PO/bank→preproduction@, invoicing/payment→payments@, other work/references→recruitment@.",
+          "content": "Contacts by topic: Availability — PreProduction (preproduction@wordbank.com); Nutshell access — Production (production@wordbank.com); Security questions — Production (security@wordbank.com); WordXtra login info — PreProduction (preproduction@wordbank.com); PO Queries — PreProduction (preproduction@wordbank.com); Update bank details — PreProduction (preproduction@wordbank.com); Invoicing questions — Accounts (payments@wordbank.com); Payment status after invoicing — Accounts (payments@wordbank.com); Expand to other client work — Creative (recruitment@wordbank.com); Seeking a reference — People & Culture (recruitment@wordbank.com).",
+          "notes": ""
         }
       ]
     }
