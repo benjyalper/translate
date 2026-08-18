@@ -608,6 +608,12 @@
           <span class="tm-tip"><span class="tm-tip-title">memoQ Auto-Translator (.mqout → .mqback)</span>Upload a memoQ out-of-house package (.mqout) → GPT fills every &lt;target&gt; across every .mqxliff inside → download a return package (.mqback) ready to hand back to the PM. TMs / term bases / settings inside the package pass through untouched.</span>
         </button>
 
+        <button class="toolmap-btn" onclick="scrollToTool('tool-xliff-translator')">
+          <span class="tm-label">🧩 XLIFF 1.1 (.xlf)</span>
+          <span class="tm-info" tabindex="0">i</span>
+          <span class="tm-tip"><span class="tm-tip-title">XLIFF 1.1 Translator / Proofreader (.xlf)</span>Drop plain XLIFF 1.1 .xlf files (DEX / Konfort-style, UTF-16). GPT translates empty &lt;target&gt; segments and/or proofreads existing needs-review targets against the source, preserving placeholders (_V_, _0V_, _PCT_, literal \n) and TM (&lt;alt-trans&gt;) reference. Downloads the same .xlf re-encoded UTF-16 — ready to re-import. Use this for jobs delivered as bare .xlf rather than a Trados .sdlppx package.</span>
+        </button>
+
         <button class="toolmap-btn" onclick="scrollToTool('tool-doc-translator')">
           <span class="tm-label">🌐 Document Translator</span>
           <span class="tm-info" tabindex="0">i</span>
@@ -1191,6 +1197,89 @@
         <!-- Error -->
         <div id="tr-error" style="display:none;padding:.7rem 1rem;background:#1a0000;border:1px solid #7f1d1d;border-radius:8px;font-size:.82rem;color:#fca5a5"></div>
       </div><!-- /trados card -->
+
+      <!-- ── 🧩 XLIFF 1.1 (.xlf) TRANSLATOR / PROOFREADER ──────────── -->
+      <div class="tool-card" style="grid-column:1/-1">
+        <div class="tool-header">
+          <div class="tool-icon">🧩</div>
+          <div>
+            <div class="tool-title" data-tool-anchor="tool-xliff-translator">XLIFF 1.1 Translator / Proofreader (.xlf)</div>
+            <div class="tool-sub">Drop plain XLIFF 1.1 <code style="background:#0a0a14;padding:0 .3rem;border-radius:3px;color:#a5b4fc">.xlf</code> files (DEX / Konfort-style, UTF-16). GPT fills empty <code style="background:#0a0a14;padding:0 .3rem;border-radius:3px;color:#a5b4fc">&lt;target&gt;</code> segments and/or proofreads existing <code style="background:#0a0a14;padding:0 .3rem;border-radius:3px;color:#a5b4fc">needs-review-l10n</code> targets — placeholders (<code style="background:#0a0a14;padding:0 .3rem;border-radius:3px;color:#a5b4fc">_V_ _0V_ _PCT_ \n</code>) and <code style="background:#0a0a14;padding:0 .3rem;border-radius:3px;color:#a5b4fc">&lt;alt-trans&gt;</code> TM matches preserved · downloads the same file, re-encoded to its original UTF-16.</div>
+          </div>
+        </div>
+        <div class="tool-divider"></div>
+
+        <!-- .xlf upload (multiple) -->
+        <div class="tdrop" id="xf-drop">
+          <input type="file" id="xf-file" accept=".xlf,.xliff" multiple onchange="xfOnFile(this)"/>
+          <div class="tdrop-icon">🧩</div>
+          <div class="tdrop-text">Drop one or more .xlf / .xliff files or click to browse<br><small>Plain XLIFF 1.1 (not a Trados .sdlppx) — UTF-16 auto-detected</small></div>
+        </div>
+        <div class="tdrop-sel" id="xf-file-label"></div>
+
+        <!-- What to do -->
+        <div class="tlang-row" style="margin-top:.7rem;align-items:center;flex-wrap:wrap">
+          <span class="tlang-lbl">Do:</span>
+          <select id="xf-mode" style="flex:1;min-width:260px;padding:.45rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.8rem">
+            <option value="both" selected>Proofread existing targets + translate empty ones (recommended)</option>
+            <option value="translate">Translate empty targets only (leave existing untouched)</option>
+            <option value="proofread">Proofread existing targets only (skip empty)</option>
+          </select>
+        </div>
+
+        <!-- Target language + state + quality -->
+        <div class="tlang-row" style="margin-top:.5rem;align-items:center;flex-wrap:wrap">
+          <span class="tlang-lbl">Target:</span>
+          <select id="xf-lang" style="flex:1;min-width:180px;padding:.45rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.8rem">
+            <option value="Hebrew" selected>🇮🇱 Hebrew (he-IL)</option>
+            <option value="Arabic">🇸🇦 Arabic</option>
+            <option value="French">🇫🇷 French</option>
+            <option value="Spanish">🇪🇸 Spanish</option>
+            <option value="German">🇩🇪 German</option>
+            <option value="Italian">🇮🇹 Italian</option>
+            <option value="Russian">🇷🇺 Russian</option>
+          </select>
+          <span class="tlang-lbl" style="margin-left:.4rem" title="What to write into each processed segment's state attribute">State:</span>
+          <select id="xf-state" style="flex:1;min-width:170px;padding:.45rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.8rem">
+            <option value="translated" selected>translated (mark as done)</option>
+            <option value="needs-review-l10n">needs-review-l10n (flag for human review)</option>
+            <option value="keep">keep original state</option>
+          </select>
+        </div>
+
+        <div class="tlang-row" style="margin-top:.5rem">
+          <span class="tlang-lbl">Quality:</span>
+          <select id="xf-model" style="flex:1;padding:.45rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.8rem">
+            <option value="gpt-5.4">Professional · gpt-5.4 (technical manuals — recommended)</option>
+            <option value="gpt-5.4-mini">Standard · gpt-5.4-mini (cheaper / faster)</option>
+            <option value="gpt-5.5">Premium · gpt-5.5 (final review / agency tests)</option>
+            <option value="gpt-5.4-nano">Draft · gpt-5.4-nano (bulk pre-translation)</option>
+          </select>
+        </div>
+
+        <div style="margin-top:.5rem;font-size:.72rem;color:#64748b" id="xf-gloss-note"></div>
+
+        <button class="tbtn gold" id="xf-btn" onclick="xfRun()" disabled>🚀 Process .xlf</button>
+
+        <!-- Progress -->
+        <div class="tprog" id="xf-prog">
+          <div class="tprog-text" id="xf-prog-text">Reading files…</div>
+          <div class="tprog-bar-outer"><div class="tprog-bar-inner" id="xf-prog-bar"></div></div>
+        </div>
+
+        <!-- Results -->
+        <div id="xf-results" style="display:none;margin-top:.9rem">
+          <div class="trados-stats" id="xf-stats"></div>
+          <div id="xf-list" style="margin-top:.7rem;display:flex;flex-direction:column;gap:.5rem"></div>
+          <div style="margin-top:.6rem">
+            <button class="tbtn" id="xf-dl-all" onclick="xfDownloadAll()" style="width:auto;padding:.55rem 1.1rem;font-size:.78rem;background:#1e1b4b;color:#a5b4fc">⬇ Download all</button>
+          </div>
+          <div style="margin-top:.6rem;font-size:.72rem;color:#64748b">Files keep their original name &amp; UTF-16 encoding — hand them straight back to the CAT tool / PM.</div>
+        </div>
+
+        <!-- Error -->
+        <div id="xf-error" style="display:none;margin-top:.7rem;padding:.7rem 1rem;background:#1a0000;border:1px solid #7f1d1d;border-radius:8px;font-size:.82rem;color:#fca5a5"></div>
+      </div><!-- /xliff card -->
 
       <!-- ── 🟣 memoQ AUTO-TRANSLATOR (.mqout → translated .mqback) ─── -->
       <div class="tool-card" style="grid-column:1/-1">
@@ -11324,6 +11413,353 @@ async function dtTranslateMq(file, ext, sourceLang, targetLang, model, apiKey, u
     return { blob, name: `${baseName}${tag}.mqxliff`, count: result.count };
   }
 }
+
+// ═══════════════════════════════════════════════════════════════
+//  🧩 XLIFF 1.1 (.xlf) TRANSLATOR / PROOFREADER
+//  For plain XLIFF 1.1 files (DEX / Konfort A/C stations, etc.) that
+//  arrive as bare .xlf — NOT wrapped in a Trados .sdlppx and NOT
+//  segmented with <mrk>/<sdl:seg>. Structure is flat:
+//    <trans-unit id=..><source>..</source>
+//                      <target state='needs-review-l10n'>..</target>
+//                      [<alt-trans match-quality=..><source>..</source>
+//                                                   <target>..</target></alt-trans>]
+//    </trans-unit>
+//  Some units ship pre-machine-translated (state=needs-review-l10n),
+//  some are empty (no <target>). We proofread the former and translate
+//  the latter, preserving DEX placeholders (_V_ _0V_ _S_ _PCT_ and the
+//  literal two-char sequence \n) and using any <alt-trans> TM match as a
+//  terminology reference. Files are UTF-16 (LE, BOM) — we decode and
+//  re-encode to the SAME byte encoding so the CAT importer accepts them.
+//  Everything runs client-side; only the GPT calls leave the browser.
+// ═══════════════════════════════════════════════════════════════
+let xfFiles = [];      // File[]
+let xfResults = [];    // { name, blob }
+
+function xfOnFile(input) {
+  const files = Array.from(input.files || []).filter(f => /\.(xlf|xliff)$/i.test(f.name));
+  if (!files.length) { showAdminToast('❌ Pick .xlf / .xliff file(s)'); return; }
+  xfFiles = files;
+  xfResults = [];
+  const lbl = document.getElementById('xf-file-label');
+  lbl.style.display = 'block';
+  lbl.textContent = files.length === 1
+    ? `🧩 ${files[0].name} · ${(files[0].size/1024).toFixed(1)} KB`
+    : `🧩 ${files.length} files · ${(files.reduce((s,f)=>s+f.size,0)/1024).toFixed(1)} KB total`;
+  document.getElementById('xf-btn').disabled = false;
+  document.getElementById('xf-results').style.display = 'none';
+  document.getElementById('xf-error').style.display = 'none';
+  // Surface whether a glossary from the Trados card will be applied.
+  const gn = document.getElementById('xf-gloss-note');
+  const n = (typeof trGlossary !== 'undefined' && Array.isArray(trGlossary)) ? trGlossary.length : 0;
+  gn.textContent = n ? `📋 ${n} glossary term${n===1?'':'s'} loaded in the Trados card will be applied for consistency.` : '';
+}
+
+// ── Byte-level encoding: detect from BOM, decode, and re-encode to the
+// same encoding. TextDecoder strips the BOM for us on decode; we add it
+// back on encode when the original had one.
+function xfDecode(buf) {
+  const b = new Uint8Array(buf);
+  let enc = 'utf-8', hasBOM = false;
+  if (b.length >= 2 && b[0] === 0xFF && b[1] === 0xFE) { enc = 'utf-16le'; hasBOM = true; }
+  else if (b.length >= 2 && b[0] === 0xFE && b[1] === 0xFF) { enc = 'utf-16be'; hasBOM = true; }
+  else if (b.length >= 3 && b[0] === 0xEF && b[1] === 0xBB && b[2] === 0xBF) { enc = 'utf-8'; hasBOM = true; }
+  const text = new TextDecoder(enc).decode(buf);
+  return { text, enc, hasBOM };
+}
+
+function xfEncode(text, enc, hasBOM) {
+  if (enc === 'utf-16le' || enc === 'utf-16be') {
+    const le = enc === 'utf-16le';
+    const out = new ArrayBuffer((text.length + (hasBOM ? 1 : 0)) * 2);
+    const dv = new DataView(out);
+    let off = 0;
+    if (hasBOM) { dv.setUint16(0, 0xFEFF, le); off = 2; }
+    for (let i = 0; i < text.length; i++) dv.setUint16(off + i * 2, text.charCodeAt(i), le);
+    return new Blob([out], { type: 'application/x-xliff+xml' });
+  }
+  const enc8 = new TextEncoder().encode(text);
+  if (hasBOM) {
+    const b = new Uint8Array(enc8.length + 3);
+    b.set([0xEF, 0xBB, 0xBF]); b.set(enc8, 3);
+    return new Blob([b], { type: 'application/x-xliff+xml' });
+  }
+  return new Blob([enc8], { type: 'application/x-xliff+xml' });
+}
+
+function xfXmlEscape(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function xfEscapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+function xfDirectChild(el, name) {
+  for (const c of el.children) if (c.localName === name) return c;
+  return null;
+}
+
+// Extract the translatable units from an XLIFF string via DOMParser
+// (robust read). Returns objects carrying the unit id, source text, the
+// current target (if any), its state, and the best <alt-trans> TM match.
+function xfExtractUnits(xmlText) {
+  const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+  const perr = doc.querySelector('parsererror');
+  if (perr) throw new Error('Not valid XML: ' + (perr.textContent || '').slice(0, 160));
+  const units = [];
+  const els = doc.getElementsByTagName('trans-unit');
+  for (let i = 0; i < els.length; i++) {
+    const u = els[i];
+    const id = u.getAttribute('id');
+    if (!id) continue;
+    const src = xfDirectChild(u, 'source');
+    const source = src ? src.textContent : '';
+    if (!source || !source.trim()) continue;         // nothing to translate
+    const tgt = xfDirectChild(u, 'target');
+    const current = tgt ? tgt.textContent : '';
+    const state = tgt ? (tgt.getAttribute('state') || '') : '';
+    // best alt-trans (highest match-quality) as a terminology reference
+    let altSource = '', altTarget = '', altQ = -1;
+    for (const c of u.children) {
+      if (c.localName !== 'alt-trans') continue;
+      const q = parseInt(c.getAttribute('match-quality') || '0', 10);
+      const as = xfDirectChild(c, 'source'), at = xfDirectChild(c, 'target');
+      if (as && at && q > altQ) { altQ = q; altSource = as.textContent; altTarget = at.textContent; }
+    }
+    units.push({
+      id, source,
+      current: (current || '').trim(),
+      hasTarget: !!(tgt && current && current.trim()),
+      state, altSource, altTarget, altQ,
+    });
+  }
+  return units;
+}
+
+// Rewrite one trans-unit's main <target> (the one before any <alt-trans>)
+// inside the raw string, preserving the rest byte-for-byte. Inserts a
+// <target> right after </source> when the unit had none.
+function xfWriteTarget(rawText, id, hebrew, stateChoice) {
+  const unitRe = new RegExp(
+    `(<trans-unit\\b[^>]*\\bid=(['"])${xfEscapeRegex(id)}\\2[^>]*>)([\\s\\S]*?)(<\\/trans-unit>)`
+  );
+  const m = unitRe.exec(rawText);
+  if (!m) return rawText;                       // id not found — leave untouched
+  const open = m[1], inner = m[3], close = m[4];
+
+  const altIdx = inner.search(/<alt-trans\b/);
+  const region = altIdx === -1 ? inner : inner.slice(0, altIdx);
+  const tail   = altIdx === -1 ? '' : inner.slice(altIdx);
+  const esc = xfXmlEscape(hebrew);
+
+  let newRegion;
+  const tgtRe = /<target\b([^>]*)>[\s\S]*?<\/target>/;
+  const tm = tgtRe.exec(region);
+  if (tm) {
+    const attrs = xfApplyState(tm[1], stateChoice);
+    newRegion = region.slice(0, tm.index) + `<target${attrs}>${esc}</target>` + region.slice(tm.index + tm[0].length);
+  } else {
+    const st = xfNewStateAttr(stateChoice);
+    const sClose = region.indexOf('</source>');
+    const at = sClose === -1 ? 0 : sClose + '</source>'.length;
+    newRegion = region.slice(0, at) + `<target${st}>${esc}</target>` + region.slice(at);
+  }
+  const rebuilt = open + newRegion + tail + close;
+  return rawText.slice(0, m.index) + rebuilt + rawText.slice(m.index + m[0].length);
+}
+
+// Adjust an existing <target …> attribute string per the user's choice.
+function xfApplyState(attrs, choice) {
+  if (choice === 'keep') return attrs;
+  const val = choice; // 'translated' | 'needs-review-l10n'
+  if (/\bstate\s*=\s*(['"])[^'"]*\1/.test(attrs)) {
+    return attrs.replace(/\bstate\s*=\s*(['"])[^'"]*\1/, `state='${val}'`);
+  }
+  return attrs + ` state='${val}'`;
+}
+// Attribute string for a brand-new <target> (unit had none). 'keep' has
+// no original to keep, so a fresh target is marked translated.
+function xfNewStateAttr(choice) {
+  const val = choice === 'keep' ? 'translated' : choice;
+  return ` state='${val}'`;
+}
+
+async function xfRun() {
+  const apiKey = getApiKey();
+  if (!apiKey) { showAdminToast('❌ Set your OpenAI key first'); return; }
+  if (!xfFiles.length) return;
+
+  const mode  = document.getElementById('xf-mode').value;   // both | translate | proofread
+  const lang  = document.getElementById('xf-lang').value;
+  const stCh  = document.getElementById('xf-state').value;  // translated | needs-review-l10n | keep
+  const model = document.getElementById('xf-model').value;
+
+  const btn  = document.getElementById('xf-btn');
+  const prog = document.getElementById('xf-prog');
+  const bar  = document.getElementById('xf-prog-bar');
+  const txt  = document.getElementById('xf-prog-text');
+  const errEl = document.getElementById('xf-error');
+  const resEl = document.getElementById('xf-results');
+
+  btn.disabled = true;
+  errEl.style.display = 'none';
+  resEl.style.display = 'none';
+  prog.classList.add('show');
+  bar.style.width = '4%';
+  txt.textContent = 'Reading files…';
+
+  const glossPairs = (typeof trGlossary !== 'undefined' && Array.isArray(trGlossary)) ? trGlossary : [];
+  xfResults = [];
+  let tot = { translated: 0, proofed: 0, changed: 0, unchanged: 0, files: 0 };
+
+  try {
+    for (let fi = 0; fi < xfFiles.length; fi++) {
+      const file = xfFiles[fi];
+      const { text, enc, hasBOM } = xfDecode(await file.arrayBuffer());
+      let raw = text;
+      const units = xfExtractUnits(text);
+
+      // Decide which units to work on, and how.
+      const jobs = [];
+      for (const u of units) {
+        const doProof = u.hasTarget && (mode === 'both' || mode === 'proofread');
+        const doTrans = !u.hasTarget && (mode === 'both' || mode === 'translate');
+        if (doProof) jobs.push({ u, kind: 'proof' });
+        else if (doTrans) jobs.push({ u, kind: 'trans' });
+      }
+
+      if (!jobs.length) {
+        // Nothing to do — still emit the file unchanged so "Download all" is complete.
+        xfResults.push({ name: file.name, blob: xfEncode(raw, enc, hasBOM) });
+        continue;
+      }
+
+      const BATCH = 20;
+      for (let i = 0; i < jobs.length; i += BATCH) {
+        const slice = jobs.slice(i, i + BATCH);
+        txt.textContent = `[${fi+1}/${xfFiles.length}] ${file.name} — ${Math.min(i+BATCH, jobs.length)}/${jobs.length} segments`;
+        const items = await xfGptBatch(slice, lang, model, apiKey, glossPairs);
+        for (let j = 0; j < slice.length; j++) {
+          const { u, kind } = slice[j];
+          let heb = (items[j] && typeof items[j].text === 'string') ? items[j].text : '';
+          const changed = !!(items[j] && items[j].changed);
+          if (!heb.trim()) { if (kind === 'proof') { tot.proofed++; tot.unchanged++; } continue; }
+          heb = heb.replace(/\r?\n/g, '\\n');     // enforce the format's literal \n line break
+          raw = xfWriteTarget(raw, u.id, heb, stCh);
+          if (kind === 'trans') tot.translated++;
+          else { tot.proofed++; changed ? tot.changed++ : tot.unchanged++; }
+        }
+        bar.style.width = (4 + ((fi + (i+BATCH)/jobs.length) / xfFiles.length) * 90) + '%';
+      }
+
+      xfResults.push({ name: file.name, blob: xfEncode(raw, enc, hasBOM) });
+      tot.files++;
+    }
+
+    bar.style.width = '100%';
+    txt.textContent = `✅ Done — ${tot.files} file${tot.files===1?'':'s'}`;
+
+    document.getElementById('xf-stats').innerHTML =
+      `<span>${tot.translated}</span> empty segment${tot.translated===1?'':'s'} translated · ` +
+      `<span>${tot.changed}</span> proofread fix${tot.changed===1?'':'es'} · ` +
+      `<span>${tot.unchanged}</span> already good`;
+
+    const list = document.getElementById('xf-list');
+    list.innerHTML = '';
+    xfResults.forEach((r, idx) => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:.7rem;background:#0a0a14;border:1px solid #1f2937;border-radius:6px;padding:.5rem .8rem';
+      row.innerHTML = `<span style="font-size:.78rem;color:#cbd5e1;word-break:break-all">🧩 ${r.name}</span>`;
+      const dl = document.createElement('button');
+      dl.className = 'tbtn';
+      dl.style.cssText = 'width:auto;padding:.4rem .9rem;font-size:.74rem;background:#1e1b4b;color:#a5b4fc;flex-shrink:0';
+      dl.textContent = '⬇ Download';
+      dl.onclick = () => xfDownload(idx);
+      row.appendChild(dl);
+      list.appendChild(row);
+    });
+    resEl.style.display = 'block';
+    document.getElementById('xf-dl-all').style.display = xfResults.length > 1 ? 'inline-block' : 'none';
+    setTimeout(() => prog.classList.remove('show'), 2400);
+  } catch (e) {
+    prog.classList.remove('show');
+    errEl.textContent = '❌ ' + e.message;
+    errEl.style.display = 'block';
+    console.error('[xliff-translator]', e);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// One GPT call for a batch of translate/proofread jobs → array aligned to
+// the batch: [{ text, changed, note }]. Missing items are padded safely.
+async function xfGptBatch(slice, lang, model, apiKey, glossPairs) {
+  const glossLine = (glossPairs && glossPairs.length)
+    ? `\nGLOSSARY (source ⇒ ${lang}, use these exact terms when they appear):\n` +
+      glossPairs.slice(0, 120).map(g => `- ${g.source} ⇒ ${g.target}`).join('\n') + '\n'
+    : '';
+
+  const sys =
+`You are a professional English→${lang} translator and proofreader for technical UI strings shown on an automotive A/C refrigerant service station (product family "DEX" / "Konfort"). Strings are short device-screen messages: keep them terse, imperative, and unambiguous.
+
+For each item you receive:
+- SOURCE: the English source string.
+- CURRENT: the current ${lang} target (may be "(empty)").
+- TM: an optional reference = a similar SOURCE and its approved ${lang} translation (a fuzzy/exact translation-memory match). Use it ONLY for terminology and style consistency — always translate the item's own SOURCE, never the TM's source.
+
+Produce the correct ${lang} target for SOURCE:
+- If CURRENT is "(empty)": translate SOURCE.
+- If CURRENT is present: proofread it against SOURCE. Fix mistranslations, wrong or inconsistent terminology, grammar, register, and missing/extra content. If CURRENT is already correct, return it unchanged and set changed=false.
+
+CRITICAL — preserve VERBATIM and in the same relative position:
+- Every placeholder token exactly as written: _V_, _0V_, _S_, _PCT_, and any _..._ token, plus standalone ALL-CAPS variables. Never translate, reorder, add, or drop a placeholder.
+- The literal two-character sequence \\n (backslash + letter n) — it is this format's line-break marker, NOT a real newline. Keep every \\n exactly where it appears; do not emit real line breaks.
+- Numbers, units, %, punctuation structure such as ": ".
+${glossLine}
+OUTPUT: JSON only, no markdown:
+{ "items": [ { "text": "<${lang} target>", "changed": <true|false>, "note": "<short reason if changed, else empty>" }, ... ] }
+Exactly ${slice.length} items, in the SAME ORDER as the input.`;
+
+  const user = slice.map((s, i) => {
+    const cur = s.kind === 'proof' && s.u.current ? s.u.current : '(empty)';
+    const tm = (s.u.altSource && s.u.altTarget)
+      ? `\nTM: ${s.u.altSource} => ${s.u.altTarget}` : '';
+    return `[${i+1}]\nSOURCE: ${s.u.source}\nCURRENT: ${cur}${tm}`;
+  }).join('\n\n');
+
+  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      response_format: { type: 'json_object' },
+      messages: [{ role: 'system', content: sys }, { role: 'user', content: user }],
+      max_completion_tokens: Math.max(1500, slice.reduce((n, s) => n + s.u.source.length + (s.u.current||'').length, 0) * 4),
+    }),
+  });
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    throw new Error(j.error?.message || ('OpenAI ' + r.status));
+  }
+  const j = await r.json();
+  let rawc = j.choices?.[0]?.message?.content || '{}';
+  rawc = rawc.replace(/^```[a-z]*\n?/i, '').replace(/```$/, '').trim();
+  let parsed;
+  try { parsed = JSON.parse(rawc); } catch { throw new Error('Model returned invalid JSON for a batch'); }
+  const arr = Array.isArray(parsed.items) ? parsed.items : [];
+  while (arr.length < slice.length) {
+    const s = slice[arr.length];
+    arr.push({ text: s.kind === 'proof' ? (s.u.current || '') : '', changed: false, note: '' });
+  }
+  return arr.slice(0, slice.length);
+}
+
+function xfDownload(idx) {
+  const r = xfResults[idx];
+  if (!r) return;
+  const url = URL.createObjectURL(r.blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = r.name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+function xfDownloadAll() { xfResults.forEach((_, i) => setTimeout(() => xfDownload(i), i * 300)); }
 
 // ═══════════════════════════════════════════════════════════════
 //  🟣 memoQ AUTO-TRANSLATOR (.mqout → .mqback)
