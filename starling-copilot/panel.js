@@ -103,7 +103,7 @@ function tagId(s) { const m = String(s == null ? '' : s).match(/O-(\d+)/); retur
 
 // Trailing tokens (tags / placeholders / entities / whitespace) that may sit after the
 // last real character — ignored when deciding whether a string "ends with a full stop".
-const TRAIL_TOK = /(?:\s+|<[^>]+>|\{\{[^{}]*\}\}|\{[^{}]*\}|%\d?\$?[sd]|&[a-zA-Z#0-9]+;|[OC]-\d+(?:-\d+)+|[①-⑳❶-➓⓪])+$/;
+const TRAIL_TOK = /(?:\s+|\\n|<[^>]+>|\{\{[^{}]*\}\}|\{[^{}]*\}|%\d?\$?[sd]|&[a-zA-Z#0-9]+;|[OC]-\d+(?:-\d+)+|[①-⑳❶-➓⓪])+$/;  // \\n = a trailing LITERAL "\n" escape, so a sentence period before it isn't hidden from the full-stop mirror
 function coreEnd(x) { return String(x == null ? '' : x).replace(TRAIL_TOK, ''); }
 function endsPeriod(x) { return /\.$/.test(x) && !/\.\.$/.test(x) && !/…$/.test(x); }  // single ASCII full stop, not ellipsis
 function endsEllipsis(x) { return /\.\.$/.test(x) || /…$/.test(x); }
@@ -252,7 +252,7 @@ function matchTrailingNL(src, out) {
 }
 // Full output polish: fix internal spacing, restore brand spacing, restore **bold** markers,
 // mirror a trailing literal "\n" escape and the source's full stop, then mirror leading/trailing whitespace.
-function polish(src, out) { return mirrorEdges(src, matchTrailingPeriod(src, matchTrailingNL(src, fixBold(src, fixAmounts(src, fixBrands(fixSpacing(out))))))); }
+function polish(src, out) { return mirrorEdges(src, matchTrailingNL(src, matchTrailingPeriod(src, fixBold(src, fixAmounts(src, fixBrands(fixSpacing(out))))))); }
 
 // ---- optional XLIFF source (alternative to DOM harvest) --------------------
 const XLIFF_TAGGED = /<\/?(?:g|x|bpt|ept|ph|it|mrk|sub)\b|[OC]-\d+(?:-\d+)+|[①-⑳❶-➓⓪]/;
