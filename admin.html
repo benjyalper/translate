@@ -11638,9 +11638,18 @@ async function xfRun() {
         for (let j = 0; j < slice.length; j++) {
           const { u, kind } = slice[j];
           let heb = (items[j] && typeof items[j].text === 'string') ? items[j].text : '';
-          const changed = !!(items[j] && items[j].changed);
+          let changed = !!(items[j] && items[j].changed);
           if (!heb.trim()) { if (kind === 'proof') { tot.proofed++; tot.unchanged++; } continue; }
           heb = heb.replace(/\r?\n/g, '\\n');     // enforce the format's literal \n line break
+          // Backstop: the target's line breaks must match the source. When the
+          // SOURCE has no literal \n, the target must have none either — the
+          // machine-pretranslated input often appended a bogus "\n…?" line that
+          // the proofread should drop. Cut from the first stray \n onward.
+          if (!/\\n/.test(u.source) && /\\n/.test(heb)) {
+            heb = heb.replace(/\\n[\s\S]*$/, '').replace(/\s+$/, '');
+            changed = true;
+          }
+          if (!heb.trim()) { if (kind === 'proof') { tot.proofed++; tot.unchanged++; } continue; }
           raw = xfWriteTarget(raw, u.id, heb, stCh);
           if (kind === 'trans') tot.translated++;
           else { tot.proofed++; changed ? tot.changed++ : tot.unchanged++; }
@@ -11709,8 +11718,12 @@ Produce the correct ${lang} target for SOURCE:
 
 CRITICAL — preserve VERBATIM and in the same relative position:
 - Every placeholder token exactly as written: _V_, _0V_, _S_, _PCT_, and any _..._ token, plus standalone ALL-CAPS variables. Never translate, reorder, add, or drop a placeholder.
-- The literal two-character sequence \\n (backslash + letter n) — it is this format's line-break marker, NOT a real newline. Keep every \\n exactly where it appears; do not emit real line breaks.
 - Numbers, units, %, punctuation structure such as ": ".
+
+LINE BREAKS — match the SOURCE, do not invent them:
+- A line break is the literal two-character sequence \\n (backslash + letter n), NOT a real newline. Never output a real newline.
+- The target's \\n breaks must MATCH THE SOURCE. If SOURCE has no \\n, the target must have NONE — DELETE any stray \\n and any text appended after it that has no basis in SOURCE. (These machine-pretranslated targets often have a bogus "\\n…?" confirmation line tacked on that is not in the source — remove it and set changed=true.)
+- If SOURCE has N \\n breaks, keep exactly N in the corresponding positions.
 ${glossLine}
 OUTPUT: JSON only, no markdown:
 { "items": [ { "text": "<${lang} target>", "changed": <true|false>, "note": "<short reason if changed, else empty>" }, ... ] }
