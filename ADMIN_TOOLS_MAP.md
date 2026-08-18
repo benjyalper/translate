@@ -52,7 +52,7 @@ The admin page detects `localhost` vs Railway and either calls the Node API dire
 
 ---
 
-## 3. The 21 tools
+## 3. The 22 tools
 
 Tools are grouped by type:
 
@@ -269,6 +269,16 @@ End-to-end tool for Starling (ByteDance CAT) tasks: drop a **raw exported XLIFF*
 - **Token highlighting:** `{placeholders}`, `{{vars}}`, `%s`, and `<html tags>` are visually tagged in both source and target.
 - **Helper (offline):** `copydeck-gen.mjs` — `node copydeck-gen.mjs <in.xliff> <corr.json> <out.html> <taskId>` builds the same deck as a standalone HTML file. Sample deck: `deck-354460046850.json`.
 - **Workflow:** Benjy exports the task XLIFF from Starling → drops the **raw** file here → clicks **Proofread** or **Translate** (GPT-5.4, placeholders/tags/HTML preserved) → copies segment-by-segment into Starling. (Claude can still hand over a pre-built deck for the tagged segments it takes in the browser.)
+
+### 🧩 22. XLIFF 1.1 Translator / Proofreader (.xlf) — `tool-xliff-translator` *(NEW)*
+For **plain XLIFF 1.1 `.xlf`** jobs delivered as a bare file (e.g. DEX / KONFORT A/C service-station UI strings) — **not** a Trados `.sdlppx` and **not** `<mrk>`/`<sdl:seg>`-segmented. Flat `<trans-unit><source/><target state='needs-review-l10n'/>[<alt-trans>]`. Many segments arrive machine-pre-translated (a proofread job); some have no `<target>` (a translate job). Handles both in one pass and hands back the **same file, re-encoded to its original UTF-16**, ready to re-import.
+
+- **Card UI:** `admin.html:1201-1282`
+- **JS:** `admin.html` — `xf*` family (section ~11418): `xfOnFile`; `xfDecode`/`xfEncode` (BOM sniff → `TextDecoder`; re-emit **UTF-16LE + BOM** byte-for-byte); `xfExtractUnits` (DOMParser + direct-child walk — ignores an `<alt-trans>`'s own `source`/`target`, grabs the **highest `match-quality` `<alt-trans>`** as a TM reference); `xfWriteTarget` (raw-string injection of the **main** `<target>` only — before any `<alt-trans>` — inserting one after `</source>` when absent); `xfApplyState`/`xfNewStateAttr`; `xfGptBatch`; `xfDownload`/`xfDownloadAll`.
+- **Backend:** none — OpenAI called directly from the browser (`gpt-5.4` default, `response_format:json_object`, batches of 20).
+- **Modes:** proofread existing + translate empty (default) · translate empty only · proofread only. **Target state** written per segment: `translated` / `needs-review-l10n` / keep original. Auto-applies any glossary loaded in the Trados card (`trGlossary`).
+- **Placeholder safety:** preserves DEX tokens `_V_ _0V_ _S_ _PCT_` (and any `_..._` / ALL-CAPS var) and the **literal two-char `\n`** line-break marker verbatim; real newlines in GPT output are forced back to literal `\n`.
+- **Why it exists:** the Trados Auto-Translator (#4) only accepts `.sdlppx` with `.sdlxliff` inside — it can't ingest these bare XLIFF 1.1 files.
 
 ---
 

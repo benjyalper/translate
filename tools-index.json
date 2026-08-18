@@ -69,6 +69,21 @@
       "needs": ["OPENAI_API_KEY (browser-side)"]
     },
     {
+      "id": "tool-xliff-translator",
+      "emoji": "🧩",
+      "title": "XLIFF 1.1 Translator / Proofreader (.xlf)",
+      "type": "client",
+      "toolmap_line": 611,
+      "card_lines": [1201, 1282],
+      "js_prefix": "xf",
+      "js_starts_around": 11418,
+      "needs": ["OPENAI_API_KEY (browser-side)"],
+      "purpose": "For plain XLIFF 1.1 .xlf files (DEX/KONFORT A/C service stations, etc.) delivered as a bare file — NOT wrapped in a Trados .sdlppx and NOT segmented with <mrk>/<sdl:seg>. Flat structure: <trans-unit><source/><target state='needs-review-l10n'/>[<alt-trans>]. Translates empty <target> segments and/or proofreads existing needs-review-l10n targets against the source, preserving DEX placeholders (_V_ _0V_ _S_ _PCT_ and the literal two-char sequence \\n) and using the highest match-quality <alt-trans> as a TM reference. Hands back the SAME file re-encoded to its original UTF-16 (LE, BOM) so the CAT importer accepts it.",
+      "inputs": "One or more .xlf / .xliff files (multi-file). Modes: proofread existing + translate empty (default) / translate empty only / proofread only. Target state written per segment: translated / needs-review-l10n / keep original. Auto-applies any glossary loaded in the Trados card (trGlossary).",
+      "ai": "xfGptBatch calls api.openai.com chat/completions, response_format json_object, batches of 20; default model gpt-5.4. Returns {items:[{text,changed,note}]}. Real newlines in output are forced back to the literal two-char \\n.",
+      "encoding": "xfDecode sniffs the BOM -> TextDecoder; xfEncode re-emits UTF-16LE+BOM byte-for-byte. Injection (xfWriteTarget) is raw-string and touches only the unit's MAIN <target> (before any <alt-trans>), inserting one after </source> when absent."
+    },
+    {
       "id": "tool-memoq-translator",
       "emoji": "🟣",
       "title": "memoQ Auto-Translator (.mqout → .mqback)",
