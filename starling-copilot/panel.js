@@ -801,10 +801,13 @@ async function doGpt() {
   }
 }
 
-let onlyChanged = true;
+let revFilter = 'changed';   // review view filter: 'changed' | 'all' | 'manual' (✋ paste-by-hand only)
 function renderReview() {
   const box = $('review');
-  const list = onlyChanged ? state.proposals.filter((p) => p.next !== p.old) : state.proposals;
+  const list = state.proposals.filter((p) =>
+    revFilter === 'manual' ? p.manual :
+    revFilter === 'all' ? true :
+    p.next !== p.old);   // 'changed'
   box.innerHTML = list.map((p) => {
     const idx = state.proposals.indexOf(p);
     const changed = p.next !== p.old;
@@ -869,7 +872,7 @@ function renderReview() {
       ${newRow}
       ${copyBlock}
     </div>`;
-  }).join('') || '<div class="info">No changes proposed.</div>';
+  }).join('') || `<div class="info">${revFilter === 'manual' ? 'No ✋ paste-by-hand (tagged/chip) segments in this task.' : 'No changes proposed.'}</div>`;
 
   box.querySelectorAll('.rc-cb').forEach((cb) => cb.addEventListener('change', (e) => {
     const i = +e.target.closest('.rc').dataset.i; state.proposals[i].approved = e.target.checked; updateRevCount();
@@ -4062,8 +4065,17 @@ async function init() {
   $('pl-scan').addEventListener('click', plScan);
   $('pl-write').addEventListener('click', plWrite);
 
-  $('only-changed').addEventListener('click', (e) => { onlyChanged = true; e.target.classList.add('active'); renderReview(); });
-  $('sel-all').addEventListener('click', () => { state.proposals.forEach((p) => p.approved = true); $('only-changed').classList.remove('active'); onlyChanged = false; renderReview(); });
+  // Review VIEW filter (mutually exclusive) — mark the active one and re-render.
+  const setRevFilter = (mode) => {
+    revFilter = mode;
+    ['view-changed', 'view-all', 'view-manual'].forEach((id) => { const b = $(id); if (b) b.classList.toggle('active', (id === 'view-' + mode)); });
+    renderReview();
+  };
+  $('view-changed').addEventListener('click', () => setRevFilter('changed'));
+  $('view-all').addEventListener('click', () => setRevFilter('all'));
+  $('view-manual').addEventListener('click', () => setRevFilter('manual'));   // ✋ paste-by-hand only
+  // Approve selection (does NOT change the view). Manual/tagged rows are copy-by-hand and never auto-written.
+  $('sel-all').addEventListener('click', () => { state.proposals.forEach((p) => p.approved = !p.manual && p.next !== String(p.old)); renderReview(); });
   $('sel-none').addEventListener('click', () => { state.proposals.forEach((p) => p.approved = false); renderReview(); });
 
   // Feishu LQA mode

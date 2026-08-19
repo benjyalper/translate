@@ -227,9 +227,15 @@
       <div class="rev-bar">
         <span id="rev-count" class="info"></span>
         <span class="spacer"></span>
-        <button id="only-changed" class="btn xs ghost active">Changed only</button>
-        <button id="sel-all" class="btn xs ghost">All</button>
-        <button id="sel-none" class="btn xs ghost">None</button>
+        <span class="rev-grp" title="What to show">
+          <button id="view-changed" class="btn xs ghost active" title="Show only segments GPT changed">Changed</button>
+          <button id="view-all" class="btn xs ghost" title="Show every segment">All</button>
+          <button id="view-manual" class="btn xs ghost" title="Show only ✋ paste-by-hand segments — tagged/chip rows you copy in by hand">✋ Paste by hand</button>
+        </span>
+        <span class="rev-grp" title="Tick / untick the apply boxes (tagged rows stay copy-by-hand)">
+          <button id="sel-all" class="btn xs ghost">✓ all</button>
+          <button id="sel-none" class="btn xs ghost">✓ none</button>
+        </span>
       </div>
       <div id="review" class="review"></div>
     </section>
