@@ -3518,10 +3518,29 @@ async function hvHarvest() {
 }
 async function hvToMemory() {
   if (!HV.pairs.length) { hvInfo('Harvest a task first.', 'err'); return; }
-  let n = 0;
-  for (const p of HV.pairs) { if (tmRecordOne(p.src, p.tgt)) n++; }
+  let added = 0, same = 0; const clashes = [];
+  // Don't re-park a conflict already sitting in the orange card (e.g. a second click, or the same
+  // source appearing twice in the harvest with the same divergent target).
+  const parked = new Set(CONF.filter((c) => c.kind === 'mem').map((c) => c.srcKey + '⇢' + wbFold(c.newVal)));
+  for (const p of HV.pairs) {
+    const k = tmKey(p.src), prev = TM.map[k];
+    if (prev && wbFold(prev.tgt) !== wbFold(p.tgt)) {   // same source already remembered with a DIFFERENT target → adjudicate, never silently overwrite
+      const sig = k + '⇢' + wbFold(p.tgt);
+      if (!parked.has(sig)) { parked.add(sig); clashes.push({ kind: 'mem', label: p.src, srcKey: k, src: p.src, oldVal: prev.tgt, newVal: p.tgt }); }
+      continue;
+    }
+    const existed = !!prev;
+    if (tmRecordOne(p.src, p.tgt)) { if (existed) same++; else added++; }
+  }
   await tmSave(); tmRefresh();
-  hvInfo(`Added ${n} pair(s) to Consistency memory (now ${tmCount()} strings). Approved wording auto-fills on matching sources.`, 'good');
+  let msg = `Added ${added} new pair(s) to Consistency memory` + (same ? ` · ${same} already matched` : '') + ` (now ${tmCount()} strings).`;
+  if (clashes.length) {
+    confAdd(clashes);
+    msg += ` ⚠ ${clashes.length} conflict(s) with existing wording — resolve them in the orange ⚠ card (pick which to keep; the other is deleted).`;
+    hvInfo(msg, 'err');
+  } else {
+    hvInfo(msg + ' Approved wording auto-fills on matching sources.', 'good');
+  }
 }
 function hvSys() {
   return 'You learn TikTok Hebrew (he-IL) localization conventions from APPROVED en→he translation pairs — the submitted, proofread source of truth. Infer GENERALIZABLE, actionable conventions a translator/proofreader should reuse across future tasks: term mappings, register/tone (e.g. singular gender-neutral slash form vs plural), punctuation, placeholder/tag handling, brand casing. ' +
