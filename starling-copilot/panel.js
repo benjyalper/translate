@@ -1292,8 +1292,8 @@ function lqAutoMap(header) {
   map.level = find(/level|severity|等级|等級/i);
   map.comment = find(/comment|说明|說明|备注|備註|reason/i);
   map.key = find(/^keys?$|\bkeys?\b|键|鍵/i);                  // "Key" or "keys"
-  map.valid = find(/valid/i);
-  map.final = find(/final\s*translation|\bfinal\b/i);   // "Final Translation (Only for valid issues)" — the human-approved fix (col K)
+  map.valid = find(/valid|proofread|\bagree/i);         // "Valid (Y/N)" · "Validation feedback" (=agree) · a bare "agree" column
+  map.final = find(/final\s*translation|\bfinal\b/i);   // "Final Translation (Only for valid issues)" — the human-approved fix (col K); lrnAdd falls back to the AI/CorrectTarget when absent
   return map;
 }
 function lqLoad(preRows) {
@@ -4436,7 +4436,10 @@ async function hvDistill() {
 const LRN_BATCH = 25, LRN_CAP = 400;
 let LRN = { rows: [] };   // {src, wrong, final, comment, etype, key, sheet}
 function lrnInfo(m, k) { info('lq-learn-info', m, k || ''); }
-function lrnYes(v) { return /^(y|yes|valid|true|1|כן|✓|v)$/i.test(String(v == null ? '' : v).trim()); }
+// A row counts as validated when you marked it Valid = Yes, OR — in an XBench/Feishu "agree" export
+// (I=Fixed, J=agree, K=final) — when the Validation-feedback cell says "agree". Anchored so "disagree"
+// never matches.
+function lrnYes(v) { return /^(y|yes|valid|true|1|כן|✓|v|agree|מסכים|מאשר(?:\/ת)?)$/i.test(String(v == null ? '' : v).trim()); }
 function lrnSheetName() { return (($('lq-tab') && $('lq-tab').value) || LQ.fileName || 'sheet'); }
 function lrnAdd() {
   if (!LQ.rows || !LQ.rows.length) { lrnInfo('Load a sheet first (Step 1).', 'err'); return; }
