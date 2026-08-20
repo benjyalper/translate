@@ -3418,7 +3418,8 @@ async function cbFetchTasks(ids, tabId) {
     target: { tabId }, args: [ids],
     func: async (ids) => {
       const URL_ = 'https://starling.bytedance.com/api/text/getSourceTextListWithTargetText';
-      const hasExtra = (o) => { const e = o && o.textExtra; if (!e) return false; try { const v = typeof e === 'string' ? JSON.parse(e) : e; return v && typeof v === 'object' && Object.values(v).some((x) => String(x == null ? '' : x).trim()); } catch (_) { return false; } };
+      // Non-empty CLDR forms from a textExtra field ({zero,one,two,few,many,other}).
+      const formsOf = (o) => { const e = o && o.textExtra; if (!e) return {}; let v; try { v = typeof e === 'string' ? JSON.parse(e) : e; } catch (_) { return {}; } if (!v || typeof v !== 'object') return {}; const out = {}; for (const k of Object.keys(v)) { const val = String(v[k] == null ? '' : v[k]); if (val.trim()) out[k] = val; } return out; };
       const out = {};
       for (const id of ids) {
         try {
@@ -3427,16 +3428,20 @@ async function cbFetchTasks(ids, tabId) {
           const j = await res.json();
           if (!j || j.status_code !== 1000) { out[id] = { error: 'sc ' + (j && j.status_code) }; continue; }
           const rows = (j.data && j.data.rows) || [];
-          const pairs = [];
+          const pairs = [], plurals = [];
           for (const row of rows) {
             const s = row.sourceText || {}, t = row.targetText || (s.targetTexts && s.targetTexts[0]) || {};
-            if (hasExtra(s) || hasExtra(t)) continue;   // plural row → plural lane (later)
+            const sf = formsOf(s), tf = formsOf(t);
+            if (Object.keys(sf).length || Object.keys(tf).length) {   // plural row → plural lane
+              if (t.status === 3 && Object.keys(sf).length && Object.keys(tf).length) plurals.push({ srcForms: sf, tgtForms: tf, key: s.key || '' });
+              continue;
+            }
             if (t.status !== 3) continue;               // proofread-confirmed only
             const src = s.content == null ? '' : String(s.content), tgt = t.content == null ? '' : String(t.content);
             if (!src.trim() || !tgt.trim()) continue;
             pairs.push({ src, tgt, key: s.key || '' });
           }
-          out[id] = { pairs };
+          out[id] = { pairs, plurals };
         } catch (e) { out[id] = { error: String((e && e.message) || e) }; }
       }
       return out;
@@ -3456,6 +3461,28 @@ function cbAgg(index, id, pairs) {
     v.n++; v.tasks[id] = 1;
   }
 }
+// --- plural lane: key on the representative source form; a variant is a whole CLDR set ---
+function cbPlKey(srcForms) { return wbFold(String((srcForms && (srcForms.other || srcForms.one)) || (srcForms && Object.values(srcForms)[0]) || '')); }
+function cbFormSig(forms) { return Object.keys(forms || {}).sort().map((k) => k + '=' + wbFold(forms[k])).join('|'); }
+function cbAggPlural(index, id, plurals) {
+  if (!index.plurals) index.plurals = {};
+  for (const p of plurals) {
+    const k = cbPlKey(p.srcForms); if (!k) continue;
+    let e = index.plurals[k]; if (!e) e = index.plurals[k] = { srcForms: p.srcForms, total: 0, variants: [] };
+    e.total++;
+    const sig = cbFormSig(p.tgtForms);
+    let v = e.variants.find((x) => x.sig === sig);
+    if (!v) { v = { forms: p.tgtForms, sig, n: 0, tasks: {} }; e.variants.push(v); }
+    v.n++; v.tasks[id] = 1;
+  }
+}
+// ---- PLURAL MEMORY (PM): remembered CLDR form-sets, read by the 🔢 Plurals tool ----
+let PM = { map: {}, updatedAt: 0 };
+async function pmLoad() { try { PM = await store.get('pluralMemory', { map: {}, updatedAt: 0 }); } catch (e) {} if (!PM || !PM.map) PM = { map: {}, updatedAt: 0 }; return PM; }
+async function pmSave() { PM.updatedAt = Date.now(); try { await store.set({ pluralMemory: PM }); } catch (e) {} }
+function pmCount() { return PM && PM.map ? Object.keys(PM.map).length : 0; }
+function pmLookup(srcForms) { const k = cbPlKey(srcForms); return (k && PM.map[k]) ? PM.map[k] : null; }
+function pmRecord(srcForms, forms) { const k = cbPlKey(srcForms); if (!k || !forms || !Object.keys(forms).length) return false; const prev = PM.map[k]; PM.map[k] = { srcForms, forms, ts: Date.now(), n: (prev ? prev.n || 1 : 0) + 1 }; return true; }
 async function cbBuild() {
   if (CB.building) return;
   CB.building = true; if ($('cb-build')) $('cb-build').disabled = true;
@@ -3467,8 +3494,8 @@ async function cbBuild() {
     if (!tasks.length) { cbInfo('No Submitted tasks found (only taskStatus 2 is harvested).', 'err'); return; }
     const force = $('cb-force') && $('cb-force').checked;
     const prior = force ? null : await store.get('corpusIndex', null);
-    const index = (prior && prior.sources) ? prior : { builtAt: 0, taskCount: 0, pairCount: 0, tasksSeen: {}, sources: {} };
-    if (!index.sources) index.sources = {}; if (!index.tasksSeen) index.tasksSeen = {};
+    const index = (prior && prior.sources) ? prior : { builtAt: 0, taskCount: 0, pairCount: 0, tasksSeen: {}, sources: {}, plurals: {} };
+    if (!index.sources) index.sources = {}; if (!index.tasksSeen) index.tasksSeen = {}; if (!index.plurals) index.plurals = {};
     const todo = tasks.filter((x) => force || !index.tasksSeen[x.id]);
     if (!todo.length) { CB.index = index; cbClassify(); cbRender(); cbBadge(); cbInfo(`Corpus already covers all ${tasks.length} Submitted task(s) — nothing new. Tick “Rebuild” to redo from scratch.`, 'good'); return; }
     const CH = 6; let done = 0, failed = 0;
@@ -3480,7 +3507,8 @@ async function cbBuild() {
         const rr = res[task.id];
         if (!rr || rr.error) { failed++; continue; }
         cbAgg(index, task.id, rr.pairs || []);
-        index.tasksSeen[task.id] = { name: task.name, ts: Date.now(), pairs: (rr.pairs || []).length };
+        cbAggPlural(index, task.id, rr.plurals || []);
+        index.tasksSeen[task.id] = { name: task.name, ts: Date.now(), pairs: (rr.pairs || []).length, plurals: (rr.plurals || []).length };
         done++;
       }
       if ($('cb-bar')) $('cb-bar').style.width = Math.round(Math.min(i + CH, todo.length) / todo.length * 100) + '%';
@@ -3531,14 +3559,29 @@ function cbClassify() {
   for (const b of Object.keys(buckets)) buckets[b].sort((a, z) => z.topTasks - a.topTasks || z.total - a.total);
   cand.sort((a, z) => z.tasks - a.tasks);
   CB.buckets = buckets; CB.cand = cand;
+  cbClassifyPlural();
+}
+// Classify the plural form-sets (variant = a whole CLDR set), reusing cbBucketOf.
+function cbClassifyPlural() {
+  const idx = CB.index; CB.pbuckets = null;
+  if (!idx || !idx.plurals || !Object.keys(idx.plurals).length) return;
+  const buckets = { unanimous: [], dominant: [], contested: [], singleton: [] };
+  for (const k of Object.keys(idx.plurals)) {
+    const e = idx.plurals[k], c = cbBucketOf(e);
+    buckets[c.bucket].push({ key: k, srcForms: e.srcForms, vs: c.vs, top: c.top, total: c.total, topShare: c.topShare, topTasks: c.topTasks });
+  }
+  for (const b of Object.keys(buckets)) buckets[b].sort((a, z) => z.topTasks - a.topTasks || z.total - a.total);
+  CB.pbuckets = buckets;
 }
 function cbRender() {
   const b = CB.buckets, idx = CB.index; if (!b || !idx) return;
   const consistent = b.unanimous.length + b.dominant.length + b.singleton.length;
+  const pb = CB.pbuckets, plN = idx.plurals ? Object.keys(idx.plurals).length : 0;
   if ($('cb-summary')) {
     $('cb-summary').hidden = false;
     $('cb-summary').innerHTML = `<b>${idx.taskCount}</b> tasks · <b>${idx.pairCount}</b> confirmed pairs · <b>${Object.keys(idx.sources).length}</b> unique sources → ` +
-      `${b.unanimous.length} unanimous · ${b.dominant.length} dominant · ${b.contested.length} contested · ${b.singleton.length} singleton`;
+      `${b.unanimous.length} unanimous · ${b.dominant.length} dominant · ${b.contested.length} contested · ${b.singleton.length} singleton` +
+      (plN ? ` · <b>${plN}</b> plural set${plN === 1 ? '' : 's'}` : '');
   }
   const rev = $('cb-review'); if (!rev) return; rev.hidden = false;
   let html = `<div class="cb-sec"><div class="cb-h">✅ Consistent — ${consistent} pair(s) ready for memory</div>` +
@@ -3558,10 +3601,29 @@ function cbRender() {
       CB.cand.slice(0, 150).map((c, i) => `<label class="cb-opt"><input type="checkbox" class="cb-lk" data-i="${i}"/> <span dir="ltr">${esc(c.en)}</span> → <span dir="rtl">${esc(c.he)}</span> <span class="hint">${c.tasks} task(s)</span></label>`).join('') +
       `<button id="cb-lock-apply" class="btn sm">🔒 Lock checked terms</button></div>`;
   }
+  // --- plural lane sections ---
+  if (pb) {
+    const fmtSet = (forms) => Object.keys(forms).map((f) => `<span class="fz-src"><b>${esc(f)}</b> </span><span dir="rtl">${esc(forms[f])}</span>`).join(' · ');
+    const plConsistent = pb.unanimous.length + pb.dominant.length + pb.singleton.length;
+    html += `<div class="cb-sec"><div class="cb-h">🔢 Plural sets — ${plConsistent} consistent · ${pb.contested.length} contested</div>` +
+      `<div class="hint">Each CLDR form-set (one/two/many/other) as a unit. Promote feeds the 🔢 Plurals tool so a remembered plural pre-fills instead of asking GPT. Clashes go to the orange ⚠ card.</div>` +
+      `<button id="cb-pl-promote" class="btn sm"${plConsistent ? '' : ' disabled'}>➕ Promote ${plConsistent} plural set(s)</button>`;
+    if (pb.contested.length) {
+      html += `<div style="margin-top:8px"></div>` +
+        pb.contested.slice(0, 60).map((r, i) => `<div class="cb-item"><div class="cb-src" dir="ltr">${esc((r.srcForms.other || r.srcForms.one || ''))}</div>` +
+          r.vs.slice(0, 4).map((v, j) => `<label class="cb-opt"><input type="radio" name="cbp-${i}" value="${j}"${j === 0 ? ' checked' : ''}/> <span class="fz-body">${fmtSet(v.forms)}</span> <span class="hint">×${v.n} · ${Object.keys(v.tasks).length} task(s)</span></label>`).join('') +
+          `</div>`).join('') +
+        `<button id="cb-pl-contested-apply" class="btn sm">➕ Add chosen plural sets</button>` +
+        (pb.contested.length > 60 ? `<div class="hint">Showing 60 of ${pb.contested.length}.</div>` : '');
+    }
+    html += `</div>`;
+  }
   rev.innerHTML = html;
   if ($('cb-promote')) $('cb-promote').addEventListener('click', cbPromote);
   if ($('cb-contested-apply')) $('cb-contested-apply').addEventListener('click', cbApplyContested);
   if ($('cb-lock-apply')) $('cb-lock-apply').addEventListener('click', cbApplyLocked);
+  if ($('cb-pl-promote')) $('cb-pl-promote').addEventListener('click', cbPromotePlural);
+  if ($('cb-pl-contested-apply')) $('cb-pl-contested-apply').addEventListener('click', cbApplyContestedPlural);
 }
 // Shared memory-write with conflict routing (mirrors hvToMemory).
 function cbWritePairs(list) {   // list: [{key, src, tgt}]
@@ -3622,6 +3684,46 @@ async function cbApplyLocked() {
   await lockSave(); lockRefresh();
   cbInfo(`Locked ${n} term(s)${skipped ? ` · ${skipped} skipped (already locked differently)` : ''}. ${lockCount()} locked total.`, 'good');
 }
+// Write plural form-sets to Plural memory, routing form-set clashes to the orange ⚠ card.
+function cbWritePlurals(list) {   // list: [{key, srcForms, forms}]
+  let added = 0, matched = 0; const clashes = [];
+  const parked = new Set(CONF.filter((c) => c.kind === 'plural').map((c) => c.plKey + '⇢' + cbFormSig(c.newForms)));
+  for (const r of list) {
+    const k = cbPlKey(r.srcForms), prev = PM.map[k];
+    if (prev && cbFormSig(prev.forms) !== cbFormSig(r.forms)) {
+      const sig = k + '⇢' + cbFormSig(r.forms);
+      if (!parked.has(sig)) { parked.add(sig); clashes.push({ kind: 'plural', plKey: k, label: (r.srcForms.other || r.srcForms.one || ''), srcForms: r.srcForms, oldForms: prev.forms, newForms: r.forms }); }
+      continue;
+    }
+    if (prev) matched++; else { pmRecord(r.srcForms, r.forms); added++; }
+  }
+  return { added, matched, clashes };
+}
+async function cbPromotePlural() {
+  const pb = CB.pbuckets; if (!pb) return;
+  const list = [].concat(pb.unanimous, pb.dominant, pb.singleton).map((r) => ({ key: r.key, srcForms: r.srcForms, forms: r.top.forms }));
+  if (!list.length) { cbInfo('No plural sets to promote.', 'err'); return; }
+  try { backupAll(); } catch (e) {}
+  const { added, matched, clashes } = cbWritePlurals(list);
+  await pmSave();
+  let msg = `Promoted ${added} plural set(s) to Plural memory` + (matched ? ` · ${matched} already matched` : '') + ` (now ${pmCount()}). The 🔢 Plurals tool will pre-fill these.`;
+  if (clashes.length) { confAdd(clashes); cbInfo(msg + ` ⚠ ${clashes.length} clash — resolve in the orange ⚠ card.`, 'err'); }
+  else cbInfo(msg, 'good');
+}
+async function cbApplyContestedPlural() {
+  const pb = CB.pbuckets, rev = $('cb-review'); if (!pb || !rev) return;
+  const list = [];
+  pb.contested.slice(0, 60).forEach((r, i) => {
+    const sel = rev.querySelector(`input[name="cbp-${i}"]:checked`); if (!sel) return;
+    const v = r.vs[+sel.value]; if (v) list.push({ key: r.key, srcForms: r.srcForms, forms: v.forms });
+  });
+  if (!list.length) { cbInfo('No plural sets chosen.', 'err'); return; }
+  const { added, matched, clashes } = cbWritePlurals(list);
+  await pmSave();
+  let msg = `Added ${added} chosen plural set(s) to Plural memory` + (matched ? ` · ${matched} matched` : '') + `.`;
+  if (clashes.length) { confAdd(clashes); cbInfo(msg + ` ⚠ ${clashes.length} clash — see orange ⚠ card.`, 'err'); }
+  else cbInfo(msg, 'good');
+}
 
 // ---- FULL BACKUP / RESTORE (safety net for every brain) -------------------
 // One JSON snapshot of EVERY store — Style Brain, Consistency memory, Locked
@@ -3630,7 +3732,7 @@ async function cbApplyLocked() {
 function snapshotAll() {
   return {
     _meta: { kind: 'starling-copilot-backup', ver: 1, ts: Date.now(), at: new Date().toISOString() },
-    styleBrain: BRAIN, consistencyTM: TM, lockedTerms: LOCK, autoFix: FIX, corpusIndex: CB.index || null
+    styleBrain: BRAIN, consistencyTM: TM, lockedTerms: LOCK, autoFix: FIX, pluralMemory: PM, corpusIndex: CB.index || null
   };
 }
 function backupAll() {
@@ -3638,7 +3740,7 @@ function backupAll() {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
   a.download = 'starling-brains-backup-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.json'; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-  cbInfo(`Backup downloaded — ${BRAIN.rules.length} rules · ${BRAIN.glossary.length} terms · ${tmCount()} memory · ${lockCount()} locked · ${fixCount()} auto-fix. Keep it to roll back anytime.`, 'good');
+  cbInfo(`Backup downloaded — ${BRAIN.rules.length} rules · ${BRAIN.glossary.length} terms · ${tmCount()} memory · ${lockCount()} locked · ${fixCount()} auto-fix · ${pmCount()} plural. Keep it to roll back anytime.`, 'good');
 }
 async function restoreAll(file) {
   try {
@@ -3650,6 +3752,7 @@ async function restoreAll(file) {
     if (o.consistencyTM) { TM = o.consistencyTM; if (!TM.map) TM.map = {}; await tmSave(); tmRefresh(); }
     if (o.lockedTerms) { LOCK = o.lockedTerms; if (!LOCK.terms) LOCK.terms = []; await lockSave(); lockRefresh(); }
     if (o.autoFix) { FIX = o.autoFix; if (!FIX.rules) FIX.rules = []; await fixSave(); fixRefresh(); }
+    if (o.pluralMemory) { PM = o.pluralMemory; if (!PM.map) PM.map = {}; await pmSave(); }
     if (o.corpusIndex) { CB.index = o.corpusIndex; try { await store.set({ corpusIndex: CB.index }); } catch (e) {} cbClassify(); cbRender(); cbBadge(); }
     cbInfo('Restored all brains from the backup. (The pre-restore state was also downloaded, just in case.)', 'good');
   } catch (e) { cbInfo('Restore failed: ' + (e.message || e), 'err'); }
@@ -3674,7 +3777,17 @@ async function plScan() {
       info('pl-info', `No plural segments matched "${$('seg-filter').value.trim()}" (task has ${all.length} plural segment(s)). Clear the box for all.`, 'err');
       plRender(); return;
     }
-    info('pl-info', PL.segs.length ? `Found ${PL.segs.length} plural segment(s)${sel ? ' (filtered)' : ''}. Propose each, review, then write.` : 'No plural segments in this task.', PL.segs.length ? 'good' : '');
+    // Plural memory pre-fill: a remembered form-set for this source drops straight in (no GPT).
+    let mem = 0;
+    for (const s of PL.segs) {
+      const hit = pmLookup(s.srcForms);
+      if (hit && hit.forms) {
+        const need = Object.keys(s.tgtForms).length ? Object.keys(s.tgtForms) : Object.keys(hit.forms);
+        s.forms = {}; need.forEach((f) => { s.forms[f] = hit.forms[f] != null ? hit.forms[f] : (hit.forms.other || hit.forms.one || ''); });
+        s.approved = true; s.memory = true; mem++;
+      }
+    }
+    info('pl-info', PL.segs.length ? `Found ${PL.segs.length} plural segment(s)${sel ? ' (filtered)' : ''}${mem ? ` · ${mem} pre-filled from Plural memory 🧠` : ''}. Propose the rest, review, then write.` : 'No plural segments in this task.', PL.segs.length ? 'good' : '');
     plRender();
   } catch (e) { info('pl-info', e.message, 'err'); }
 }
@@ -3711,7 +3824,8 @@ function plRender() {
       : '<div class="info">Not proposed yet — click ✨ Propose.</div>';
     return `<div class="rc${s.written ? ' unchanged' : ''}" data-i="${idx}">
       <div class="rc-top"><span class="rc-seg">#${esc(s.rank)}</span>
-        <div class="rc-ctl">${s.forms ? `<label><input type="checkbox" class="pl-cb" data-i="${idx}" ${s.approved ? 'checked' : ''}/> write</label>` : ''}<button class="rc-write pl-propose" type="button" data-i="${idx}">✨ Propose</button></div>
+        ${s.memory ? '<span class="rc-warn" style="background:#0c4a6e" title="Pre-filled from your Plural memory (a form-set you promoted from the corpus) — review and write, no GPT needed.">🧠 memory</span>' : ''}
+        <div class="rc-ctl">${s.forms ? `<label><input type="checkbox" class="pl-cb" data-i="${idx}" ${s.approved ? 'checked' : ''}/> write</label>` : ''}<button class="rc-write pl-propose" type="button" data-i="${idx}">✨ ${s.memory ? 'Re-propose' : 'Propose'}</button></div>
       </div>
       <div class="rc-src">${src}</div>
       <div class="rc-parts">${forms}</div>
@@ -4083,7 +4197,15 @@ function confRender() {
   const box = $('conf-card'); if (!box) return;
   if (!CONF.length) { box.hidden = true; if ($('conf-list')) $('conf-list').innerHTML = ''; if ($('conf-count')) $('conf-count').textContent = ''; return; }
   box.hidden = false; box.open = true;
+  const fmtSet = (forms) => Object.keys(forms || {}).map((f) => `<b>${esc(f)}</b> <span dir="rtl">${esc(forms[f])}</span>`).join(' · ');
   const rows = CONF.map((c, i) => {
+    if (c.kind === 'plural') {
+      return `<div class="conf-item">
+        <div class="conf-head">⚠ <span dir="ltr">${esc(c.label)}</span> <span class="hint">— plural set</span></div>
+        <div class="conf-opt"><button class="btn xs" data-i="${i}" data-keep="old">Keep current</button><span class="conf-val" dir="auto">${fmtSet(c.oldForms)}</span></div>
+        <div class="conf-opt"><button class="btn xs" data-i="${i}" data-keep="new">Use new</button><span class="conf-val" dir="auto">${fmtSet(c.newForms)}</span></div>
+      </div>`;
+    }
     const head = c.kind === 'mem'
       ? `<span dir="ltr">${esc(c.label)}</span> <span class="hint">— remembered source</span>`
       : `<span dir="ltr">${esc(c.en)}</span> <span class="hint">— glossary term</span>`;
@@ -4099,7 +4221,10 @@ function confRender() {
 }
 async function confResolve(i, keep) {
   const c = CONF[i]; if (!c) return;
-  if (c.kind === 'mem') {
+  if (c.kind === 'plural') {
+    if (keep === 'new') { PM.map[c.plKey] = { srcForms: c.srcForms, forms: c.newForms, ts: Date.now(), n: 1 }; await pmSave(); }
+    // keep === 'old' → leave plural memory as is; the unselected set is dropped
+  } else if (c.kind === 'mem') {
     if (keep === 'new') { TM.map[c.srcKey] = { src: c.src, tgt: c.newVal, ts: Date.now(), n: 1 }; await tmSave(); tmRefresh(); }
     // keep === 'old' → leave memory as is; the unselected new string is simply dropped
   } else {   // glossary
@@ -4369,6 +4494,7 @@ async function init() {
 
   // Consistency memory
   await tmLoad(); tmRefresh();
+  await pmLoad();   // plural memory — read by the 🔢 Plurals tool
   $('tm-export').addEventListener('click', tmExport);
   $('tm-import').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) tmImport(f); e.target.value = ''; });
   $('tm-toggle').addEventListener('change', async (e) => {
