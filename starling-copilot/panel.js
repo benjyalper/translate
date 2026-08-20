@@ -3475,27 +3475,32 @@ function cbRender() {
 }
 // Shared memory-write with conflict routing (mirrors hvToMemory).
 function cbWritePairs(list) {   // list: [{key, src, tgt}]
-  let added = 0, matched = 0; const clashes = [];
+  let added = 0, matched = 0, fixed = 0; const clashes = [];
   const parked = new Set(CONF.filter((c) => c.kind === 'mem').map((c) => c.srcKey + '⇢' + wbFold(c.newVal)));
   for (const r of list) {
+    // Auto-fix protection: normalize the historical target to your CURRENT style (e.g. an old
+    // plural imperative → your slash form) BEFORE it enters memory, so promoting years of tasks
+    // can't re-introduce a style you've moved away from.
+    let tgt = r.tgt;
+    if (FIX && FIX.enabled) { const res = fixApplyText(tgt); if (res.text !== tgt) { tgt = res.text; fixed++; } }
     const k = r.key, prev = TM.map[k];
-    if (prev && wbFold(prev.tgt) !== wbFold(r.tgt)) {
-      const sig = k + '⇢' + wbFold(r.tgt);
-      if (!parked.has(sig)) { parked.add(sig); clashes.push({ kind: 'mem', label: r.src, srcKey: k, src: r.src, oldVal: prev.tgt, newVal: r.tgt }); }
+    if (prev && wbFold(prev.tgt) !== wbFold(tgt)) {
+      const sig = k + '⇢' + wbFold(tgt);
+      if (!parked.has(sig)) { parked.add(sig); clashes.push({ kind: 'mem', label: r.src, srcKey: k, src: r.src, oldVal: prev.tgt, newVal: tgt }); }
       continue;
     }
-    if (prev) matched++; else { tmRecordOne(r.src, r.tgt); added++; }
+    if (prev) matched++; else { tmRecordOne(r.src, tgt); added++; }
   }
-  return { added, matched, clashes };
+  return { added, matched, fixed, clashes };
 }
 async function cbPromote() {
   const b = CB.buckets; if (!b) return;
   const list = [].concat(b.unanimous, b.dominant, b.singleton).map((r) => ({ key: r.key, src: r.src, tgt: r.top.tgt }));
   if (!list.length) { cbInfo('Nothing to promote.', 'err'); return; }
   try { backupAll(); } catch (e) {}   // auto-download a FULL snapshot of every brain before writing
-  const { added, matched, clashes } = cbWritePairs(list);
+  const { added, matched, fixed, clashes } = cbWritePairs(list);
   await tmSave(); tmRefresh();
-  let msg = `Promoted ${added} pair(s) to Consistency memory` + (matched ? ` · ${matched} already matched` : '') + ` (now ${tmCount()}). Memory backup downloaded.`;
+  let msg = `Promoted ${added} pair(s) to Consistency memory` + (matched ? ` · ${matched} already matched` : '') + (fixed ? ` · ${fixed} auto-fixed to current style` : '') + ` (now ${tmCount()}). Memory backup downloaded.`;
   if (clashes.length) { confAdd(clashes); cbInfo(msg + ` ⚠ ${clashes.length} clash with existing wording — resolve in the orange ⚠ card.`, 'err'); }
   else cbInfo(msg, 'good');
 }
@@ -3507,9 +3512,9 @@ async function cbApplyContested() {
     const v = r.vs[+sel.value]; if (v) list.push({ key: r.key, src: r.src, tgt: v.tgt });
   });
   if (!list.length) { cbInfo('Nothing chosen.', 'err'); return; }
-  const { added, matched, clashes } = cbWritePairs(list);
+  const { added, matched, fixed, clashes } = cbWritePairs(list);
   await tmSave(); tmRefresh();
-  let msg = `Added ${added} chosen pair(s) to memory` + (matched ? ` · ${matched} matched` : '') + `.`;
+  let msg = `Added ${added} chosen pair(s) to memory` + (matched ? ` · ${matched} matched` : '') + (fixed ? ` · ${fixed} auto-fixed to current style` : '') + `.`;
   if (clashes.length) { confAdd(clashes); cbInfo(msg + ` ⚠ ${clashes.length} clash — see orange ⚠ card.`, 'err'); }
   else cbInfo(msg, 'good');
 }
