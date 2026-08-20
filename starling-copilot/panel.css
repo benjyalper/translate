@@ -164,6 +164,7 @@ textarea { font-family: ui-monospace, Menlo, Consolas, monospace; resize: vertic
 #lock-card > summary { color: #f19999; }
 #fx-card > summary { color: #67d0e0; }
 #cb-card > summary { color: #7bd88f; }
+#pm-card > summary { color: #d8b56a; }
 .cb-sec { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line, #333); }
 .cb-h { font-weight: 700; margin-bottom: 4px; }
 .cb-item { border: 1px solid var(--line, #333); border-radius: 8px; padding: 6px 8px; margin: 6px 0; }

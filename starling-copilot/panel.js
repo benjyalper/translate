@@ -3739,6 +3739,151 @@ async function cbApplyContestedPlural() {
   else cbInfo(msg, 'good');
 }
 
+// ---- 🔤 PHRASE MINING: sub-segment EN→HE term extraction from the corpus ----
+// Deterministic (no GPT). Mines recurring EN phrase → HE lemma pairs across the
+// built corpus: a HE lemma present in ≥70% of the targets whose source contains
+// an EN phrase (seen in ≥3 tasks) is that phrase's translation. Consistent terms
+// → Style-Brain glossary; drift (one EN rendered several ways) → pick canonical
+// + optional Auto-fix rule. Hebrew clitics are folded so inflected forms group.
+const PMINE = { consistent: [], drift: [], known: 0, running: false };
+const PM_MIN_TASKS = 3, PM_MIN_COV = 0.7, PM_SAMPLE = 150;
+const PM_EN_STOP = new Set(('the a an to of in on for and or your you we our us it its is are be been being this that these those with at from as by will would can could may might not no yes do does did have has i my me so if when what how who').split(' '));
+const PM_HE_CLITIC = 'ובהלכמש';
+const PM_HE_STOP = new Set(['של', 'את', 'זה', 'זו', 'הזה', 'הזו', 'שלך', 'שלכם', 'שלנו', 'אם', 'או', 'גם', 'כדי', 'על', 'עם', 'לא', 'כן', 'אל', 'יש', 'אין', 'הוא', 'היא', 'אני', 'אנחנו', 'כל', 'לך', 'לכם', 'אנו', 'אחרי', 'אחר', 'כמו', 'לפני', 'אלה', 'הזאת', 'יותר', 'רק', 'כבר']);
+function pmEnTokens(s) { return (wbFold(s).toLowerCase().match(/[a-z0-9]+(?:'[a-z]+)?/g)) || []; }
+function pmEnTokensCased(s) { return (wbFold(s).match(/[A-Za-z0-9]+(?:'[a-z]+)?/g)) || []; }
+function pmHeTokens(s) { return (wbFold(s).match(/[א-ת]+(?:["'׳״][א-ת]+)?/g)) || []; }
+function pmHeBases(t) { const out = [t]; let s = t; for (let k = 0; k < 2; k++) { if (s.length >= 4 && PM_HE_CLITIC.indexOf(s[0]) >= 0) { s = s.slice(1); out.push(s); } else break; } return out; }
+function pmTokBases(t) { return pmHeBases(t).filter((b) => b.length >= 3 && !PM_HE_STOP.has(b)); }
+function pmHeClean(t) { return (t.length >= 4 && (t[0] === 'ה' || t[0] === 'ו')) ? t.slice(1) : t; }
+function pmTokMatchLemma(tok, lemma) { return tok === lemma || pmHeClean(tok) === lemma || pmHeBases(tok).indexOf(lemma) >= 0; }
+function pmHasPhrase(toks, lemmas) { for (let i = 0; i + lemmas.length <= toks.length; i++) { let ok = true; for (let j = 0; j < lemmas.length; j++) { if (!pmTokMatchLemma(toks[i + j], lemmas[j])) { ok = false; break; } } if (ok) return true; } return false; }
+// The best single contiguous HE phrase for a set of target token-arrays, + its coverage.
+function pmTopPhrase(segs) {
+  const N = segs.length; if (!N) return null;
+  const cov = new Map(), surfOf = new Map();
+  for (const s of segs) { const bases = new Set(); for (const t of s.toks) for (const b of pmTokBases(t)) { bases.add(b); if (!surfOf.has(b)) surfOf.set(b, new Set()); surfOf.get(b).add(t); } for (const b of bases) cov.set(b, (cov.get(b) || 0) + 1); }
+  if (!cov.size) return null;
+  const anchor = Math.max(...cov.values()); if (anchor / N < 0.35) return null;
+  const floor = Math.max(anchor * 0.9, 0.35 * N);
+  const high = new Set([...cov.keys()].filter((b) => cov.get(b) >= floor));
+  // trust a stripped lemma only when reached from ≥2 distinct surface forms; else keep the surface word
+  const lemmaOf = (tok) => { const hbs = pmTokBases(tok).filter((b) => high.has(b)).sort((a, z) => a.length - z.length); for (const b of hbs) { if ((surfOf.get(b) || new Set()).size >= 2) return b; } return pmHeClean(tok); };
+  let repI = 0, best = -1; segs.forEach((s, i) => { const c = s.toks.filter((t) => pmTokBases(t).some((b) => high.has(b))).length; if (c > best) { best = c; repI = i; } });
+  const rep = segs[repI].toks; let run = [], bestRun = [];
+  for (const t of rep) { if (pmTokBases(t).some((b) => high.has(b))) { run.push(lemmaOf(t)); if (run.length > bestRun.length) bestRun = run.slice(); } else run = []; }
+  if (!bestRun.length) return null;
+  const c = segs.filter((s) => pmHasPhrase(s.toks, bestRun)).length;
+  return { phrase: bestRun, cov: c / N };
+}
+function pmKnown(en) { const l = en.toLowerCase(); return (BRAIN.glossary || []).some((g) => (g.en || '').toLowerCase() === l) || (LOCK.terms || []).some((t) => (t.en || '').toLowerCase() === l); }
+function pmMine() {
+  const sources = CB.index && CB.index.sources; if (!sources) return;
+  const EN = new Map();
+  for (const k of Object.keys(sources)) {
+    const e = sources[k]; const vs = e.variants.slice().sort((a, b) => b.n - a.n); const top = vs[0]; if (!top) continue;
+    const tasks = new Set(); for (const v of e.variants) for (const t of Object.keys(v.tasks || {})) tasks.add(t);
+    const toks = pmHeTokens(top.tgt); if (!toks.length) continue;
+    const low = pmEnTokens(e.src), cased = pmEnTokensCased(e.src); if (!low.length) continue;
+    const seen = new Set();
+    for (let n = 1; n <= 3; n++) for (let i = 0; i + n <= low.length; i++) {
+      const gw = low.slice(i, i + n); if (PM_EN_STOP.has(gw[0]) || PM_EN_STOP.has(gw[gw.length - 1])) continue;
+      const g = gw.join(' '); if (seen.has(g)) continue; seen.add(g);
+      let rec = EN.get(g); if (!rec) { rec = { segs: [], tasks: new Set(), disp: (cased.length === low.length ? cased.slice(i, i + n).join(' ') : g) }; EN.set(g, rec); }
+      rec.segs.push({ toks }); for (const t of tasks) rec.tasks.add(t);
+    }
+  }
+  const consistent = [], drift = []; let known = 0;
+  for (const [g, rec] of EN) {
+    if (rec.tasks.size < PM_MIN_TASKS) continue;
+    if (pmKnown(rec.disp)) { known++; continue; }
+    const segs = rec.segs.length > PM_SAMPLE ? rec.segs.slice(0, PM_SAMPLE) : rec.segs;
+    const tp = pmTopPhrase(segs); if (!tp) continue;
+    if (tp.phrase.length === 1 && PM_HE_STOP.has(tp.phrase[0])) continue;
+    const rest = segs.filter((s) => !pmHasPhrase(s.toks, tp.phrase));
+    let dv = null;
+    if (rest.length >= 2) { const tp2 = pmTopPhrase(rest); if (tp2 && rest.filter((s) => pmHasPhrase(s.toks, tp2.phrase)).length >= 2) dv = { he: tp2.phrase.join(' ') }; }
+    const item = { en: rec.disp, he: tp.phrase.join(' '), cov: Math.round(tp.cov * 100), tasks: rec.tasks.size };
+    if (dv) { item.drift = dv; drift.push(item); }
+    else if (tp.cov >= PM_MIN_COV) consistent.push(item);
+  }
+  const dedup = (list) => { list.sort((a, z) => z.en.split(' ').length - a.en.split(' ').length || z.tasks - a.tasks); const kept = []; for (const it of list) { if (kept.some((kk) => kk.he === it.he && (' ' + kk.en.toLowerCase() + ' ').includes(' ' + it.en.toLowerCase() + ' '))) continue; kept.push(it); } return kept; };
+  PMINE.consistent = dedup(consistent).sort((a, z) => z.tasks - a.tasks);
+  PMINE.drift = dedup(drift).sort((a, z) => z.tasks - a.tasks);
+  PMINE.known = known;
+}
+function pmInfo(m, k) { info('pm-info', m, k || ''); }
+function pmBadge() { const el = $('pm-badge'); if (el) el.textContent = (PMINE.consistent.length || PMINE.drift.length) ? `· ${PMINE.consistent.length} terms · ${PMINE.drift.length} drift` : ''; }
+async function pmRun() {
+  if (PMINE.running) return;
+  if (!CB.index || !CB.index.sources || !Object.keys(CB.index.sources).length) { pmInfo('Build the 📦 Corpus first — phrase mining reads it.', 'err'); return; }
+  PMINE.running = true; if ($('pm-run')) $('pm-run').disabled = true;
+  pmInfo('Mining phrases from the corpus…');
+  await new Promise((r) => setTimeout(r, 30));
+  try { pmMine(); pmRender(); pmBadge(); pmInfo(`Found ${PMINE.consistent.length} consistent term(s) · ${PMINE.drift.length} drift term(s)${PMINE.known ? ` · ${PMINE.known} already in glossary/locked` : ''}.`, 'good'); }
+  catch (e) { pmInfo('Mining failed: ' + (e.message || e), 'err'); }
+  finally { PMINE.running = false; if ($('pm-run')) $('pm-run').disabled = false; }
+}
+function pmRender() {
+  const box = $('pm-review'); if (!box) return; box.hidden = false;
+  let html = '';
+  if (PMINE.consistent.length) {
+    html += `<div class="cb-sec"><div class="cb-h">✅ Consistent terms — ${PMINE.consistent.length}</div><div class="hint">Recurring EN→HE terms your translations agree on. Check any to add to the Style-Brain glossary (advisory).</div>` +
+      PMINE.consistent.slice(0, 250).map((c, i) => `<label class="cb-opt"><input type="checkbox" class="pm-ck" data-i="${i}"/> <span dir="ltr">${esc(c.en)}</span> → <span dir="rtl">${esc(c.he)}</span> <span class="hint">${c.cov}% · ${c.tasks} tasks</span></label>`).join('') +
+      `<button id="pm-add-consistent" class="btn sm">➕ Add checked to glossary</button>` + (PMINE.consistent.length > 250 ? `<div class="hint">Showing 250 of ${PMINE.consistent.length}.</div>` : '') + `</div>`;
+  }
+  if (PMINE.drift.length) {
+    html += `<div class="cb-sec"><div class="cb-h">⚖️ Drift terms — ${PMINE.drift.length} · pick the canonical</div><div class="hint">One EN term rendered several ways across tasks. Pick the canonical → glossary. The Auto-fix checkbox rewrites the other form → canonical on every run — <b>tick it only when the other form is a safe spelling/article variant</b>, never a different word (e.g. הורה = "parent").</div>` +
+      PMINE.drift.slice(0, 150).map((d, i) => {
+        const single = !d.he.includes(' ') && !d.drift.he.includes(' ');
+        return `<div class="cb-item"><div class="cb-src" dir="ltr">${esc(d.en)} <span class="hint">· ${d.tasks} tasks</span></div>` +
+          `<label class="cb-opt"><input type="radio" name="pmd-${i}" value="win" checked/> <span dir="rtl">${esc(d.he)}</span> <span class="hint">(${d.cov}%)</span></label>` +
+          `<label class="cb-opt"><input type="radio" name="pmd-${i}" value="drift"/> <span dir="rtl">${esc(d.drift.he)}</span></label>` +
+          (single ? `<label class="cb-opt"><input type="checkbox" class="pm-fx" data-i="${i}"/> <span class="hint">also add 🩹 Auto-fix (other form → canonical) — safe spelling variant only</span></label>` : '') +
+          `</div>`;
+      }).join('') +
+      `<button id="pm-apply-drift" class="btn sm">➕ Apply drift choices</button>` + (PMINE.drift.length > 150 ? `<div class="hint">Showing 150 of ${PMINE.drift.length}.</div>` : '') + `</div>`;
+  }
+  box.innerHTML = html || '<div class="hint">No term candidates at the current thresholds (3 tasks · 70%).</div>';
+  if ($('pm-add-consistent')) $('pm-add-consistent').addEventListener('click', pmApplyConsistent);
+  if ($('pm-apply-drift')) $('pm-apply-drift').addEventListener('click', pmApplyDrift);
+}
+function pmGlossPush(en, he, note, clashes) {
+  const clash = (BRAIN.glossary || []).find((g) => (g.en || '').toLowerCase() === en.toLowerCase() && wbFold(g.he) !== wbFold(he));
+  if (clash) { clashes.push({ kind: 'gloss', en, oldVal: clash.he, newVal: he, note, source: 'phrase-mining' }); return false; }
+  BRAIN.glossary = (BRAIN.glossary || []).filter((g) => (g.en || '').toLowerCase() !== en.toLowerCase());
+  BRAIN.glossary.push({ id: brainUid(), en, he, note, source: 'phrase-mining', ts: Date.now() });
+  return true;
+}
+async function pmApplyConsistent() {
+  const box = $('pm-review'); if (!box) return;
+  const checked = [...box.querySelectorAll('.pm-ck:checked')].map((el) => PMINE.consistent[+el.getAttribute('data-i')]).filter(Boolean);
+  if (!checked.length) { pmInfo('Check at least one term.', 'err'); return; }
+  let added = 0; const clashes = [];
+  for (const c of checked) { if (pmGlossPush(c.en, c.he, 'from phrase-mining', clashes)) added++; }
+  await brainSave(); brainRefresh();
+  let msg = `Added ${added} term(s) to the glossary (now ${(BRAIN.glossary || []).length}).`;
+  if (clashes.length) { confAdd(clashes); pmInfo(msg + ` ⚠ ${clashes.length} clash — resolve in the orange ⚠ card.`, 'err'); }
+  else pmInfo(msg, 'good');
+}
+async function pmApplyDrift() {
+  const box = $('pm-review'); if (!box) return;
+  let added = 0, fx = 0; const clashes = [];
+  PMINE.drift.slice(0, 150).forEach((d, i) => {
+    const sel = box.querySelector(`input[name="pmd-${i}"]:checked`); if (!sel) return;
+    const canon = sel.value === 'win' ? d.he : d.drift.he, loser = sel.value === 'win' ? d.drift.he : d.he;
+    if (pmGlossPush(d.en, canon, 'from phrase-mining (drift)', clashes)) added++;
+    const fxCk = box.querySelector(`.pm-fx[data-i="${i}"]`);
+    if (fxCk && fxCk.checked && !canon.includes(' ') && !loser.includes(' ') && wbFold(loser) !== wbFold(canon) && !(FIX.rules || []).some((r) => r.from === loser)) {
+      FIX.rules.push({ id: fixUid(), from: loser, to: canon, note: 'phrase-mining drift', ts: Date.now() }); fx++;
+    }
+  });
+  await brainSave(); brainRefresh(); if (fx) { await fixSave(); fixRefresh(); }
+  let msg = `Applied ${added} canonical term(s) to glossary${fx ? ` · ${fx} Auto-fix rule(s) added` : ''}.`;
+  if (clashes.length) { confAdd(clashes); pmInfo(msg + ` ⚠ ${clashes.length} clash — orange ⚠ card.`, 'err'); }
+  else pmInfo(msg, 'good');
+}
+
 // ---- FULL BACKUP / RESTORE (safety net for every brain) -------------------
 // One JSON snapshot of EVERY store — Style Brain, Consistency memory, Locked
 // terms, Auto-fix, and the corpus index — so you can always roll back to the
@@ -4598,6 +4743,7 @@ async function init() {
   if ($('cb-build')) $('cb-build').addEventListener('click', cbBuild);
   if ($('cb-backup')) $('cb-backup').addEventListener('click', backupAll);
   if ($('cb-restore')) $('cb-restore').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) restoreAll(f); e.target.value = ''; });
+  if ($('pm-run')) $('pm-run').addEventListener('click', pmRun);   // 🔤 phrase mining
 
   $('harvest').addEventListener('click', doHarvest);
   $('xliff-file').addEventListener('change', (e) => onXliffFile(e.target));
