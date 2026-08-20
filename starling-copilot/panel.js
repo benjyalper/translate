@@ -3884,6 +3884,58 @@ async function pmApplyDrift() {
   else pmInfo(msg, 'good');
 }
 
+// ---- 🔎 LOOKUP: "how do I normally translate this?" across every brain -----
+// Read-only concordance. EN query → the corpus's dominant rendering + examples,
+// plus matching memory / glossary / locked / auto-fix. HE query → reverse (where
+// you used this Hebrew) + matching entries. Nothing is written.
+function lkMatch(s, q) { return wbFold(String(s == null ? '' : s)).toLowerCase().includes(q.toLowerCase()); }
+function lkSeq(arr, sub) { if (!sub.length) return false; for (let i = 0; i + sub.length <= arr.length; i++) { let ok = true; for (let j = 0; j < sub.length; j++) { if (arr[i + j] !== sub[j]) { ok = false; break; } } if (ok) return true; } return false; }
+function lkInfo(m, k) { info('lk-info', m, k || ''); }
+function lkSearch(q) {
+  const out = $('lk-out'); if (!out) return;
+  q = (q || '').trim();
+  if (q.length < 2) { out.innerHTML = '<div class="hint">Type an English or Hebrew word/phrase to see how it\'s normally translated across all your brains + the corpus.</div>'; return; }
+  const heQ = /[א-ת]/.test(q), enQ = /[A-Za-z]/.test(q);
+  const eg = (s, t) => `<div class="lk-eg"><span dir="ltr">${esc(s)}</span> → <span dir="rtl">${esc(t)}</span></div>`;
+  let html = '';
+  // 1) Corpus concordance — the richest signal
+  if (CB.index && CB.index.sources) {
+    const keys = Object.keys(CB.index.sources);
+    if (enQ) {
+      const qtoks = pmEnTokens(q), segs = [], ex = [];
+      for (const k of keys) {
+        const e = CB.index.sources[k]; if (!lkSeq(pmEnTokens(e.src), qtoks)) continue;
+        const vs = e.variants.slice().sort((a, b) => b.n - a.n); const top = vs[0];
+        const tasks = new Set(); for (const v of e.variants) for (const t of Object.keys(v.tasks || {})) tasks.add(t);
+        segs.push({ toks: pmHeTokens(top.tgt), tasks }); if (ex.length < 5) ex.push([e.src, top.tgt]);
+      }
+      if (segs.length) {
+        const tp = pmTopPhrase(segs), taskN = new Set(); segs.forEach((s) => s.tasks.forEach((t) => taskN.add(t)));
+        html += `<div class="cb-sec"><div class="cb-h">📦 Corpus — “${esc(q)}” in ${segs.length} segment(s) · ${taskN.size} task(s)</div>` +
+          (tp ? `<div class="lk-hit">usually → <b dir="rtl">${esc(tp.phrase.join(' '))}</b> <span class="hint">(${Math.round(tp.cov * 100)}% of them)</span></div>` : '') +
+          ex.map((x) => eg(x[0], x[1])).join('') + `</div>`;
+      }
+    }
+    if (heQ) {
+      const hits = [];
+      for (const k of keys) { const e = CB.index.sources[k]; const top = e.variants.slice().sort((a, b) => b.n - a.n)[0]; if (top && wbFold(top.tgt).includes(wbFold(q))) { hits.push([e.src, top.tgt]); if (hits.length >= 6) break; } }
+      if (hits.length) html += `<div class="cb-sec"><div class="cb-h">📦 Corpus — Hebrew “${esc(q)}” appears in</div>` + hits.map((x) => eg(x[0], x[1])).join('') + `</div>`;
+    }
+  }
+  // 2) Consistency memory — exact first, then contains
+  const exact = tmLookup(q), memHits = [];
+  for (const kk of Object.keys(TM.map || {})) { const e = TM.map[kk]; if (e === exact) continue; if (lkMatch(e.src, q) || (heQ && wbFold(e.tgt).includes(wbFold(q)))) { memHits.push(e); if (memHits.length >= 8) break; } }
+  if (exact || memHits.length) html += `<div class="cb-sec"><div class="cb-h">🧩 Consistency memory</div>` + (exact ? `<div class="lk-hit">exact → <b dir="rtl">${esc(exact.tgt)}</b> <span class="hint">(${esc(exact.src)})</span></div>` : '') + memHits.map((e) => eg(e.src, e.tgt)).join('') + `</div>`;
+  // 3) Style-Brain glossary + Locked terms
+  const gl = (BRAIN.glossary || []).filter((g) => lkMatch(g.en, q) || lkMatch(g.he, q)).slice(0, 12);
+  const lk = (LOCK.terms || []).filter((t) => lkMatch(t.en, q) || lkMatch(t.he, q)).slice(0, 12);
+  if (gl.length || lk.length) html += `<div class="cb-sec"><div class="cb-h">🧠 Glossary / 🔒 Locked</div>` + gl.map((g) => eg(g.en, g.he)).join('') + lk.map((t) => `<div class="lk-eg">🔒 <span dir="ltr">${esc(t.en)}</span> → <span dir="rtl">${esc(t.he)}</span></div>`).join('') + `</div>`;
+  // 4) Auto-fix (HE rewrites)
+  const fx = (FIX.rules || []).filter((r) => lkMatch(r.from, q) || lkMatch(r.to, q)).slice(0, 10);
+  if (fx.length) html += `<div class="cb-sec"><div class="cb-h">🩹 Auto-fix</div>` + fx.map((r) => `<div class="lk-eg"><span dir="rtl">${esc(r.from)}</span> → <span dir="rtl">${esc(r.to)}</span></div>`).join('') + `</div>`;
+  out.innerHTML = html || `<div class="hint">No matches for “${esc(q)}” in the brains${CB.index && CB.index.sources ? ' or corpus' : ' (build the 📦 Corpus for richer results)'}.</div>`;
+}
+
 // ---- FULL BACKUP / RESTORE (safety net for every brain) -------------------
 // One JSON snapshot of EVERY store — Style Brain, Consistency memory, Locked
 // terms, Auto-fix, and the corpus index — so you can always roll back to the
@@ -4744,6 +4796,7 @@ async function init() {
   if ($('cb-backup')) $('cb-backup').addEventListener('click', backupAll);
   if ($('cb-restore')) $('cb-restore').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) restoreAll(f); e.target.value = ''; });
   if ($('pm-run')) $('pm-run').addEventListener('click', pmRun);   // 🔤 phrase mining
+  if ($('lk-q')) { let lkT = null; $('lk-q').addEventListener('input', (e) => { clearTimeout(lkT); const v = e.target.value; lkT = setTimeout(() => lkSearch(v), 180); }); }   // 🔎 lookup
 
   $('harvest').addEventListener('click', doHarvest);
   $('xliff-file').addEventListener('change', (e) => onXliffFile(e.target));
