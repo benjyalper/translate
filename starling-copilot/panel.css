@@ -169,6 +169,15 @@ textarea { font-family: ui-monospace, Menlo, Consolas, monospace; resize: vertic
 .cb-item { border: 1px solid var(--line, #333); border-radius: 8px; padding: 6px 8px; margin: 6px 0; }
 .cb-src { direction: ltr; font-size: .92em; opacity: .85; margin-bottom: 4px; }
 .cb-opt { display: flex; gap: 6px; align-items: baseline; padding: 2px 0; cursor: pointer; }
+.rc-fuzzy { margin: 6px 0; border-left: 3px solid #7c3aed; padding-left: 8px; display: flex; flex-direction: column; gap: 6px; }
+.fz-m { font-size: .92em; }
+.fz-meta { display: flex; gap: 6px; align-items: baseline; opacity: .8; }
+.fz-score { font-weight: 700; color: #b794f6; min-width: 42px; }
+.fz-src { direction: ltr; }
+.fz-body { display: flex; gap: 6px; align-items: center; }
+.fz-tgt { direction: rtl; flex: 1; }
+.fz-use { font-size: .82em; padding: 1px 8px; border: 1px solid #7c3aed; border-radius: 6px; background: transparent; color: #b794f6; cursor: pointer; }
+.fz-use:hover { background: rgba(124, 58, 237, .18); }
 .conf-list { display: flex; flex-direction: column; gap: 8px; margin: 8px 0; }
 .conf-item { border: 1px solid var(--warn); border-radius: 8px; padding: 8px 10px; background: rgba(217,119,6,.12); }
 .conf-head { font-weight: 600; margin-bottom: 6px; overflow-wrap: anywhere; }

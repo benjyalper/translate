@@ -437,8 +437,9 @@ async function tmLoad() { try { TM = await store.get('consistencyTM', { map: {},
   // One-time: turn Consistency memory OFF by default (user request). The data is kept; re-enable any
   // time with the "Apply remembered wording" toggle. Runs once, then the toggle state is respected.
   if (!TM.defaultOffMigrated) { TM.enabled = false; TM.defaultOffMigrated = true; try { await store.set({ consistencyTM: TM }); } catch (e) {} }
+  if (!TM.fuzzy) TM.fuzzy = { enabled: false, threshold: 0.8 };   // near-match suggestions, off until tuned
   return TM; }
-async function tmSave() { TM.updatedAt = Date.now(); try { await store.set({ consistencyTM: TM }); } catch (e) {} }
+async function tmSave() { TM.updatedAt = Date.now(); FZ.dirty = true; try { await store.set({ consistencyTM: TM }); } catch (e) {} }
 function tmCount() { return TM && TM.map ? Object.keys(TM.map).length : 0; }
 function tmKey(src) { return wbFold(String(src == null ? '' : src)); }   // normalise quotes/dashes/spaces/fullwidth; case kept
 function tmLookup(src) { const k = tmKey(src); return (k && TM.map[k]) ? TM.map[k] : null; }
@@ -463,11 +464,13 @@ async function tmRecordWritten(okSegs) {
 }
 // Enforce memory on a freshly-built proposal list (called before state.proposals=…).
 function tmApply(proposals) {
-  if (!TM || !TM.enabled) return;   // enforcement switched off in Settings
+  if (!TM) return;
+  const exactOn = !!TM.enabled, fuzzyOn = !!(TM.fuzzy && TM.fuzzy.enabled);
+  if (!exactOn && !fuzzyOn) return;   // both switched off in Settings
   // 1) cross-task/session memory — prior wording is offered over a fresh GPT suggestion.
   for (const p of proposals) {
-    const hit = tmLookup(p.src);
-    if (!hit) continue;
+    const hit = exactOn ? tmLookup(p.src) : null;
+    if (!hit) { if (fuzzyOn && !p.manual) fzAttach(p); continue; }   // no exact hit → offer near-matches
     // Tagged/chip ("manual") segments are copy-by-hand, never auto-written — but we STILL seed their
     // suggestion from memory so the remembered wording lands in the per-part Copy text. Guard: only when
     // the stored target carries the SAME tag tokens as the source, so the ①…① splitter stays aligned;
@@ -484,6 +487,7 @@ function tmApply(proposals) {
     }
   }
   // 2) intra-run alignment — identical sources in THIS task get one identical target.
+  if (!exactOn) return;
   const groups = new Map();
   for (const p of proposals) { if (p.manual) continue; const k = tmKey(p.src); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(p); }
   for (const arr of groups.values()) {
@@ -499,6 +503,82 @@ function tmApply(proposals) {
     }
   }
 }
+
+// ---- FUZZY MEMORY: near-match suggestions when there's no exact hit --------
+// Two DETERMINISTIC, review-only tiers (never auto-applied, never auto-checked):
+//  A) TEMPLATE — mask numbers + placeholders; an EXACT match of the masked template
+//     surfaces the prior target, with a safe 1:1 literal-number transplant (Option C).
+//  B) FUZZY — token Sørensen–Dice similarity ≥ threshold (default 0.8) surfaces the
+//     closest prior translation + its source so you can adapt it. Top-3.
+// Off by default (TM.fuzzy.enabled). Index built lazily from TM.map, rebuilt when memory changes.
+let FZ = { entries: [], templates: null, inverted: null, dirty: true };
+const FZ_PLACE = /\{\{[^{}]*\}\}|\{[^{}]*\}|%\d?\$?[sd]|<[^>]+>|\[[^\]]*\]|[①-⑳❶-➓⓪]/g;
+const FZ_NUM = /\d[\d.,]*/g;
+function fzMask(s) { return wbFold(String(s == null ? '' : s)).replace(FZ_PLACE, '  ').replace(FZ_NUM, '  '); }
+function fzTemplate(s) { return fzMask(s).toLowerCase().replace(/\s+/g, ' ').trim(); }
+function fzTokens(s) { return fzTemplate(s).split(/[^\p{L}\p{N}]+/u).filter(Boolean); }
+function fzNumbers(s) { return String(s == null ? '' : s).match(/\d[\d.,]*/g) || []; }
+function fzDice(aTokens, bSet, bLen) {
+  if (!aTokens.length || !bLen) return 0;
+  const aUniq = new Set(aTokens); let inter = 0;
+  for (const t of aUniq) if (bSet.has(t)) inter++;
+  return (2 * inter) / (aUniq.size + bLen);
+}
+function fzBuildIndex() {
+  const entries = [], templates = new Map(), inverted = new Map();
+  for (const k of Object.keys(TM.map || {})) {
+    const e = TM.map[k]; if (!e || !e.src || !e.tgt) continue;
+    const set = new Set(fzTokens(e.src)); const tmpl = fzTemplate(e.src); const idx = entries.length;
+    entries.push({ key: k, src: e.src, tgt: e.tgt, tmpl, set, len: set.size });
+    if (!templates.has(tmpl)) templates.set(tmpl, []); templates.get(tmpl).push(idx);
+    for (const t of set) { if (!inverted.has(t)) inverted.set(t, []); inverted.get(t).push(idx); }
+  }
+  FZ = { entries, templates, inverted, dirty: false };
+}
+// Option C — safe 1:1 literal-number transplant. Only when the new source and the memory
+// source each have exactly ONE literal number and that number appears verbatim exactly once
+// in the memory target; otherwise return the target unchanged (ranges/reformatting → as-is).
+function fzTransplant(newSrc, memSrc, memTgt) {
+  const nn = fzNumbers(newSrc), mn = fzNumbers(memSrc);
+  if (nn.length !== 1 || mn.length !== 1) return memTgt;
+  const esc = mn[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const g = new RegExp('(?<![\\d.,])' + esc + '(?![\\d.,])', 'g');
+  if ((memTgt.match(g) || []).length !== 1) return memTgt;
+  return memTgt.replace(new RegExp('(?<![\\d.,])' + esc + '(?![\\d.,])'), nn[0]);
+}
+// Up to 3 near-matches for one source, excluding an exact hit and GPT's own text.
+function fzMatch(src, gptTgt) {
+  if (FZ.dirty || !FZ.entries) fzBuildIndex();
+  if (!FZ.entries.length) return [];
+  const th = (TM.fuzzy && TM.fuzzy.threshold) || 0.8;
+  const qTmpl = fzTemplate(src), qToks = fzTokens(src), qFold = wbFold(src);
+  const out = [], seenTgt = new Set(gptTgt ? [wbFold(gptTgt)] : []);
+  for (const idx of (FZ.templates.get(qTmpl) || [])) {   // A) template tier
+    const e = FZ.entries[idx]; if (wbFold(e.src) === qFold) continue;   // exact hit — handled elsewhere
+    const suggest = fzTransplant(src, e.src, e.tgt); const kt = wbFold(suggest);
+    if (seenTgt.has(kt)) continue; seenTgt.add(kt);
+    out.push({ tier: 'template', score: 0.99, src: e.src, tgt: e.tgt, suggest });
+    if (out.length >= 3) return out;
+  }
+  const N = FZ.entries.length, cap = Math.max(40, Math.floor(N * 0.05)), tally = new Map();
+  for (const t of new Set(qToks)) { const lst = FZ.inverted.get(t); if (!lst || lst.length > cap) continue; for (const i of lst) tally.set(i, (tally.get(i) || 0) + 1); }
+  const cands = [...tally.keys()].sort((a, b) => tally.get(b) - tally.get(a)).slice(0, 300);
+  const scored = [];
+  for (const i of cands) {
+    const e = FZ.entries[i];
+    if (e.tmpl === qTmpl || wbFold(e.src) === qFold) continue;   // template-tier / exact already handled
+    const score = fzDice(qToks, e.set, e.len);
+    if (score >= th) scored.push({ e, score });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  for (const { e, score } of scored) {
+    const kt = wbFold(e.tgt); if (seenTgt.has(kt)) continue; seenTgt.add(kt);
+    out.push({ tier: 'fuzzy', score, src: e.src, tgt: e.tgt, suggest: e.tgt });
+    if (out.length >= 3) break;
+  }
+  return out.slice(0, 3);
+}
+function fzAttach(p) { const m = fzMatch(p.src, p.next); if (m.length) p.fuzzy = { matches: m }; }
 
 // ---- LOCKED TERMS: a "must" glossary (mandatory EN→HE) --------------------
 // Two-tier enforcement, chosen by the user as FLAG-ONLY (never auto-edits, so it
@@ -862,12 +942,16 @@ function renderReview() {
         ${p.flag ? `<span class="rc-warn" title="${esc(p.flag)}" style="background:#7a5c0a">⚠ register</span>` : ''}
         ${p.lockMiss ? `<span class="rc-warn" style="background:#b91c1c" title="MANDATORY locked term missing from the target — must be rendered exactly (a prefix is OK): ${esc(p.lockMiss.join(' · '))}. Fix the Hebrew, then this clears.">🔒 locked term</span>` : ''}
         ${p.fixApplied ? `<span class="rc-warn" style="background:#0e7490" title="Auto-corrected by your locked 🩹 Auto-fix rules: ${esc(p.fixApplied.join(' · '))}. Edit the text to revert.">✎ auto-fixed</span>` : ''}
+        ${p.fuzzy && p.fuzzy.matches.length ? `<span class="rc-warn" style="background:#3b0764" title="No exact memory match, but ${p.fuzzy.matches.length} near-match(es) from your past work are shown below — click “use” to adopt one. Nothing is applied automatically.">🧠 ${p.fuzzy.matches.length} near-match${p.fuzzy.matches.length === 1 ? '' : 'es'}</span>` : ''}
         <div class="rc-ctl">${control}</div>
       </div>
       ${p.src ? `<div class="rc-src" dir="ltr">${hl(esc(p.src))}</div>` : ''}
       ${p.fullSrc && p.fullSrc !== p.src ? `<div class="rc-full" dir="ltr" title="Full source string this segment is a split fragment of — GPT sees it for context but translates only the fragment above.">↔ ${esc(p.fullSrc)}</div>` : ''}
       ${p.context ? `<div class="rc-ctx" title="Translator note from Starling (Translation Information → Context) — GPT was given this as authoritative guidance.">ℹ️ ${esc(p.context)}</div>` : ''}
       ${p.key || (p.shots && p.shots.length) ? `<div class="rc-meta">${p.key ? `<span class="rc-key" title="String key — its suffix (…_title / _btn / _toast / …) hints at the UI role.">🔑 ${esc(p.key)}</span>` : ''}${(p.shots || []).map((sh, i) => `<a class="rc-shot" href="${esc(sh.uri)}" target="_blank" rel="noopener" title="Open this segment's UI screenshot in a new tab">📷 screenshot${p.shots.length > 1 ? ' ' + (i + 1) : ''}</a>`).join('')}</div>` : ''}
+      ${p.fuzzy && p.fuzzy.matches.length ? `<div class="rc-fuzzy" title="Near-matches from your Consistency memory — review-only. “use” drops the wording into the target for you to adjust.">` +
+        p.fuzzy.matches.map((m, j) => `<div class="fz-m"><div class="fz-meta"><span class="fz-score">${m.tier === 'template' ? 'template' : Math.round(m.score * 100) + '%'}</span> <span class="fz-src" dir="ltr">${hl(esc(m.src))}</span></div><div class="fz-body"><div class="fz-tgt" dir="rtl">${esc(m.suggest)}</div><button class="fz-use" type="button" data-i="${idx}" data-j="${j}" title="Use this wording (fills the target — edit as needed)">use</button></div></div>`).join('') +
+        `</div>` : ''}
       ${changed && String(p.old).trim() ? `<div class="rc-old" dir="rtl">${hl(esc(p.old))}</div>` : ''}
       ${newRow}
       ${copyBlock}
@@ -906,6 +990,12 @@ function renderReview() {
   });
   box.querySelectorAll('.rc-copy').forEach((b) => b.addEventListener('click', () => panelCopy(b.getAttribute('data-copy'), b)));
   box.querySelectorAll('.rc-write').forEach((b) => b.addEventListener('click', () => doWriteOne(+b.dataset.i, b)));
+  box.querySelectorAll('.fz-use').forEach((b) => b.addEventListener('click', () => {
+    const p = state.proposals[+b.dataset.i], m = p && p.fuzzy && p.fuzzy.matches[+b.dataset.j]; if (!m) return;
+    p.next = m.suggest; p.edited = true; p.fuzzy = null;   // adopted → clear the near-match panel; your text now leads
+    if (!p.manual) p.approved = p.next !== String(p.old);
+    renderReview();
+  }));
   updateRevCount();
 }
 
@@ -4285,6 +4375,16 @@ async function init() {
     TM.enabled = e.target.checked; await tmSave(); tmRefresh();
     tmInfo(TM.enabled ? 'On — remembered wording is applied to matching sources.' : 'Off — memory is kept but not applied to new translations.', '');
   });
+  // Fuzzy near-match suggestions (review-only)
+  if (!TM.fuzzy) TM.fuzzy = { enabled: false, threshold: 0.8 };
+  if ($('tm-fuzzy')) { $('tm-fuzzy').checked = !!TM.fuzzy.enabled; $('tm-fuzzy').addEventListener('change', async (e) => {
+    TM.fuzzy.enabled = e.target.checked; await tmSave();
+    tmInfo(TM.fuzzy.enabled ? `Near-match suggestions ON (≥${Math.round((TM.fuzzy.threshold || 0.8) * 100)}%) — shown for review on the next Run.` : 'Near-match suggestions off.', '');
+  }); }
+  if ($('tm-fuzzy-th')) { $('tm-fuzzy-th').value = TM.fuzzy.threshold || 0.8; $('tm-fuzzy-th').addEventListener('change', async (e) => {
+    let v = parseFloat(e.target.value); if (isNaN(v)) v = 0.8; v = Math.min(0.95, Math.max(0.5, v)); TM.fuzzy.threshold = v; e.target.value = v; await tmSave();
+    tmInfo(`Fuzzy threshold set to ${Math.round(v * 100)}%.`, '');
+  }); }
   $('tm-search').addEventListener('input', (e) => tmRenderList(e.target.value));
   $('brain-search').addEventListener('input', brainRefresh);
   if ($('tm-add')) $('tm-add').addEventListener('click', async () => {
