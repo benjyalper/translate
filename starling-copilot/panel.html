@@ -194,6 +194,7 @@
       <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
         <button id="cb-build" class="btn">📦 Build corpus from Submitted tasks</button>
         <label class="row" style="gap:4px" title="Ignore what's already ingested and re-read every Submitted task from scratch"><input type="checkbox" id="cb-force" /> Rebuild from scratch</label>
+        <label class="row" style="gap:4px" title="Also harvest In-progress tasks, but only those at least 95% proofread-confirmed. Only their confirmed segments are used, same as Submitted. Below-95% tasks are re-checked on a later build."><input type="checkbox" id="cb-inprogress" /> + In-progress ≥95%</label>
       </div>
       <div class="prog" style="margin-top:8px"><i id="cb-bar"></i></div>
       <div id="cb-info" class="info"></div>
