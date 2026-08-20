@@ -3,7 +3,7 @@
   "name": "Starling Copilot (he-IL)",
   "version": "0.1.0",
   "description": "Harvest a Starling task, proofread/translate with GPT-5.4 (plural, tags preserved), review, and write back cell-by-cell.",
-  "permissions": ["storage", "sidePanel", "scripting", "activeTab", "tabs"],
+  "permissions": ["storage", "unlimitedStorage", "sidePanel", "scripting", "activeTab", "tabs"],
   "host_permissions": [
     "https://starling.bytedance.com/*",
     "https://*.crowdin.com/*",

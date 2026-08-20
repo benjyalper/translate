@@ -3287,6 +3287,279 @@ function pcRender() {
      <div class="hint" style="margin-top:6px">Sums the <b>Weighted word count</b> column (weightingWordCountV2). Translation tasks only; bold row = current filter.</div>`;
 }
 
+// ---- 📦 CORPUS BUILDER (singular lane) ------------------------------------
+// Batch-reads every SUBMITTED task's proofread-confirmed segments, aggregates
+// identical sources with occurrence + task-spread counts, classifies how
+// consistently you translated each, and promotes the reliable pairs into
+// Consistency memory (+ proposes short Locked terms). Reads via same-origin
+// fetch in the active Starling tab (executeScript, like 💰 Word count) —
+// panel-only, no content.js, no GPT, $0. Plural lane comes later.
+// Persisted as `corpusIndex` = { builtAt, taskCount, pairCount, tasksSeen, sources }.
+const CB = { index: null, buckets: null, cand: null, building: false };
+const CB_MAJORITY = 0.8;   // "dominant" = the top target holds ≥ this share
+function cbInfo(m, k) { info('cb-info', m, k || ''); }
+function cbBadge() {
+  const el = $('cb-badge'); if (!el) return;
+  const ix = CB.index;
+  el.textContent = (ix && ix.taskCount) ? `· ${ix.taskCount} tasks · ${Object.keys(ix.sources || {}).length} sources` : '· not built';
+}
+// Enumerate Submitted tasks (taskStatus 2) — same getMyTasks read the word count uses.
+async function cbFetchMyTasks(tabId) {
+  const [r] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: async () => {
+      try {
+        const res = await fetch('/api/task/getMyTasks?offset=0&limit=5000&progress=all&translateTypeList=%5B%5D&_=' + Date.now(), { credentials: 'include', cache: 'no-store' });
+        const j = await res.json(); const d = j.data || {};
+        // subtaskId is the id the editor/content endpoints use (the sibling taskId is often 0).
+        const rows = (d.rows || []).map((x) => ({ id: String(x.subtaskId || x.subTaskId || x.id || ''), name: x.taskName || '', status: x.taskStatus }));
+        return { ok: true, rows };
+      } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+    }
+  });
+  const out = r && r.result;
+  if (!out || !out.ok) throw new Error((out && out.error) || 'getMyTasks failed');
+  return (out.rows || []).filter((x) => x.id && String(x.status) === '2');   // Submitted only
+}
+// Harvest a chunk of task ids → { [id]: { pairs:[{src,tgt,key}] } | { error } }. Confirmed
+// (status 3), non-plural (no textExtra), non-empty only. Tagged rows are KEPT (per settings).
+async function cbFetchTasks(ids, tabId) {
+  const [r] = await chrome.scripting.executeScript({
+    target: { tabId }, args: [ids],
+    func: async (ids) => {
+      const URL_ = 'https://starling.bytedance.com/api/text/getSourceTextListWithTargetText';
+      const hasExtra = (o) => { const e = o && o.textExtra; if (!e) return false; try { const v = typeof e === 'string' ? JSON.parse(e) : e; return v && typeof v === 'object' && Object.values(v).some((x) => String(x == null ? '' : x).trim()); } catch (_) { return false; } };
+      const out = {};
+      for (const id of ids) {
+        try {
+          const res = await fetch(URL_ + '?limit=10000&sortType=1&offset=0&editMode=dual&taskId=' + encodeURIComponent(id), { credentials: 'include', cache: 'no-store', headers: { accept: 'application/json' } });
+          if (!res.ok) { out[id] = { error: 'HTTP ' + res.status }; continue; }
+          const j = await res.json();
+          if (!j || j.status_code !== 1000) { out[id] = { error: 'sc ' + (j && j.status_code) }; continue; }
+          const rows = (j.data && j.data.rows) || [];
+          const pairs = [];
+          for (const row of rows) {
+            const s = row.sourceText || {}, t = row.targetText || (s.targetTexts && s.targetTexts[0]) || {};
+            if (hasExtra(s) || hasExtra(t)) continue;   // plural row → plural lane (later)
+            if (t.status !== 3) continue;               // proofread-confirmed only
+            const src = s.content == null ? '' : String(s.content), tgt = t.content == null ? '' : String(t.content);
+            if (!src.trim() || !tgt.trim()) continue;
+            pairs.push({ src, tgt, key: s.key || '' });
+          }
+          out[id] = { pairs };
+        } catch (e) { out[id] = { error: String((e && e.message) || e) }; }
+      }
+      return out;
+    }
+  });
+  return (r && r.result) || {};
+}
+// Fold one task's pairs into the index (source → variants with counts + task-spread).
+function cbAgg(index, id, pairs) {
+  for (const p of pairs) {
+    const k = tmKey(p.src); if (!k) continue;
+    let e = index.sources[k]; if (!e) e = index.sources[k] = { src: p.src, total: 0, variants: [] };
+    e.total++;
+    const tk = wbFold(p.tgt);
+    let v = e.variants.find((x) => wbFold(x.tgt) === tk);
+    if (!v) { v = { tgt: p.tgt, n: 0, tasks: {} }; e.variants.push(v); }
+    v.n++; v.tasks[id] = 1;
+  }
+}
+async function cbBuild() {
+  if (CB.building) return;
+  CB.building = true; if ($('cb-build')) $('cb-build').disabled = true;
+  try {
+    const t = await wbActiveTab();
+    if (!t || !/^https:\/\/starling\.bytedance\.com\//.test(t.url || '')) { cbInfo('Open a starling.bytedance.com tab (e.g. My tasks), then Build.', 'err'); return; }
+    cbInfo('Reading My tasks…');
+    const tasks = await cbFetchMyTasks(t.id);
+    if (!tasks.length) { cbInfo('No Submitted tasks found (only taskStatus 2 is harvested).', 'err'); return; }
+    const force = $('cb-force') && $('cb-force').checked;
+    const prior = force ? null : await store.get('corpusIndex', null);
+    const index = (prior && prior.sources) ? prior : { builtAt: 0, taskCount: 0, pairCount: 0, tasksSeen: {}, sources: {} };
+    if (!index.sources) index.sources = {}; if (!index.tasksSeen) index.tasksSeen = {};
+    const todo = tasks.filter((x) => force || !index.tasksSeen[x.id]);
+    if (!todo.length) { CB.index = index; cbClassify(); cbRender(); cbBadge(); cbInfo(`Corpus already covers all ${tasks.length} Submitted task(s) — nothing new. Tick “Rebuild” to redo from scratch.`, 'good'); return; }
+    const CH = 6; let done = 0, failed = 0;
+    if ($('cb-bar')) $('cb-bar').style.width = '0%';
+    for (let i = 0; i < todo.length; i += CH) {
+      const chunk = todo.slice(i, i + CH);
+      const res = await cbFetchTasks(chunk.map((x) => x.id), t.id);
+      for (const task of chunk) {
+        const rr = res[task.id];
+        if (!rr || rr.error) { failed++; continue; }
+        cbAgg(index, task.id, rr.pairs || []);
+        index.tasksSeen[task.id] = { name: task.name, ts: Date.now(), pairs: (rr.pairs || []).length };
+        done++;
+      }
+      if ($('cb-bar')) $('cb-bar').style.width = Math.round(Math.min(i + CH, todo.length) / todo.length * 100) + '%';
+      cbInfo(`Harvesting… ${Math.min(i + CH, todo.length)}/${todo.length} task(s)${failed ? ` · ${failed} failed` : ''}`, '');
+      if (i % (CH * 5) === 0) { index.builtAt = Date.now(); try { await store.set({ corpusIndex: index }); } catch (e) {} }   // checkpoint (resumable)
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    index.builtAt = Date.now();
+    index.taskCount = Object.keys(index.tasksSeen).length;
+    index.pairCount = Object.values(index.tasksSeen).reduce((a, x) => a + (x.pairs || 0), 0);
+    try { await store.set({ corpusIndex: index }); } catch (e) {}
+    CB.index = index; cbClassify(); cbRender(); cbBadge();
+    cbInfo(`Done — harvested ${done} new task(s)${failed ? ` · ${failed} failed` : ''}. ${Object.keys(index.sources).length} unique sources. Review below, then Apply.`, 'good');
+  } catch (e) { cbInfo('Build failed: ' + (e.message || e), 'err'); }
+  finally { CB.building = false; if ($('cb-build')) $('cb-build').disabled = false; }
+}
+// Classify one source into a consistency bucket.
+function cbBucketOf(e) {
+  const vs = e.variants.slice().sort((a, b) => b.n - a.n);
+  const total = e.total, top = vs[0], distinct = vs.length;
+  const topShare = total ? top.n / total : 0;
+  const topTasks = Object.keys(top.tasks || {}).length;
+  let bucket;
+  if (distinct === 1 && total === 1) bucket = 'singleton';
+  else if (distinct === 1) bucket = 'unanimous';
+  else if (topShare >= CB_MAJORITY && topTasks >= 2) bucket = 'dominant';
+  else bucket = 'contested';
+  return { bucket, vs, top, distinct, total, topShare, topTasks };
+}
+// Short, term-like source worth PROPOSING as a Locked term (never a whole sentence).
+function cbTermLike(src) {
+  const s = String(src || '').trim(); if (!s) return false;
+  const words = s.split(/\s+/);
+  if (words.length > 4) return false;
+  if (/[.?!:;]$/.test(s)) return false;
+  if (/[{}<>%]/.test(s)) return false;   // no placeholders/tags
+  return /[A-Za-z]/.test(s);
+}
+function cbClassify() {
+  const idx = CB.index; if (!idx) return;
+  const buckets = { unanimous: [], dominant: [], contested: [], singleton: [] };
+  const cand = [];
+  for (const k of Object.keys(idx.sources)) {
+    const e = idx.sources[k], c = cbBucketOf(e);
+    buckets[c.bucket].push({ key: k, src: e.src, vs: c.vs, top: c.top, total: c.total, topShare: c.topShare, topTasks: c.topTasks });
+    if ((c.bucket === 'unanimous' || c.bucket === 'dominant') && c.topTasks >= 2 && cbTermLike(e.src)) cand.push({ key: k, en: e.src, he: c.top.tgt, tasks: c.topTasks });
+  }
+  for (const b of Object.keys(buckets)) buckets[b].sort((a, z) => z.topTasks - a.topTasks || z.total - a.total);
+  cand.sort((a, z) => z.tasks - a.tasks);
+  CB.buckets = buckets; CB.cand = cand;
+}
+function cbRender() {
+  const b = CB.buckets, idx = CB.index; if (!b || !idx) return;
+  const consistent = b.unanimous.length + b.dominant.length + b.singleton.length;
+  if ($('cb-summary')) {
+    $('cb-summary').hidden = false;
+    $('cb-summary').innerHTML = `<b>${idx.taskCount}</b> tasks · <b>${idx.pairCount}</b> confirmed pairs · <b>${Object.keys(idx.sources).length}</b> unique sources → ` +
+      `${b.unanimous.length} unanimous · ${b.dominant.length} dominant · ${b.contested.length} contested · ${b.singleton.length} singleton`;
+  }
+  const rev = $('cb-review'); if (!rev) return; rev.hidden = false;
+  let html = `<div class="cb-sec"><div class="cb-h">✅ Consistent — ${consistent} pair(s) ready for memory</div>` +
+    `<div class="hint">Unanimous + dominant (≥${Math.round(CB_MAJORITY * 100)}%) + singletons. Adds them to Consistency memory; a clash with an existing entry goes to the orange ⚠ card. A memory backup downloads first.</div>` +
+    `<button id="cb-promote" class="btn sm"${consistent ? '' : ' disabled'}>➕ Promote ${consistent} to memory</button></div>`;
+  if (b.contested.length) {
+    html += `<div class="cb-sec"><div class="cb-h">⚖️ Contested — ${b.contested.length} · pick the canonical</div>` +
+      b.contested.slice(0, 150).map((r, i) => `<div class="cb-item"><div class="cb-src" dir="ltr">${esc(r.src)}</div>` +
+        r.vs.slice(0, 5).map((v, j) => `<label class="cb-opt"><input type="radio" name="cbc-${i}" value="${j}"${j === 0 ? ' checked' : ''}/> <span dir="rtl">${esc(v.tgt)}</span> <span class="hint">×${v.n} · ${Object.keys(v.tasks).length} task(s)</span></label>`).join('') +
+        `</div>`).join('') +
+      `<button id="cb-contested-apply" class="btn sm">➕ Add chosen to memory</button>` +
+      (b.contested.length > 150 ? `<div class="hint">Showing 150 of ${b.contested.length}.</div>` : '') + `</div>`;
+  }
+  if (CB.cand.length) {
+    html += `<div class="cb-sec"><div class="cb-h">🔒 Locked-term candidates — ${CB.cand.length}</div>` +
+      `<div class="hint">Short, consistent terms across many tasks. Check any to also lock (mandatory).</div>` +
+      CB.cand.slice(0, 150).map((c, i) => `<label class="cb-opt"><input type="checkbox" class="cb-lk" data-i="${i}"/> <span dir="ltr">${esc(c.en)}</span> → <span dir="rtl">${esc(c.he)}</span> <span class="hint">${c.tasks} task(s)</span></label>`).join('') +
+      `<button id="cb-lock-apply" class="btn sm">🔒 Lock checked terms</button></div>`;
+  }
+  rev.innerHTML = html;
+  if ($('cb-promote')) $('cb-promote').addEventListener('click', cbPromote);
+  if ($('cb-contested-apply')) $('cb-contested-apply').addEventListener('click', cbApplyContested);
+  if ($('cb-lock-apply')) $('cb-lock-apply').addEventListener('click', cbApplyLocked);
+}
+// Shared memory-write with conflict routing (mirrors hvToMemory).
+function cbWritePairs(list) {   // list: [{key, src, tgt}]
+  let added = 0, matched = 0; const clashes = [];
+  const parked = new Set(CONF.filter((c) => c.kind === 'mem').map((c) => c.srcKey + '⇢' + wbFold(c.newVal)));
+  for (const r of list) {
+    const k = r.key, prev = TM.map[k];
+    if (prev && wbFold(prev.tgt) !== wbFold(r.tgt)) {
+      const sig = k + '⇢' + wbFold(r.tgt);
+      if (!parked.has(sig)) { parked.add(sig); clashes.push({ kind: 'mem', label: r.src, srcKey: k, src: r.src, oldVal: prev.tgt, newVal: r.tgt }); }
+      continue;
+    }
+    if (prev) matched++; else { tmRecordOne(r.src, r.tgt); added++; }
+  }
+  return { added, matched, clashes };
+}
+async function cbPromote() {
+  const b = CB.buckets; if (!b) return;
+  const list = [].concat(b.unanimous, b.dominant, b.singleton).map((r) => ({ key: r.key, src: r.src, tgt: r.top.tgt }));
+  if (!list.length) { cbInfo('Nothing to promote.', 'err'); return; }
+  try { backupAll(); } catch (e) {}   // auto-download a FULL snapshot of every brain before writing
+  const { added, matched, clashes } = cbWritePairs(list);
+  await tmSave(); tmRefresh();
+  let msg = `Promoted ${added} pair(s) to Consistency memory` + (matched ? ` · ${matched} already matched` : '') + ` (now ${tmCount()}). Memory backup downloaded.`;
+  if (clashes.length) { confAdd(clashes); cbInfo(msg + ` ⚠ ${clashes.length} clash with existing wording — resolve in the orange ⚠ card.`, 'err'); }
+  else cbInfo(msg, 'good');
+}
+async function cbApplyContested() {
+  const b = CB.buckets, rev = $('cb-review'); if (!b || !rev) return;
+  const list = [];
+  b.contested.slice(0, 150).forEach((r, i) => {
+    const sel = rev.querySelector(`input[name="cbc-${i}"]:checked`); if (!sel) return;
+    const v = r.vs[+sel.value]; if (v) list.push({ key: r.key, src: r.src, tgt: v.tgt });
+  });
+  if (!list.length) { cbInfo('Nothing chosen.', 'err'); return; }
+  const { added, matched, clashes } = cbWritePairs(list);
+  await tmSave(); tmRefresh();
+  let msg = `Added ${added} chosen pair(s) to memory` + (matched ? ` · ${matched} matched` : '') + `.`;
+  if (clashes.length) { confAdd(clashes); cbInfo(msg + ` ⚠ ${clashes.length} clash — see orange ⚠ card.`, 'err'); }
+  else cbInfo(msg, 'good');
+}
+async function cbApplyLocked() {
+  const rev = $('cb-review'); if (!rev) return;
+  const checked = [...rev.querySelectorAll('.cb-lk:checked')].map((el) => CB.cand[+el.getAttribute('data-i')]).filter(Boolean);
+  if (!checked.length) { cbInfo('Check at least one term to lock.', 'err'); return; }
+  let n = 0, skipped = 0;
+  for (const c of checked) {
+    const clash = (LOCK.terms || []).find((t) => (t.en || '').toLowerCase() === c.en.toLowerCase() && wbFold(t.he) !== wbFold(c.he));
+    if (clash) { skipped++; continue; }   // already locked to a different Hebrew → leave it, don't clobber
+    LOCK.terms = (LOCK.terms || []).filter((t) => (t.en || '').toLowerCase() !== c.en.toLowerCase());
+    LOCK.terms.push({ id: brainUid(), en: c.en, he: c.he, note: 'from corpus', ts: Date.now() }); n++;
+  }
+  await lockSave(); lockRefresh();
+  cbInfo(`Locked ${n} term(s)${skipped ? ` · ${skipped} skipped (already locked differently)` : ''}. ${lockCount()} locked total.`, 'good');
+}
+
+// ---- FULL BACKUP / RESTORE (safety net for every brain) -------------------
+// One JSON snapshot of EVERY store — Style Brain, Consistency memory, Locked
+// terms, Auto-fix, and the corpus index — so you can always roll back to the
+// exact state before any bulk change. The corpus Promote auto-downloads one first.
+function snapshotAll() {
+  return {
+    _meta: { kind: 'starling-copilot-backup', ver: 1, ts: Date.now(), at: new Date().toISOString() },
+    styleBrain: BRAIN, consistencyTM: TM, lockedTerms: LOCK, autoFix: FIX, corpusIndex: CB.index || null
+  };
+}
+function backupAll() {
+  const blob = new Blob([JSON.stringify(snapshotAll(), null, 2)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'starling-brains-backup-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.json'; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  cbInfo(`Backup downloaded — ${BRAIN.rules.length} rules · ${BRAIN.glossary.length} terms · ${tmCount()} memory · ${lockCount()} locked · ${fixCount()} auto-fix. Keep it to roll back anytime.`, 'good');
+}
+async function restoreAll(file) {
+  try {
+    const o = JSON.parse(await file.text());
+    if (!o || (!o.styleBrain && !o.consistencyTM && !o.lockedTerms && !o.autoFix)) throw new Error('not a full brains-backup file.');
+    if (!confirm('Restore REPLACES your Style Brain, Consistency memory, Locked terms and Auto-fix with this backup — your current data is overwritten (a fresh backup of the current state downloads first). Continue?')) return;
+    try { backupAll(); } catch (e) {}   // safety: snapshot the CURRENT state before overwriting it
+    if (o.styleBrain) { BRAIN = o.styleBrain; if (!BRAIN.rules) BRAIN.rules = []; if (!BRAIN.glossary) BRAIN.glossary = []; await brainSave(); brainRefresh(); }
+    if (o.consistencyTM) { TM = o.consistencyTM; if (!TM.map) TM.map = {}; await tmSave(); tmRefresh(); }
+    if (o.lockedTerms) { LOCK = o.lockedTerms; if (!LOCK.terms) LOCK.terms = []; await lockSave(); lockRefresh(); }
+    if (o.autoFix) { FIX = o.autoFix; if (!FIX.rules) FIX.rules = []; await fixSave(); fixRefresh(); }
+    if (o.corpusIndex) { CB.index = o.corpusIndex; try { await store.set({ corpusIndex: CB.index }); } catch (e) {} cbClassify(); cbRender(); cbBadge(); }
+    cbInfo('Restored all brains from the backup. (The pre-restore state was also downloaded, just in case.)', 'good');
+  } catch (e) { cbInfo('Restore failed: ' + (e.message || e), 'err'); }
+}
+
 // ---- PLURAL (one/two/many/other) sub-forms --------------------------------
 // Harvest is via the data API (all forms, no lazy-editor problem). Propose runs
 // each source form through GPT (number-position rule already in the prompt), then
@@ -4072,6 +4345,14 @@ async function init() {
     if (!clearPass('every auto-fix rule')) return;
     FIX = { rules: [], enabled: FIX.enabled, seeded: true, updatedAt: 0 }; await fixSave(); fixRefresh(); fixInfo('All auto-fix rules cleared.', '');
   });
+
+  // 📦 Corpus builder + full backup/restore
+  CB.index = await store.get('corpusIndex', null);
+  if (CB.index && CB.index.sources) { cbClassify(); cbRender(); }
+  cbBadge();
+  if ($('cb-build')) $('cb-build').addEventListener('click', cbBuild);
+  if ($('cb-backup')) $('cb-backup').addEventListener('click', backupAll);
+  if ($('cb-restore')) $('cb-restore').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) restoreAll(f); e.target.value = ''; });
 
   $('harvest').addEventListener('click', doHarvest);
   $('xliff-file').addEventListener('change', (e) => onXliffFile(e.target));
