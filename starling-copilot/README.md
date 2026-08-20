@@ -501,6 +501,29 @@ fact so the same string always lands the same way.
 
 ---
 
+## 🧠 Brain toolkit (built on the corpus)
+
+Six tools layered on top of the Style Brain + Consistency memory. All are **panel-only** (no
+`content.js`), read Starling through your own logged-in session, and cost **$0** (no GPT) except
+where noted. Full details per feature live in **Version history** below; storage keys in parentheses.
+
+| Tool | Storage | What it does |
+|---|---|---|
+| **🔒 Locked terms** (`lockedTerms`) | `LOCK.terms[]` | Mandatory glossary. Injected as NON-NEGOTIABLE into the prompt (`lockText`), and after a Run any target missing the required Hebrew gets a red **🔒** flag (`lockCheck`). Never auto-edits. |
+| **🩹 Auto-fix** (`autoFix`) | `FIX.rules[]` | Deterministic HE→HE rewriter run after GPT (`fixApplyText`): a two-sided dictionary (`שלמו→שלם/י`) so irregulars stay correct. Whole-word, leading `ו` kept, badged **✎ auto-fixed**. |
+| **📦 Corpus** (`corpusIndex`) | `CB.index` | Turns Submitted tasks into a frequency-weighted truth (`getMyTasks` + `getSourceTextListWithTargetText`). Classifies unanimous/dominant/contested/singleton + plural sets; promotes to memory / locks candidates. `+ In-progress ≥95%` and Rebuild options. |
+| **🧩 Fuzzy memory** | `TM.fuzzy` | Optional near-match tier of Consistency memory: template (masked numbers/placeholders) + token Sørensen–Dice ≥ threshold (default 80%). Review-only, off by default. |
+| **🔤 Phrase mining** | `PMINE` | Mines the corpus for sub-segment EN→HE terms — catches drift across *different* sentences (`guardian → אפוטרופוס / הורה`). Consistent → glossary; drift → canonical (+ optional Auto-fix). Clitic folding groups inflections; the **displayed** term is always a real corpus surface (never a stripped fragment). |
+| **🔎 Lookup** | — (read-only) | "How do I normally translate this?" — cross-brain concordance over corpus + memory + glossary + locked + auto-fix, query highlighted. **✏️ Set preferred** pushes a go-forward preference to the glossary or Lock. |
+| **🗄 Backup / Restore** | all keys | One JSON snapshot of every brain (`snapshotAll`) to roll back. Promote/Restore auto-back-up first. Use chrome://extensions **Reload (↻)**, never Remove (which wipes storage). |
+
+**How they stack:** Locked terms + Style Brain shape the prompt → GPT → Consistency memory
+force-replaces exact matches (Fuzzy *suggests* on a miss) → Auto-fix rewrites locked corrections →
+Locked-term post-check flags anything still missing. Corpus / Phrase mining are the offline miners
+that *feed* the glossary, memory, locked terms and auto-fix; Lookup is the read-only window over all of them.
+
+---
+
 ## ⚠️ Calibration (Starling DOM)
 
 Starling is a React app; its DOM is **not a stable API**. The content script ships with best-known
@@ -594,6 +617,8 @@ Default selectors are **unions** covering both editors; hidden measurement-clone
 | — | *(panel-only, no CS bump)* **Review view filter — ✋ Paste by hand.** The Step-3 review bar now splits into a **view** group (`Changed` / `All` / `✋ Paste by hand`) and a **select** group (`✓ all` / `✓ none`). The new **✋ Paste by hand** filter (`revFilter='manual'`) shows only the tagged/chip copy-by-hand rows so you can walk just those after a Run; `Changed`/`All` are the former view toggles, now mutually exclusive with an active highlight. `✓ all` ticks apply on non-manual changed rows only (manual stays copy-by-hand); the view no longer flips as a side effect of selecting |
 | — | *(panel-only, no CS bump)* **Full-stop mirror fix — trailing literal `\n`.** A source ending with a period right before a trailing literal `\n` escape (`"Thanks.\n"`) hid the period from the full-stop mirror, so it was dropped from the target (and a stray target period before a literal `\n` wasn't stripped). Fix: added the literal `\n` to `TRAIL_TOK` (the trailing-token look-past set) and reordered `polish()` so `matchTrailingPeriod` runs before `matchTrailingNL` (period placed on the core, then the `\n` re-attached). Verified 30/30 punctuation/edge cases |
 | — | *(panel-only, no CS bump)* **🩹 Auto-fix — deterministic post-GPT rewriter ("smart scanner").** A curated dictionary (`FIX`, stored as `autoFix`) of locked Hebrew corrections applied to every target **after** the Run (order: `tmApply` → `fixApply` → `lockCheck`), reaching both 🐦 Starling and ⚖️ Feishu. Main use: a plural imperative GPT still returned → your singular gender-slash (`שלמו→שלם/י`, `הצטרפו→הצטרף/י`, irregulars `נסו→נסה/י`, long-form `בדקו→בדוק/בדקי`). **Dictionary, not auto-morphology** (you lock both sides, so irregular verbs stay correct). Whole-word Hebrew match (`[א-ת]` boundaries; a leading `ו` is preserved: `והצטרפו→והצטרף/י`; won't touch inner-word `הצטרפות` or prefix-glued `בהצטרפו`). **Auto-applied** and badged **✎ auto-fixed** in Review (tooltip lists the changes), reversible by editing the row; never auto-approves a memory-override row. Enable toggle + add/import/export/password-gated clear; seeded on first load with the six starters. Prompt also hardened to default ambiguous number/gender to the singular gender-slash and never לשון רבים |
+| — | *(panel-only, no CS bump)* **Phrase mining — fixed dropped Hebrew letters.** The clitic folding that groups inflected forms (`אפוטרופוס`/`האפוטרופוס`/`מהאפוטרופוס`) was also used to *display* the term, so root letters mistaken for prefixes were stripped: `מספר→ספר`, `שעות→עות`, `כרטיס→רטיס`, `הודעה→ודעה`, `לפני→פני`. Now folding is used **only for matching/coverage**; the shown term (`pmTopPhrase.disp` via `domSurf`) is the most frequent **real corpus surface**, so no letters are ever dropped (worst case keeps a definite article, still a real word). Also cleans the drift "other" column. Harness 8/8 |
+| — | *(panel-only, no CS bump)* **🔎 Lookup — readability + honest arrows.** Each result is a **bulleted** row with the source on top and its **Hebrew on the line below** (`.lk-t` block); the query stays highlighted. The misleading LTR `→` between an English term and an RTL Hebrew line was **removed** from the stacked result rows (it pointed the wrong way in RTL); Auto-fix (HE→HE) keeps a direction cue but as a correctly-oriented `←`. The single-line `usually →` / `exact →` summaries and the set-preferred input keep their LTR arrow |
 | — | *(panel-only, no CS bump)* **🔒 Locked terms — a mandatory "must" glossary.** A third list (`LOCK`, stored as `lockedTerms`) of EN→HE pairs enforced two ways: **(1) prompt tier** — `lockText()` injects them at the TOP of `brainText()` as **NON-NEGOTIABLE** (GPT may only add a Hebrew prefix), reaching both 🐦 Starling and ⚖️ Feishu; **(2) post-check tier (flag-only)** — after a Run, `lockCheck()` scans each proposal and any segment whose source contains the term but whose target is **missing** the required Hebrew gets a red **🔒 locked term** badge. It **never auto-edits** (so it can't corrupt Hebrew inflection); the match allows a fused prefix and the definite-ה drop (ההגדרות→בהגדרות), boundary-aware EN detection, and the flag clears live when you fix the row (blur re-check). Add / import / export / password-gated clear in the new **🔒 Locked terms** card |
 
 ## Test the panel offline

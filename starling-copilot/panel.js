@@ -3919,7 +3919,7 @@ function lkSearch(q) {
   q = (q || '').trim();
   if (q.length < 2) { out.innerHTML = '<div class="hint">Type an English or Hebrew word/phrase to see how it\'s normally translated across all your brains + the corpus.</div>'; return; }
   const heQ = /[א-ת]/.test(q), enQ = /[A-Za-z]/.test(q);
-  const eg = (s, t) => `<div class="lk-eg"><span dir="ltr">${lkHl(s, q)}</span><span class="lk-t" dir="rtl">→ ${lkHl(t, q)}</span></div>`;
+  const eg = (s, t) => `<div class="lk-eg"><span dir="ltr">${lkHl(s, q)}</span><span class="lk-t" dir="rtl">${lkHl(t, q)}</span></div>`;
   let html = '', pref = '';
   // 1) Corpus concordance — the richest signal
   if (CB.index && CB.index.sources) {
@@ -3955,10 +3955,10 @@ function lkSearch(q) {
   const lk = (LOCK.terms || []).filter((t) => lkMatch(t.en, q) || lkMatch(t.he, q)).slice(0, 12);
   const exactGloss = (BRAIN.glossary || []).find((g) => (g.en || '').toLowerCase() === q.toLowerCase());
   if (enQ && exactGloss) pref = exactGloss.he;   // an existing preference wins the prefill
-  if (gl.length || lk.length) html += `<div class="cb-sec"><div class="cb-h">🧠 Glossary / 🔒 Locked</div>` + gl.map((g) => eg(g.en, g.he)).join('') + lk.map((t) => `<div class="lk-eg">🔒 <span dir="ltr">${lkHl(t.en, q)}</span><span class="lk-t" dir="rtl">→ ${lkHl(t.he, q)}</span></div>`).join('') + `</div>`;
+  if (gl.length || lk.length) html += `<div class="cb-sec"><div class="cb-h">🧠 Glossary / 🔒 Locked</div>` + gl.map((g) => eg(g.en, g.he)).join('') + lk.map((t) => `<div class="lk-eg">🔒 <span dir="ltr">${lkHl(t.en, q)}</span><span class="lk-t" dir="rtl">${lkHl(t.he, q)}</span></div>`).join('') + `</div>`;
   // 4) Auto-fix (HE rewrites)
   const fx = (FIX.rules || []).filter((r) => lkMatch(r.from, q) || lkMatch(r.to, q)).slice(0, 10);
-  if (fx.length) html += `<div class="cb-sec"><div class="cb-h">🩹 Auto-fix</div>` + fx.map((r) => `<div class="lk-eg"><span dir="rtl">${lkHl(r.from, q)}</span><span class="lk-t" dir="rtl">→ ${lkHl(r.to, q)}</span></div>`).join('') + `</div>`;
+  if (fx.length) html += `<div class="cb-sec"><div class="cb-h">🩹 Auto-fix</div>` + fx.map((r) => `<div class="lk-eg"><span dir="rtl">${lkHl(r.from, q)}</span><span class="lk-t lk-fix" dir="rtl">${lkHl(r.to, q)}</span></div>`).join('') + `</div>`;
   // 5) Set your preferred translation going forward (writes to a brain — corpus/memory are history)
   if (enQ && q.length <= 48) {
     html += `<div class="cb-sec"><div class="cb-h">✏️ Set your preferred translation</div>` +
