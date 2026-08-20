@@ -169,6 +169,7 @@ textarea { font-family: ui-monospace, Menlo, Consolas, monospace; resize: vertic
 .lk-hit { margin: 2px 0 4px; }
 .lk-eg { font-size: .9em; opacity: .85; padding: 3px 0 6px 14px; position: relative; line-height: 1.45; }
 .lk-eg::before { content: "•"; position: absolute; left: 2px; top: 3px; opacity: .5; }
+.lk-t { display: block; margin-top: 1px; }
 #lk-out mark { background: rgba(240, 200, 80, .38); color: inherit; border-radius: 2px; padding: 0 1px; }
 .cb-sec { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line, #333); }
 .cb-h { font-weight: 700; margin-bottom: 4px; }
