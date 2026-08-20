@@ -3761,20 +3761,36 @@ function pmHasPhrase(toks, lemmas) { for (let i = 0; i + lemmas.length <= toks.l
 // The best single contiguous HE phrase for a set of target token-arrays, + its coverage.
 function pmTopPhrase(segs) {
   const N = segs.length; if (!N) return null;
-  const cov = new Map(), surfOf = new Map();
-  for (const s of segs) { const bases = new Set(); for (const t of s.toks) for (const b of pmTokBases(t)) { bases.add(b); if (!surfOf.has(b)) surfOf.set(b, new Set()); surfOf.get(b).add(t); } for (const b of bases) cov.set(b, (cov.get(b) || 0) + 1); }
+  // cov: base -> #segs it appears in.  surfCnt: base -> Map(real surface token -> count).
+  // Folding groups inflections for coverage, but the DISPLAY always comes from surfCnt
+  // (a real corpus word), never a reconstructed/stripped base — so no letters are dropped.
+  const cov = new Map(), surfCnt = new Map();
+  for (const s of segs) {
+    const bases = new Set();
+    for (const t of s.toks) for (const b of pmTokBases(t)) {
+      bases.add(b);
+      let m = surfCnt.get(b); if (!m) { m = new Map(); surfCnt.set(b, m); }
+      m.set(t, (m.get(t) || 0) + 1);
+    }
+    for (const b of bases) cov.set(b, (cov.get(b) || 0) + 1);
+  }
   if (!cov.size) return null;
   const anchor = Math.max(...cov.values()); if (anchor / N < 0.35) return null;
   const floor = Math.max(anchor * 0.9, 0.35 * N);
   const high = new Set([...cov.keys()].filter((b) => cov.get(b) >= floor));
-  // trust a stripped lemma only when reached from ≥2 distinct surface forms; else keep the surface word
-  const lemmaOf = (tok) => { const hbs = pmTokBases(tok).filter((b) => high.has(b)).sort((a, z) => a.length - z.length); for (const b of hbs) { if ((surfOf.get(b) || new Set()).size >= 2) return b; } return pmHeClean(tok); };
+  // the most frequent REAL surface word that folds to this base (e.g. base ספר → מספר, not ספר)
+  const domSurf = (b) => { const m = surfCnt.get(b); if (!m) return null; let bs = null, bc = -1; for (const [sf, c] of m) { if (c > bc) { bc = c; bs = sf; } } return bs; };
   let repI = 0, best = -1; segs.forEach((s, i) => { const c = s.toks.filter((t) => pmTokBases(t).some((b) => high.has(b))).length; if (c > best) { best = c; repI = i; } });
-  const rep = segs[repI].toks; let run = [], bestRun = [];
-  for (const t of rep) { if (pmTokBases(t).some((b) => high.has(b))) { run.push(lemmaOf(t)); if (run.length > bestRun.length) bestRun = run.slice(); } else run = []; }
+  const rep = segs[repI].toks;
+  let run = [], disp = [], bestRun = [], bestDisp = [];   // run = folded bases (matching); disp = real surfaces (display)
+  for (const t of rep) {
+    const hb = pmTokBases(t).filter((b) => high.has(b)).sort((a, z) => a.length - z.length);
+    if (hb.length) { run.push(hb[0]); disp.push(domSurf(hb[0]) || t); if (run.length > bestRun.length) { bestRun = run.slice(); bestDisp = disp.slice(); } }
+    else { run = []; disp = []; }
+  }
   if (!bestRun.length) return null;
   const c = segs.filter((s) => pmHasPhrase(s.toks, bestRun)).length;
-  return { phrase: bestRun, cov: c / N };
+  return { phrase: bestRun, disp: bestDisp.join(' '), cov: c / N };
 }
 function pmKnown(en) { const l = en.toLowerCase(); return (BRAIN.glossary || []).some((g) => (g.en || '').toLowerCase() === l) || (LOCK.terms || []).some((t) => (t.en || '').toLowerCase() === l); }
 function pmMine() {
@@ -3802,8 +3818,8 @@ function pmMine() {
     if (tp.phrase.length === 1 && PM_HE_STOP.has(tp.phrase[0])) continue;
     const rest = segs.filter((s) => !pmHasPhrase(s.toks, tp.phrase));
     let dv = null;
-    if (rest.length >= 2) { const tp2 = pmTopPhrase(rest); if (tp2 && rest.filter((s) => pmHasPhrase(s.toks, tp2.phrase)).length >= 2) dv = { he: tp2.phrase.join(' ') }; }
-    const item = { en: rec.disp, he: tp.phrase.join(' '), cov: Math.round(tp.cov * 100), tasks: rec.tasks.size };
+    if (rest.length >= 2) { const tp2 = pmTopPhrase(rest); if (tp2 && rest.filter((s) => pmHasPhrase(s.toks, tp2.phrase)).length >= 2) dv = { he: tp2.disp }; }
+    const item = { en: rec.disp, he: tp.disp, cov: Math.round(tp.cov * 100), tasks: rec.tasks.size };
     if (dv) { item.drift = dv; drift.push(item); }
     else if (tp.cov >= PM_MIN_COV) consistent.push(item);
   }
