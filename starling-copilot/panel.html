@@ -220,7 +220,7 @@
 
     <details class="card" id="pm-card">
       <summary>🔤 Phrase mining <span id="pm-badge" class="hint"></span></summary>
-      <div class="hint" style="margin:4px 0 8px">Mines the built <b>📦 Corpus</b> for recurring EN→HE <b>terms</b> (sub-segment, not whole strings) — so it catches drift buried across different sentences (e.g. <b dir="rtl">guardian → אפוטרופוס / הורה</b>). Consistent terms → add to the <b>Style-Brain glossary</b>; drift terms → pick a canonical (+ optional Auto-fix). Deterministic, no GPT, no cost. Build the corpus first.</div>
+      <div class="hint" style="margin:4px 0 8px">Mines the built <b>📦 Corpus</b> for recurring EN→HE <b>terms</b> (sub-segment, not whole strings) — so it catches drift buried across different sentences (e.g. <b dir="rtl">guardian → אפוטרופוס / הורה</b>). Consistent terms → add to the <b>Style-Brain glossary</b>; drift terms → pick a canonical (+ optional Auto-fix). Deterministic, no GPT, no cost. Build the corpus first. After mining you can optionally <b>✨ Refine with GPT</b> — it reconstructs a clean canonical term from your real examples (e.g. <b dir="rtl">LIVE on TikTok → שידור חי ב-TikTok</b>, not <b dir="rtl">בשידור</b>) and drops non-terms.</div>
       <button id="pm-run" class="btn">🔤 Mine phrases from the corpus</button>
       <div id="pm-info" class="info"></div>
       <div id="pm-review" hidden style="margin-top:8px"></div>

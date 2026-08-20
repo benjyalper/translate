@@ -3805,8 +3805,9 @@ function pmMine() {
     for (let n = 1; n <= 3; n++) for (let i = 0; i + n <= low.length; i++) {
       const gw = low.slice(i, i + n); if (PM_EN_STOP.has(gw[0]) || PM_EN_STOP.has(gw[gw.length - 1])) continue;
       const g = gw.join(' '); if (seen.has(g)) continue; seen.add(g);
-      let rec = EN.get(g); if (!rec) { rec = { segs: [], tasks: new Set(), disp: (cased.length === low.length ? cased.slice(i, i + n).join(' ') : g) }; EN.set(g, rec); }
+      let rec = EN.get(g); if (!rec) { rec = { segs: [], tasks: new Set(), ex: [], disp: (cased.length === low.length ? cased.slice(i, i + n).join(' ') : g) }; EN.set(g, rec); }
       rec.segs.push({ toks }); for (const t of tasks) rec.tasks.add(t);
+      if (rec.ex.length < 3) rec.ex.push({ src: e.src, tgt: top.tgt });   // real pairs → ground the optional GPT refine
     }
   }
   const consistent = [], drift = []; let known = 0;
@@ -3819,7 +3820,12 @@ function pmMine() {
     const rest = segs.filter((s) => !pmHasPhrase(s.toks, tp.phrase));
     let dv = null;
     if (rest.length >= 2) { const tp2 = pmTopPhrase(rest); if (tp2 && rest.filter((s) => pmHasPhrase(s.toks, tp2.phrase)).length >= 2) dv = { he: tp2.disp }; }
-    const item = { en: rec.disp, he: tp.disp, cov: Math.round(tp.cov * 100), tasks: rec.tasks.size };
+    const item = { en: rec.disp, he: tp.disp, cov: Math.round(tp.cov * 100), tasks: rec.tasks.size, ex: rec.ex.slice(0, 3) };
+    // "partial" = likely clipped by the deterministic run: a multi-word EN phrase reduced to a
+    // single HE token (e.g. "LIVE on TikTok" → "בשידור"). These are the rows GPT refinement helps
+    // most. (A single-token HE starting with a clitic letter is NOT a reliable signal — most real
+    // words start with מ/ש/ה/ב/ל/כ/ו — so we don't flag on that.)
+    item.partial = /\s/.test(item.en) && !/\s/.test(item.he);
     if (dv) { item.drift = dv; drift.push(item); }
     else if (tp.cov >= PM_MIN_COV) consistent.push(item);
   }
@@ -3844,8 +3850,17 @@ function pmRender() {
   const box = $('pm-review'); if (!box) return; box.hidden = false;
   let html = '';
   if (PMINE.consistent.length) {
-    html += `<div class="cb-sec"><div class="cb-h">✅ Consistent terms — ${PMINE.consistent.length}</div><div class="hint">Recurring EN→HE terms your translations agree on. Check any to add to the Style-Brain glossary (advisory).</div>` +
-      PMINE.consistent.slice(0, 250).map((c, i) => `<label class="cb-opt"><input type="checkbox" class="pm-ck" data-i="${i}"/> <span dir="ltr">${esc(c.en)}</span> → <span dir="rtl">${esc(c.he)}</span> <span class="hint">${c.cov}% · ${c.tasks} tasks</span></label>`).join('') +
+    const npart = PMINE.consistent.filter((c) => c.partial && !c.refined).length;
+    const nref = PMINE.consistent.filter((c) => c.refined).length;
+    html += `<div class="cb-sec"><div class="cb-h">✅ Consistent terms — ${PMINE.consistent.length}</div><div class="hint">Recurring EN→HE terms your translations agree on. Check any to add to the Style-Brain glossary (advisory).` +
+      (npart ? ` <b>${npart}</b> look ⚠ partial (clipped) — <b>✨ Refine with GPT</b> reconstructs the full term from your real examples.` : '') +
+      (nref ? ` ${nref} refined.` : '') + `</div>` +
+      `<div class="row" style="gap:6px;margin:2px 0 6px"><button id="pm-refine" class="btn sm">✨ Refine ${PMINE.consistent.length} with GPT</button><span id="pm-refine-info" class="info"></span></div>` +
+      PMINE.consistent.slice(0, 250).map((c, i) => {
+        if (c.keep === false) return `<label class="cb-opt pm-skip" title="${esc(c.note || 'GPT: not a reusable glossary term')}"><input type="checkbox" class="pm-ck" data-i="${i}" disabled/> <span dir="ltr">${esc(c.en)}</span> → <span dir="rtl">${esc(c.he || c.mined || '')}</span> <span class="hint">✨ skipped${c.note ? ' · ' + esc(c.note) : ''}</span></label>`;
+        const badge = c.refined ? `<span class="hint" title="was: ${esc(c.mined || '')}">✨${c.mined && wbFold(c.mined) !== wbFold(c.he) ? ' refined' : ' ok'}</span>` : (c.partial ? `<span class="hint">⚠ partial</span>` : '');
+        return `<label class="cb-opt"><input type="checkbox" class="pm-ck" data-i="${i}"/> <span dir="ltr">${esc(c.en)}</span> → <span dir="rtl">${esc(c.he)}</span> <span class="hint">${c.cov}% · ${c.tasks} tasks</span> ${badge}</label>`;
+      }).join('') +
       `<button id="pm-add-consistent" class="btn sm">➕ Add checked to glossary</button>` + (PMINE.consistent.length > 250 ? `<div class="hint">Showing 250 of ${PMINE.consistent.length}.</div>` : '') + `</div>`;
   }
   if (PMINE.drift.length) {
@@ -3863,6 +3878,7 @@ function pmRender() {
   box.innerHTML = html || '<div class="hint">No term candidates at the current thresholds (3 tasks · 70%).</div>';
   if ($('pm-add-consistent')) $('pm-add-consistent').addEventListener('click', pmApplyConsistent);
   if ($('pm-apply-drift')) $('pm-apply-drift').addEventListener('click', pmApplyDrift);
+  if ($('pm-refine')) $('pm-refine').addEventListener('click', pmRefine);
 }
 function pmGlossPush(en, he, note, clashes) {
   const clash = (BRAIN.glossary || []).find((g) => (g.en || '').toLowerCase() === en.toLowerCase() && wbFold(g.he) !== wbFold(he));
@@ -3873,7 +3889,7 @@ function pmGlossPush(en, he, note, clashes) {
 }
 async function pmApplyConsistent() {
   const box = $('pm-review'); if (!box) return;
-  const checked = [...box.querySelectorAll('.pm-ck:checked')].map((el) => PMINE.consistent[+el.getAttribute('data-i')]).filter(Boolean);
+  const checked = [...box.querySelectorAll('.pm-ck:checked')].map((el) => PMINE.consistent[+el.getAttribute('data-i')]).filter((c) => c && c.keep !== false);
   if (!checked.length) { pmInfo('Check at least one term.', 'err'); return; }
   let added = 0; const clashes = [];
   for (const c of checked) { if (pmGlossPush(c.en, c.he, 'from phrase-mining', clashes)) added++; }
@@ -3898,6 +3914,65 @@ async function pmApplyDrift() {
   let msg = `Applied ${added} canonical term(s) to glossary${fx ? ` · ${fx} Auto-fix rule(s) added` : ''}.`;
   if (clashes.length) { confAdd(clashes); pmInfo(msg + ` ⚠ ${clashes.length} clash — orange ⚠ card.`, 'err'); }
   else pmInfo(msg, 'good');
+}
+// ---- ✨ GPT refinement of mined consistent terms ---------------------------
+// The deterministic miner is high-recall but clips at Latin/short tokens and leaves stray
+// clitics (LIVE on TikTok → בשידור). This asks GPT, per candidate, to reconstruct the clean
+// canonical HE term from the EN phrase + real example pairs, or to drop it (keep:false) when
+// it isn't a reusable term. Grounded (it only cleans phrases your own work already agreed on),
+// batched, and every result still goes through the normal review → glossary flow.
+function pmRefineInfo(m, k) { info('pm-refine-info', m, k || ''); }
+async function pmGptRefine(items, key, model) {
+  const sys = 'You refine EN→HE glossary TERM candidates for TikTok he-IL (Hebrew) UI localization. ' +
+    'Each candidate has: "en" (an English UI phrase), "mined_he" (a Hebrew form a frequency counter pulled from real human translations — it may be CLIPPED, missing a word, or carry a stray leading prefix), and "ex" (1–3 real human translations of full sentences that contain the phrase — ground truth). ' +
+    'For each, output the CANONICAL Hebrew equivalent of EXACTLY "en" as a clean, reusable glossary term:\n' +
+    '- Reconstruct the FULL phrase when mined_he is clipped, using ex as ground truth (e.g. en="LIVE on TikTok" → "שידור חי ב-TikTok", not "בשידור").\n' +
+    '- Keep brand/Latin tokens in Latin and use the maqaf prefix (ב-TikTok, ל-Story). Keep {placeholders} verbatim.\n' +
+    '- Strip a stray leading clitic that is NOT part of the term (בשידור → שידור) unless the term needs it.\n' +
+    '- House style: singular gender-neutral slash for imperatives (לחץ/י), never plural (לשון רבים); currency symbol/code AFTER the number.\n' +
+    '- Set "keep": false when "en" is NOT a reusable term — a function/stop word (before, more, your), a context-only fragment, or too variable to pin as one Hebrew string.\n' +
+    'Return ONLY JSON {"out":[{"i":<number>,"he":"<canonical hebrew>","keep":<true|false>,"note":"<optional short>"}]}, one per input item, same "i".';
+  const payload = items.map((it) => ({ i: it.i, en: it.en, mined_he: it.he, ex: (it.ex || []).map((e) => ({ src: String(e.src || '').slice(0, 160), tgt: String(e.tgt || '').slice(0, 160) })) }));
+  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST', headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, temperature: 0.1, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: sys }, { role: 'user', content: JSON.stringify({ items: payload }) }] })
+  });
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error && data.error.message || ('GPT error ' + r.status));
+  return JSON.parse(data.choices?.[0]?.message?.content || '{}').out || [];
+}
+async function pmRefine() {
+  if (PMINE.refining) { PMINE.refineStop = true; return; }   // second click = stop
+  const key = await store.get('key', '');
+  if (!key) { pmRefineInfo('Add your OpenAI key in ⚙️ Settings first.', 'err'); return; }
+  const model = await store.get('model', 'gpt-5.4');
+  const list = PMINE.consistent;
+  if (!list.length) { pmRefineInfo('Nothing to refine.', 'err'); return; }
+  if (!confirm(`Send ${list.length} consistent term(s) to GPT (${model}) to reconstruct clean canonical Hebrew? This uses your OpenAI key. You can Stop mid-way.`)) return;
+  PMINE.refining = true; PMINE.refineStop = false;
+  const btn = $('pm-refine'); if (btn) btn.textContent = '⏹ Stop';
+  const CH = 40; let done = 0, changed = 0, dropped = 0, failed = 0;
+  try {
+    for (let i = 0; i < list.length && !PMINE.refineStop; i += CH) {
+      const chunk = []; for (let j = i; j < Math.min(i + CH, list.length); j++) chunk.push({ i: j, en: list[j].en, he: list[j].he, ex: list[j].ex });
+      pmRefineInfo(`Refining ${Math.min(i + CH, list.length)}/${list.length}…`);
+      let out;
+      try { out = await pmGptRefine(chunk, key, model); }
+      catch (e) { failed += chunk.length; if (/\b(401|invalid|api key)\b/i.test(e.message || '')) { pmRefineInfo('Stopped: ' + e.message, 'err'); break; } continue; }
+      for (const o of out) {
+        const c = list[+o.i]; if (!c) continue;
+        c.mined = c.mined || c.he; c.refined = true; c.note = o.note || '';
+        if (o.keep === false) { c.keep = false; dropped++; }
+        else { c.keep = true; const he = String(o.he || '').trim(); if (he) { if (wbFold(he) !== wbFold(c.he)) changed++; c.he = he; } }
+        done++;
+      }
+    }
+  } finally {
+    PMINE.refining = false; PMINE.refineStop = false;
+    pmRender(); pmBadge();
+    const tail = failed ? ` · ${failed} failed` : '';
+    pmRefineInfo(`Refined ${done} term(s): ${changed} rewritten, ${dropped} dropped as non-terms${tail}. Review & check what to add.`, failed ? 'err' : 'good');
+  }
 }
 
 // ---- 🔎 LOOKUP: "how do I normally translate this?" across every brain -----
