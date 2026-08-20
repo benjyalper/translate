@@ -4408,22 +4408,23 @@ function confRender() {
   const box = $('conf-card'); if (!box) return;
   if (!CONF.length) { box.hidden = true; if ($('conf-list')) $('conf-list').innerHTML = ''; if ($('conf-count')) $('conf-count').textContent = ''; return; }
   box.hidden = false; box.open = true;
-  const fmtSet = (forms) => Object.keys(forms || {}).map((f) => `<b>${esc(f)}</b> <span dir="rtl">${esc(forms[f])}</span>`).join(' · ');
+  // Values are EDITABLE — fix the wording before you pick; whichever side you click writes what's shown.
+  const fmtSetEdit = (forms, i, side) => Object.keys(forms || {}).map((f) => `<span class="conf-form"><b>${esc(f)}</b> <span class="conf-val" contenteditable="true" spellcheck="false" dir="rtl" data-cf="${i}|${side}|${esc(f)}">${esc(forms[f])}</span></span>`).join('');
   const rows = CONF.map((c, i) => {
     if (c.kind === 'plural') {
       return `<div class="conf-item">
-        <div class="conf-head">⚠ <span dir="ltr">${esc(c.label)}</span> <span class="hint">— plural set</span></div>
-        <div class="conf-opt"><button class="btn xs" data-i="${i}" data-keep="old">Keep current</button><span class="conf-val" dir="auto">${fmtSet(c.oldForms)}</span></div>
-        <div class="conf-opt"><button class="btn xs" data-i="${i}" data-keep="new">Use new</button><span class="conf-val" dir="auto">${fmtSet(c.newForms)}</span></div>
+        <div class="conf-head">⚠ <span dir="ltr">${esc(c.label)}</span> <span class="hint">— plural set · ✎ editable</span></div>
+        <div class="conf-opt"><button class="btn xs" data-i="${i}" data-keep="old">Keep current</button><span class="conf-vals">${fmtSetEdit(c.oldForms, i, 'old')}</span></div>
+        <div class="conf-opt"><button class="btn xs" data-i="${i}" data-keep="new">Use new</button><span class="conf-vals">${fmtSetEdit(c.newForms, i, 'new')}</span></div>
       </div>`;
     }
     const head = c.kind === 'mem'
-      ? `<span dir="ltr">${esc(c.label)}</span> <span class="hint">— remembered source</span>`
-      : `<span dir="ltr">${esc(c.en)}</span> <span class="hint">— glossary term</span>`;
+      ? `<span dir="ltr">${esc(c.label)}</span> <span class="hint">— remembered source · ✎ editable</span>`
+      : `<span dir="ltr">${esc(c.en)}</span> <span class="hint">— glossary term · ✎ editable</span>`;
     return `<div class="conf-item">
       <div class="conf-head">⚠ ${head}</div>
-      <div class="conf-opt"><button class="btn xs" data-i="${i}" data-keep="old">Keep current</button><span class="conf-val" dir="auto">${esc(c.oldVal)}</span></div>
-      <div class="conf-opt"><button class="btn xs" data-i="${i}" data-keep="new">Use new</button><span class="conf-val" dir="auto">${esc(c.newVal)}</span></div>
+      <div class="conf-opt"><button class="btn xs" data-i="${i}" data-keep="old">Keep current</button><span class="conf-val" contenteditable="true" spellcheck="false" dir="auto" data-cv="${i}|old">${esc(c.oldVal)}</span></div>
+      <div class="conf-opt"><button class="btn xs" data-i="${i}" data-keep="new">Use new</button><span class="conf-val" contenteditable="true" spellcheck="false" dir="auto" data-cv="${i}|new">${esc(c.newVal)}</span></div>
     </div>`;
   }).join('');
   if ($('conf-list')) $('conf-list').innerHTML = rows;
@@ -4432,23 +4433,19 @@ function confRender() {
 }
 async function confResolve(i, keep) {
   const c = CONF[i]; if (!c) return;
+  const box = $('conf-list');
+  const rd = (sel, fallback) => { const el = box && box.querySelector(sel); const v = el ? String(el.innerText).trim() : ''; return v || fallback; };   // read the edited value (or fall back)
   if (c.kind === 'plural') {
-    if (keep === 'new') { PM.map[c.plKey] = { srcForms: c.srcForms, forms: c.newForms, ts: Date.now(), n: 1 }; await pmSave(); }
-    // keep === 'old' → leave plural memory as is; the unselected set is dropped
-  } else if (c.kind === 'mem') {
-    if (keep === 'new') { TM.map[c.srcKey] = { src: c.src, tgt: c.newVal, ts: Date.now(), n: 1 }; await tmSave(); tmRefresh(); }
-    // keep === 'old' → leave memory as is; the unselected new string is simply dropped
-  } else {   // glossary
-    if (keep === 'new') {
-      BRAIN.glossary = (BRAIN.glossary || []).filter((g) => (g.en || '').toLowerCase() !== c.en.toLowerCase());
-      BRAIN.glossary.push({ id: brainUid(), en: c.en, he: c.newVal, note: c.note || '', source: c.source || 'adjudicated', ts: Date.now() });
-      await brainSave(); brainRefresh();
-    }
-    // keep === 'old' → existing brain term stays; the unselected new one is dropped
+    const src = keep === 'new' ? c.newForms : c.oldForms, forms = {};
+    for (const f of Object.keys(src || {})) forms[f] = rd(`[data-cf="${i}|${keep}|${f}"]`, src[f]);
+    PM.map[c.plKey] = { srcForms: c.srcForms, forms, ts: Date.now(), n: 1 }; await pmSave();
+  } else {
+    const val = rd(`[data-cv="${i}|${keep}"]`, keep === 'new' ? c.newVal : c.oldVal);
+    if (c.kind === 'mem') { TM.map[c.srcKey] = { src: c.src, tgt: val, ts: Date.now(), n: 1 }; await tmSave(); tmRefresh(); }
+    else { BRAIN.glossary = (BRAIN.glossary || []).filter((g) => (g.en || '').toLowerCase() !== c.en.toLowerCase()); BRAIN.glossary.push({ id: brainUid(), en: c.en, he: val, note: c.note || '', source: c.source || 'adjudicated', ts: Date.now() }); await brainSave(); brainRefresh(); }
   }
   CONF.splice(i, 1); confRender();
-  confInfo(CONF.length ? (keep === 'new' ? 'Kept the new wording — previous deleted. ' + CONF.length + ' conflict(s) left.' : 'Kept the current wording — new one discarded. ' + CONF.length + ' left.')
-    : (keep === 'new' ? 'Kept the new wording — previous deleted. All conflicts resolved.' : 'Kept the current wording — new one discarded. All conflicts resolved.'), 'good');
+  confInfo(CONF.length ? `Saved. ${CONF.length} conflict(s) left.` : 'Saved. All conflicts resolved.', 'good');
 }
 
 async function brainGrab() {

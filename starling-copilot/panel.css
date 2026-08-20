@@ -185,8 +185,13 @@ textarea { font-family: ui-monospace, Menlo, Consolas, monospace; resize: vertic
 .conf-list { display: flex; flex-direction: column; gap: 8px; margin: 8px 0; }
 .conf-item { border: 1px solid var(--warn); border-radius: 8px; padding: 8px 10px; background: rgba(217,119,6,.12); }
 .conf-head { font-weight: 600; margin-bottom: 6px; overflow-wrap: anywhere; }
-.conf-opt { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.conf-opt { display: flex; align-items: flex-start; gap: 8px; margin: 4px 0; }
 .conf-opt .conf-val { flex: 1; overflow-wrap: anywhere; }
+.conf-val[contenteditable] { border: 1px dashed var(--line, #4a4a4a); border-radius: 5px; padding: 2px 6px; min-width: 60px; }
+.conf-val[contenteditable]:focus { outline: none; border-color: var(--warn); border-style: solid; }
+.conf-vals { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.conf-form { display: flex; gap: 6px; align-items: baseline; }
+.conf-form > b { min-width: 40px; opacity: .7; font-size: .85em; }
 .conf-opt .btn.xs { flex: 0 0 auto; min-width: 84px; }
 .brain-sec { font-size: 11px; color: var(--dim); margin: 6px 0 2px; font-weight: 600; }
 .brain-list { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; max-height: 260px; overflow-y: auto; }
