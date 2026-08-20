@@ -4022,9 +4022,9 @@ function lkSearch(q) {
       }
       if (segs.length) {
         const tp = pmTopPhrase(segs), taskN = new Set(); segs.forEach((s) => s.tasks.forEach((t) => taskN.add(t)));
-        if (tp) pref = tp.phrase.join(' ');
+        if (tp) pref = tp.disp;   // real corpus surface (ביוטי), never the clitic-stripped base (יוטי)
         html += `<div class="cb-sec"><div class="cb-h">📦 Corpus — “${esc(q)}” in ${segs.length} segment(s) · ${taskN.size} task(s)</div>` +
-          (tp ? `<div class="lk-hit">usually → <b dir="rtl">${esc(tp.phrase.join(' '))}</b> <span class="hint">(${Math.round(tp.cov * 100)}% of them)</span></div>` : '') +
+          (tp ? `<div class="lk-hit">usually → <b dir="rtl">${esc(tp.disp)}</b> <span class="hint">(${Math.round(tp.cov * 100)}% of them)</span></div>` : '') +
           ex.map((x) => eg(x[0], x[1])).join('') + `</div>`;
       }
     }
