@@ -3234,7 +3234,7 @@ function setMode(m) {
 // weightingWordCountV2. Sums it and multiplies by the editing rate. Fetch runs in the active
 // Starling tab's context (same-origin cookie) via executeScript — no content.js dependency.
 const PC = { rows: null };
-const PC_STATUS = { 1: 'In progress', 2: 'Submitted', 3: 'Closed', 4: 'To be claimed' };
+const PC_STATUS = { 1: 'In progress', 2: 'Submitted', 4: 'To be claimed' };   // Closed (3) is excluded from the word count entirely
 function pcInfo(m, k) { info('pc-info', m, k || ''); }
 async function pcFetch() {
   const t = await wbActiveTab();
@@ -3254,8 +3254,8 @@ async function pcFetch() {
     });
     const out = r && r.result;
     if (!out || !out.ok) throw new Error((out && out.error) || 'fetch failed');
-    PC.rows = out.rows;
-    pcInfo(`Loaded ${out.rows.length} translation task(s) from My tasks.`, 'good');
+    PC.rows = (out.rows || []).filter((r) => String(r.s) !== '3');   // drop Closed tasks — never counted
+    pcInfo(`Loaded ${PC.rows.length} translation task(s) from My tasks (Closed excluded).`, 'good');
     pcRender();
   } catch (e) { pcInfo('Could not read My tasks — reload the extension, make sure a Starling tab is active, then try again. (' + e.message + ')', 'err'); }
   finally { if ($('pc-run')) $('pc-run').disabled = false; }
