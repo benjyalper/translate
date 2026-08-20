@@ -480,6 +480,9 @@ function tmApply(proposals) {
   if (!TM) return;
   const exactOn = !!TM.enabled, fuzzyOn = !!(TM.fuzzy && TM.fuzzy.enabled);
   if (!exactOn && !fuzzyOn) return;   // both switched off in Settings
+  // Locked terms OUTRANK memory: don't let a stale remembered target inject a locked-term violation.
+  const haveLocks = !!(LOCK && LOCK.terms && LOCK.terms.length);
+  const lockClashes = [], parkedLock = new Set(CONF.filter((c) => c.kind === 'lockmem').map((c) => c.srcKey + '⇢' + String(c.lockEn).toLowerCase()));
   // 1) cross-task/session memory — prior wording is offered over a fresh GPT suggestion.
   for (const p of proposals) {
     const hit = exactOn ? tmLookup(p.src) : null;
@@ -489,6 +492,16 @@ function tmApply(proposals) {
     // the stored target carries the SAME tag tokens as the source, so the ①…① splitter stays aligned;
     // otherwise (e.g. a plain-text memory for a bullet-list segment) keep GPT's tag-carrying output.
     if (p.manual && tmTagSig(hit.tgt) !== tmTagSig(p.src)) continue;
+    // If the remembered target VIOLATES a locked term the source requires, the locked term wins:
+    // keep GPT's (locked-compliant) output, do NOT apply the stale memory, and park the clash.
+    if (haveLocks) {
+      const lv = lockViolations(p.src, hit.tgt);
+      if (lv.length) {
+        for (const t of lv) { const sig = tmKey(p.src) + '⇢' + String(t.en).toLowerCase(); if (!parkedLock.has(sig)) { parkedLock.add(sig); lockClashes.push({ kind: 'lockmem', label: p.src, srcKey: tmKey(p.src), src: p.src, memVal: hit.tgt, lockEn: t.en, lockHe: t.he }); } }
+        p.tmLockBlocked = true;
+        continue;   // locked wins — memory not applied
+      }
+    }
     if (wbFold(hit.tgt) !== wbFold(p.next)) {
       p.tmPrev = p.next;           // what GPT proposed this time
       p.next = hit.tgt;            // your previous, endorsed wording
@@ -499,6 +512,7 @@ function tmApply(proposals) {
       p.tm = true;                 // GPT already matches memory → badge as consistent
     }
   }
+  if (lockClashes.length) confAdd(lockClashes);   // surface stale locked-vs-memory clashes for a one-time decision
   // 2) intra-run alignment — identical sources in THIS task get one identical target.
   if (!exactOn) return;
   const groups = new Map();
@@ -4541,7 +4555,7 @@ async function lrnDistill() {
 // do NOT silently overwrite (the old behaviour, "newest wins"): the clash is parked here and shown
 // as an orange ⚠ card. You pick the wording to keep on the spot — the one you don't pick is deleted.
 // Fed by: lrnToMemory (memory), brainMerge (distilled glossary), and the manual add fields.
-let CONF = [];   // {kind:'mem'|'gloss', label?, en?, note?, source?, srcKey?, src?, oldVal, newVal}
+let CONF = [];   // {kind:'mem'|'gloss'|'plural'|'lockmem', label?, en?, note?, source?, srcKey?, src?, oldVal?, newVal?, memVal?, lockEn?, lockHe?}
 function confInfo(m, k) { info('conf-info', m, k || ''); }
 function confAdd(items) { for (const it of items) CONF.push(it); confRender(); }
 function confRender() {
@@ -4556,6 +4570,14 @@ function confRender() {
         <div class="conf-head">⚠ <span dir="ltr">${esc(c.label)}</span> <span class="hint">— plural set · ✎ editable</span></div>
         <div class="conf-opt"><button class="btn xs" data-i="${i}" data-keep="old">Keep current</button><span class="conf-vals">${fmtSetEdit(c.oldForms, i, 'old')}</span></div>
         <div class="conf-opt"><button class="btn xs" data-i="${i}" data-keep="new">Use new</button><span class="conf-vals">${fmtSetEdit(c.newForms, i, 'new')}</span></div>
+      </div>`;
+    }
+    if (c.kind === 'lockmem') {
+      // A locked term and a remembered target disagree — pick which brain wins; the other entry is removed.
+      return `<div class="conf-item">
+        <div class="conf-head">⚠ <span dir="ltr">${esc(c.label)}</span> <span class="hint">— 🔒 locked term vs 🧠 memory (pick which wins; the other is deleted)</span></div>
+        <div class="conf-opt"><button class="btn xs" data-i="${i}" data-keep="lock">🔒 Keep locked</button><span dir="ltr">${esc(c.lockEn)}</span> → <span dir="rtl">${esc(c.lockHe)}</span> <span class="hint">(deletes the memory)</span></div>
+        <div class="conf-opt"><button class="btn xs" data-i="${i}" data-keep="mem">🧠 Keep memory</button><span dir="rtl">${esc(c.memVal)}</span> <span class="hint">(removes the lock)</span></div>
       </div>`;
     }
     const head = c.kind === 'mem'
@@ -4575,7 +4597,10 @@ async function confResolve(i, keep) {
   const c = CONF[i]; if (!c) return;
   const box = $('conf-list');
   const rd = (sel, fallback) => { const el = box && box.querySelector(sel); const v = el ? String(el.innerText).trim() : ''; return v || fallback; };   // read the edited value (or fall back)
-  if (c.kind === 'plural') {
+  if (c.kind === 'lockmem') {
+    if (keep === 'lock') { delete TM.map[c.srcKey]; await tmSave(); tmRefresh(); }   // locked term wins → drop the stale memory
+    else { LOCK.terms = (LOCK.terms || []).filter((t) => !((t.en || '').toLowerCase() === String(c.lockEn).toLowerCase() && wbFold(t.he) === wbFold(c.lockHe))); await lockSave(); lockRefresh(); }   // memory wins → remove the lock
+  } else if (c.kind === 'plural') {
     const src = keep === 'new' ? c.newForms : c.oldForms, forms = {};
     for (const f of Object.keys(src || {})) forms[f] = rd(`[data-cf="${i}|${keep}|${f}"]`, src[f]);
     PM.map[c.plKey] = { srcForms: c.srcForms, forms, ts: Date.now(), n: 1 }; await pmSave();
