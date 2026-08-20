@@ -253,6 +253,19 @@ function matchTrailingNL(src, out) {
 // Full output polish: fix internal spacing, restore brand spacing, restore **bold** markers,
 // mirror a trailing literal "\n" escape and the source's full stop, then mirror leading/trailing whitespace.
 function polish(src, out) { return mirrorEdges(src, matchTrailingNL(src, matchTrailingPeriod(src, fixBold(src, fixAmounts(src, fixBrands(fixSpacing(out))))))); }
+// "Do these two targets render IDENTICALLY to the eye?" Used only to decide whether a proposal
+// is a *real* change — never to alter what gets written. Ignores exactly the differences a reader
+// can't see: leading/trailing whitespace & newlines (which polish() mirrors from the source), and
+// invisible bidi / zero-width control marks (RLM ‏, LRM, isolates, ZWSP, BOM, soft hyphen). So a
+// memory-refilled segment whose visible Hebrew already matches the confirmed target — differing
+// only by a mirrored trailing space or an inserted ‏ — is NOT flagged as a change. Visible edits
+// (a word, a real double-space fix, a curly-vs-straight quote) still differ and stay flagged.
+function renderNorm(s) {
+  return String(s == null ? '' : s)
+    .replace(/[​-‏‪-‮⁠⁦-⁩﻿­]/g, '')  // zero-width + bidi controls + soft hyphen
+    .replace(/^[\s ]+|[\s ]+$/g, '');                                    // leading/trailing whitespace (incl. \n, NBSP)
+}
+function sameRender(a, b) { return renderNorm(a) === renderNorm(b); }
 
 // ---- optional XLIFF source (alternative to DOM harvest) --------------------
 const XLIFF_TAGGED = /<\/?(?:g|x|bpt|ept|ph|it|mrk|sub)\b|[OC]-\d+(?:-\d+)+|[①-⑳❶-➓⓪]/;
@@ -498,7 +511,7 @@ function tmApply(proposals) {
       if (wbFold(p.next) !== wbFold(canon)) {
         if (!p.tmPrev) p.tmPrev = p.next;
         p.next = canon; p.dedupe = true;
-        p.approved = !p.manual && p.next !== String(p.old);
+        p.approved = !p.manual && !sameRender(p.next, p.old);
       }
     }
   }
@@ -684,7 +697,7 @@ function fixApply(proposals) {
     if (res.text !== p.next) {
       p.fixPrev = p.next; p.next = res.text;
       const seen = new Set(); p.fixApplied = res.changes.filter((c) => { const k = c.from + '⇢' + c.to; if (seen.has(k)) return false; seen.add(k); return true; }).map((c) => c.from + ' → ' + c.to);
-      if (!p.manual && !p.tmOverride && p.next !== String(p.old)) p.approved = true;
+      if (!p.manual && !p.tmOverride && !sameRender(p.next, p.old)) p.approved = true;
     }
   }
 }
@@ -869,7 +882,7 @@ async function doGpt() {
     fixApply(proposals);  // deterministic post-GPT rewrites (plural imperative → your singular slash form, etc.)
     lockCheck(proposals); // flag rows where a MANDATORY locked term is missing from the target (sees the fixed text)
     state.proposals = proposals;
-    const changed = proposals.filter((p) => p.next !== p.old).length;
+    const changed = proposals.filter((p) => !sameRender(p.next, p.old)).length;
     const tmN = proposals.filter((p) => p.tm || p.dedupe).length;
     const pf = done - filled;
     info('gpt-info', `✅ ${done} done${filled ? ` (${pf} proofread · ${filled} translated)` : ''} · ${changed} changed${tmN ? ` · 🧠 ${tmN} from memory` : ''}${failed ? ` · ${failed} failed` : ''}`, failed ? 'err' : 'good');
@@ -887,10 +900,10 @@ function renderReview() {
   const list = state.proposals.filter((p) =>
     revFilter === 'manual' ? p.manual :
     revFilter === 'all' ? true :
-    p.next !== p.old);   // 'changed'
+    !sameRender(p.next, p.old));   // 'changed'
   box.innerHTML = list.map((p) => {
     const idx = state.proposals.indexOf(p);
-    const changed = p.next !== p.old;
+    const changed = !sameRender(p.next, p.old);
     const cleanFull = stripTags(p.next);                        // whole target, inner text only (no tokens)
     const bulletParts = splitParts(p.next);
     const runParts = bulletParts ? null : splitTagRuns(p.next); // text runs between O-/C- tags
@@ -993,7 +1006,7 @@ function renderReview() {
   box.querySelectorAll('.fz-use').forEach((b) => b.addEventListener('click', () => {
     const p = state.proposals[+b.dataset.i], m = p && p.fuzzy && p.fuzzy.matches[+b.dataset.j]; if (!m) return;
     p.next = m.suggest; p.edited = true; p.fuzzy = null;   // adopted → clear the near-match panel; your text now leads
-    if (!p.manual) p.approved = p.next !== String(p.old);
+    if (!p.manual) p.approved = !sameRender(p.next, p.old);
     renderReview();
   }));
   updateRevCount();
@@ -4940,7 +4953,7 @@ async function init() {
   $('view-all').addEventListener('click', () => setRevFilter('all'));
   $('view-manual').addEventListener('click', () => setRevFilter('manual'));   // ✋ paste-by-hand only
   // Approve selection (does NOT change the view). Manual/tagged rows are copy-by-hand and never auto-written.
-  $('sel-all').addEventListener('click', () => { state.proposals.forEach((p) => p.approved = !p.manual && p.next !== String(p.old)); renderReview(); });
+  $('sel-all').addEventListener('click', () => { state.proposals.forEach((p) => p.approved = !p.manual && !sameRender(p.next, p.old)); renderReview(); });
   $('sel-none').addEventListener('click', () => { state.proposals.forEach((p) => p.approved = false); renderReview(); });
 
   // Feishu LQA mode
