@@ -3891,13 +3891,20 @@ async function pmApplyDrift() {
 function lkMatch(s, q) { return wbFold(String(s == null ? '' : s)).toLowerCase().includes(q.toLowerCase()); }
 function lkSeq(arr, sub) { if (!sub.length) return false; for (let i = 0; i + sub.length <= arr.length; i++) { let ok = true; for (let j = 0; j < sub.length; j++) { if (arr[i + j] !== sub[j]) { ok = false; break; } } if (ok) return true; } return false; }
 function lkInfo(m, k) { info('lk-info', m, k || ''); }
+// Escape + highlight every case-insensitive occurrence of q with <mark>.
+function lkHl(raw, q) {
+  raw = String(raw == null ? '' : raw); if (!q) return esc(raw);
+  const lc = raw.toLowerCase(), lq = q.toLowerCase(); let out = '', i = 0;
+  while (i < raw.length) { const idx = lc.indexOf(lq, i); if (idx < 0) { out += esc(raw.slice(i)); break; } out += esc(raw.slice(i, idx)) + '<mark>' + esc(raw.slice(idx, idx + q.length)) + '</mark>'; i = idx + q.length; }
+  return out;
+}
 function lkSearch(q) {
   const out = $('lk-out'); if (!out) return;
   q = (q || '').trim();
   if (q.length < 2) { out.innerHTML = '<div class="hint">Type an English or Hebrew word/phrase to see how it\'s normally translated across all your brains + the corpus.</div>'; return; }
   const heQ = /[א-ת]/.test(q), enQ = /[A-Za-z]/.test(q);
-  const eg = (s, t) => `<div class="lk-eg"><span dir="ltr">${esc(s)}</span> → <span dir="rtl">${esc(t)}</span></div>`;
-  let html = '';
+  const eg = (s, t) => `<div class="lk-eg"><span dir="ltr">${lkHl(s, q)}</span> → <span dir="rtl">${lkHl(t, q)}</span></div>`;
+  let html = '', pref = '';
   // 1) Corpus concordance — the richest signal
   if (CB.index && CB.index.sources) {
     const keys = Object.keys(CB.index.sources);
@@ -3911,6 +3918,7 @@ function lkSearch(q) {
       }
       if (segs.length) {
         const tp = pmTopPhrase(segs), taskN = new Set(); segs.forEach((s) => s.tasks.forEach((t) => taskN.add(t)));
+        if (tp) pref = tp.phrase.join(' ');
         html += `<div class="cb-sec"><div class="cb-h">📦 Corpus — “${esc(q)}” in ${segs.length} segment(s) · ${taskN.size} task(s)</div>` +
           (tp ? `<div class="lk-hit">usually → <b dir="rtl">${esc(tp.phrase.join(' '))}</b> <span class="hint">(${Math.round(tp.cov * 100)}% of them)</span></div>` : '') +
           ex.map((x) => eg(x[0], x[1])).join('') + `</div>`;
@@ -3925,15 +3933,40 @@ function lkSearch(q) {
   // 2) Consistency memory — exact first, then contains
   const exact = tmLookup(q), memHits = [];
   for (const kk of Object.keys(TM.map || {})) { const e = TM.map[kk]; if (e === exact) continue; if (lkMatch(e.src, q) || (heQ && wbFold(e.tgt).includes(wbFold(q)))) { memHits.push(e); if (memHits.length >= 8) break; } }
-  if (exact || memHits.length) html += `<div class="cb-sec"><div class="cb-h">🧩 Consistency memory</div>` + (exact ? `<div class="lk-hit">exact → <b dir="rtl">${esc(exact.tgt)}</b> <span class="hint">(${esc(exact.src)})</span></div>` : '') + memHits.map((e) => eg(e.src, e.tgt)).join('') + `</div>`;
+  if (exact || memHits.length) html += `<div class="cb-sec"><div class="cb-h">🧩 Consistency memory</div>` + (exact ? `<div class="lk-hit">exact → <b dir="rtl">${esc(exact.tgt)}</b> <span class="hint">(${lkHl(exact.src, q)})</span></div>` : '') + memHits.map((e) => eg(e.src, e.tgt)).join('') + `</div>`;
   // 3) Style-Brain glossary + Locked terms
   const gl = (BRAIN.glossary || []).filter((g) => lkMatch(g.en, q) || lkMatch(g.he, q)).slice(0, 12);
   const lk = (LOCK.terms || []).filter((t) => lkMatch(t.en, q) || lkMatch(t.he, q)).slice(0, 12);
-  if (gl.length || lk.length) html += `<div class="cb-sec"><div class="cb-h">🧠 Glossary / 🔒 Locked</div>` + gl.map((g) => eg(g.en, g.he)).join('') + lk.map((t) => `<div class="lk-eg">🔒 <span dir="ltr">${esc(t.en)}</span> → <span dir="rtl">${esc(t.he)}</span></div>`).join('') + `</div>`;
+  const exactGloss = (BRAIN.glossary || []).find((g) => (g.en || '').toLowerCase() === q.toLowerCase());
+  if (enQ && exactGloss) pref = exactGloss.he;   // an existing preference wins the prefill
+  if (gl.length || lk.length) html += `<div class="cb-sec"><div class="cb-h">🧠 Glossary / 🔒 Locked</div>` + gl.map((g) => eg(g.en, g.he)).join('') + lk.map((t) => `<div class="lk-eg">🔒 <span dir="ltr">${lkHl(t.en, q)}</span> → <span dir="rtl">${lkHl(t.he, q)}</span></div>`).join('') + `</div>`;
   // 4) Auto-fix (HE rewrites)
   const fx = (FIX.rules || []).filter((r) => lkMatch(r.from, q) || lkMatch(r.to, q)).slice(0, 10);
-  if (fx.length) html += `<div class="cb-sec"><div class="cb-h">🩹 Auto-fix</div>` + fx.map((r) => `<div class="lk-eg"><span dir="rtl">${esc(r.from)}</span> → <span dir="rtl">${esc(r.to)}</span></div>`).join('') + `</div>`;
+  if (fx.length) html += `<div class="cb-sec"><div class="cb-h">🩹 Auto-fix</div>` + fx.map((r) => `<div class="lk-eg"><span dir="rtl">${lkHl(r.from, q)}</span> → <span dir="rtl">${lkHl(r.to, q)}</span></div>`).join('') + `</div>`;
+  // 5) Set your preferred translation going forward (writes to a brain — corpus/memory are history)
+  if (enQ && q.length <= 48) {
+    html += `<div class="cb-sec"><div class="cb-h">✏️ Set your preferred translation</div>` +
+      `<div class="row" style="gap:6px;align-items:center;flex-wrap:wrap"><span dir="ltr">${esc(q)}</span> → ` +
+      `<input id="lk-pref" type="text" dir="rtl" value="${esc(pref)}" placeholder="your preferred Hebrew" style="flex:1;min-width:130px" />` +
+      `<button id="lk-gloss" class="btn sm">➕ Glossary</button><button id="lk-lock" class="btn sm">🔒 Lock</button></div>` +
+      `<div class="hint"><b>Glossary</b> = advisory (GPT prefers it and inflects naturally — best for a slash form like אפוטרופוס/ית). <b>Lock</b> = mandatory (flags any run that's missing it). This sets it <b>going forward</b>; it doesn't rewrite past corpus/memory.</div></div>`;
+  }
   out.innerHTML = html || `<div class="hint">No matches for “${esc(q)}” in the brains${CB.index && CB.index.sources ? ' or corpus' : ' (build the 📦 Corpus for richer results)'}.</div>`;
+  // wire the "set preferred" buttons (q captured)
+  if ($('lk-gloss')) $('lk-gloss').addEventListener('click', async () => {
+    const he = ($('lk-pref').value || '').trim(); if (!he) { lkInfo('Enter your preferred Hebrew first.', 'err'); return; }
+    const clashes = [];
+    if (pmGlossPush(q, he, 'from lookup', clashes)) { await brainSave(); brainRefresh(); lkInfo(`Added to glossary: “${q}” → “${he}”.`, 'good'); }
+    else { confAdd(clashes); await brainSave(); lkInfo(`“${q}” already maps to a different term — resolve it in the orange ⚠ card.`, 'err'); }
+  });
+  if ($('lk-lock')) $('lk-lock').addEventListener('click', async () => {
+    const he = ($('lk-pref').value || '').trim(); if (!he) { lkInfo('Enter your preferred Hebrew first.', 'err'); return; }
+    const clash = (LOCK.terms || []).find((t) => (t.en || '').toLowerCase() === q.toLowerCase() && wbFold(t.he) !== wbFold(he));
+    if (clash) { lkInfo(`“${q}” is already locked to “${clash.he}” — change it in the 🔒 Locked terms card.`, 'err'); return; }
+    LOCK.terms = (LOCK.terms || []).filter((t) => (t.en || '').toLowerCase() !== q.toLowerCase());
+    LOCK.terms.push({ id: brainUid(), en: q, he, note: 'from lookup', ts: Date.now() });
+    await lockSave(); lockRefresh(); lkInfo(`Locked: “${q}” → “${he}”.`, 'good');
+  });
 }
 
 // ---- FULL BACKUP / RESTORE (safety net for every brain) -------------------
