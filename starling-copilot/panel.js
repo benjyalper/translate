@@ -1078,9 +1078,15 @@ async function doWrite() {
     const unv = results.filter((r) => r.via === 'unverified');
     const bad = results.filter((r) => !r.ok && r.via !== 'unverified');
     const okSegs = new Set(results.filter((r) => r.ok && r.via !== 'unverified').map((r) => r.seg));
+    // Segments that were EMPTY and got a fresh translation (vs a proofread edit of existing text).
+    // Call them out in the log + summary so a "did my new translations get written?" question is
+    // answerable at a glance — each still goes through the same server-verify + API rescue.
+    const filledSegs = new Set((state.proposals || []).filter((p) => p.filled).map((p) => p.seg));
+    const newOk = results.filter((r) => r.ok && r.via !== 'unverified' && filledSegs.has(r.seg)).length;
+    const newBad = results.filter((r) => filledSegs.has(r.seg) && (!r.ok || r.via === 'unverified')).length;
     const remembered = await tmRecordWritten(okSegs);
     if (remembered) tmRefresh();
-    results.forEach((r) => log(`write #${r.seg}: ${r.via}${r.ok ? '' : ' ✕'}${r.reason ? ' — ' + r.reason : ''}`));
+    results.forEach((r) => log(`write #${r.seg}: ${r.via}${filledSegs.has(r.seg) ? ' (new translation)' : ''}${r.ok ? '' : ' ✕'}${r.reason ? ' — ' + r.reason : ''}`));
     if (unv.length) {
       // The server read failed — we genuinely don't know if these landed. Say so; don't claim success.
       info('write-info', `⚠ Wrote ${unv.length} via the editor but COULDN'T verify against Starling's server (it may not have saved). Reload the tab (Ctrl+R) and re-run ↩ Write, or use ⚡ Write·Confirm·Submit.`, 'err');
@@ -1090,7 +1096,8 @@ async function doWrite() {
       if (apiN) parts.push(`${apiN} rescued via API (auto-confirmed)`);
       if (bad.length) parts.push(`${bad.length} failed`);
       const allServer = domN + apiN === results.length && !bad.length;
-      info('write-info', `✅ ${results.length} segment(s): ${parts.join(' · ')}${remembered ? ` · 🧠 ${remembered} remembered` : ''}. ${allServer ? 'Starling’s server has them all — if the editor still shows old text, reload (Ctrl+R) to refresh the display.' : ''}`, bad.length ? 'err' : 'good');
+      const newNote = filledSegs.size ? ` · ✍ ${newOk}/${filledSegs.size} new translation${filledSegs.size === 1 ? '' : 's'} written${newBad ? ` (${newBad} NOT written — see log)` : ''}` : '';
+      info('write-info', `✅ ${results.length} segment(s): ${parts.join(' · ')}${newNote}${remembered ? ` · 🧠 ${remembered} remembered` : ''}. ${allServer ? 'Starling’s server has them all — if the editor still shows old text, reload (Ctrl+R) to refresh the display.' : ''}`, (bad.length || newBad) ? 'err' : 'good');
     }
   } catch (e) {
     info('write-info', e.message, 'err');
