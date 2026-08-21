@@ -513,14 +513,25 @@ function tmApply(proposals) {
     }
   }
   if (lockClashes.length) confAdd(lockClashes);   // surface stale locked-vs-memory clashes for a one-time decision
-  // 2) intra-run alignment — identical sources in THIS task get one identical target.
+  // 2) intra-run alignment — identical sources in THIS task get ONE target.
+  //    Canonical wording is chosen by MAJORITY VOTE (the rendering GPT produced most
+  //    often for that source), but a remembered wording (p.tm) still outranks the vote.
+  //    Ties break to the earliest segment so the pick is stable and predictable.
   if (!exactOn) return;
   const groups = new Map();
   for (const p of proposals) { if (p.manual) continue; const k = tmKey(p.src); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(p); }
   for (const arr of groups.values()) {
     if (arr.length < 2) continue;
-    const canonP = arr.find((p) => p.tm) || arr.find((p) => p.next && p.next !== p.old) || arr[0];
-    const canon = canonP.next;
+    let canon;
+    const memP = arr.find((p) => p.tm);                     // a memory hit is authoritative — it wins outright
+    if (memP) { canon = memP.next; }
+    else {
+      const tally = new Map(), first = new Map();           // fold -> count · fold -> {i, text} of its first occurrence
+      arr.forEach((p, i) => { const f = wbFold(p.next); tally.set(f, (tally.get(f) || 0) + 1); if (!first.has(f)) first.set(f, { i, text: p.next }); });
+      let best = null;
+      for (const [f, n] of tally) { const o = first.get(f); if (!best || n > best.n || (n === best.n && o.i < best.i)) best = { n, i: o.i, text: o.text }; }
+      canon = best.text;                                    // most-frequent rendering (earliest on a tie)
+    }
     for (const p of arr) {
       if (wbFold(p.next) !== wbFold(canon)) {
         if (!p.tmPrev) p.tmPrev = p.next;
@@ -659,6 +670,69 @@ function lockCheck(proposals) {
     const v = lockViolations(p.src, p.next);
     p.lockMiss = v.length ? v.map((t) => t.en + ' → ' + t.he) : null;
   }
+}
+
+// ---- IN-TASK CONSISTENCY (Case 2): flag-only term drift -------------------
+// A DETECT-AND-FLAG sanity check — it NEVER rewrites. Hebrew inflects and fuses
+// prefixes (ב/ל/ה/מ/ו/ש), so forcing one rendering onto a term sitting inside a
+// sentence could quietly break grammar (that's why LOCKED terms are flag-only too).
+// So we only surface the drift and let you decide — with one click to LOCK the term
+// so it can't drift again across future tasks.
+//
+// How it decides a term's "right" wording: it builds an ad-hoc glossary from this
+// task's STANDALONE LABEL segments — a short source translated on its own is that
+// term's citation form (e.g. a segment whose whole source is "Check status"). It runs
+// AFTER the majority-vote alignment above, so identical labels already share one target.
+// Then, for each such term, it flags any OTHER segment whose source contains the term
+// but whose target is MISSING the label's Hebrew (fused-prefix / definite-ה tolerant —
+// the same tolerance lockTgtHas() uses). High-precision by design: only multi-word or
+// ≥5-letter terms are scanned inside prose (single short words are too ambiguous).
+function consistLabelEn(src) {
+  const f = wbFold(String(src == null ? '' : src));
+  if (!f || !/[A-Za-z]/.test(f)) return '';               // must carry Latin letters (an English UI term)
+  const words = f.split(' ').filter(Boolean);
+  if (words.length > 4 || f.length > 40) return '';       // not a short standalone label
+  return f;                                               // wbFold'd English = the citation-form key
+}
+function consistScanable(en) {                            // worth hunting for INSIDE longer sentences?
+  const words = en.split(' ').filter(Boolean);
+  return words.length >= 2 || (words.length === 1 && en.replace(/[^A-Za-z]/g, '').length >= 5);
+}
+// Tag every proposal with p.consist = [{en, he, from}] (or null) for the review badge.
+function consistCheck(proposals) {
+  for (const p of proposals) p.consist = null;
+  // 1) Authority glossary from standalone labels: enKey -> { en (original), he (clean), from (first seg) }.
+  const gloss = new Map();
+  for (const p of proposals) {
+    if (p.manual) continue;                               // tagged/chip rows aren't clean citation forms
+    const en = consistLabelEn(p.src); if (!en) continue;
+    const he = stripTags(String(p.next == null ? '' : p.next)).trim();
+    if (!he) continue;
+    if (!gloss.has(en)) gloss.set(en, { en: String(p.src).trim(), he, from: p.seg });
+  }
+  // 2) Flag any OTHER segment that carries the English term but not the label's Hebrew.
+  for (const [en, g] of gloss) {
+    if (!consistScanable(en)) continue;
+    for (const p of proposals) {
+      if (p.manual) continue;
+      if (consistLabelEn(p.src) === en) continue;         // the label itself / an identical-source repeat
+      if (!lockSrcHas(p.src, g.en)) continue;             // English term not present as a whole phrase
+      if (lockTgtHas(p.next, g.he)) continue;             // its citation Hebrew IS present → consistent
+      (p.consist = p.consist || []).push({ en: g.en, he: g.he, from: g.from });
+    }
+  }
+}
+// One-click lock from a ⚖ consistency flag — reuses the LOCKED-terms store so the
+// pairing becomes mandatory everywhere (same guard as the Lookup 🔒 lock).
+async function consistLock(en, he) {
+  en = String(en || '').trim(); he = String(he || '').trim();
+  if (!en || !he) return { ok: false, msg: 'Missing term.' };
+  const clash = (LOCK.terms || []).find((t) => (t.en || '').toLowerCase() === en.toLowerCase() && wbFold(t.he) !== wbFold(he));
+  if (clash) return { ok: false, msg: `“${en}” is already locked to “${clash.he}” — change it in the 🔒 Locked terms card.` };
+  LOCK.terms = (LOCK.terms || []).filter((t) => (t.en || '').toLowerCase() !== en.toLowerCase());
+  LOCK.terms.push({ id: brainUid(), en, he, note: 'from consistency', ts: Date.now() });
+  await lockSave(); lockRefresh();
+  return { ok: true, msg: `Locked: “${en}” → “${he}”.` };
 }
 
 // ---- AUTO-FIX: deterministic post-GPT rewriter ("smart scanner") -----------
@@ -896,11 +970,14 @@ async function doGpt() {
     tmApply(proposals);   // enforce your remembered wording on exact-source recurrences
     fixApply(proposals);  // deterministic post-GPT rewrites (plural imperative → your singular slash form, etc.)
     lockCheck(proposals); // flag rows where a MANDATORY locked term is missing from the target (sees the fixed text)
+    consistCheck(proposals); // flag in-task term drift (Case 2) — never rewrites; you review + one-click lock
     state.proposals = proposals;
     const changed = proposals.filter((p) => !sameRender(p.next, p.old)).length;
-    const tmN = proposals.filter((p) => p.tm || p.dedupe).length;
+    const tmN = proposals.filter((p) => p.tm).length;         // remembered wording (cross-task memory)
+    const dedupeN = proposals.filter((p) => p.dedupe).length; // aligned to one wording within this task
+    const consistN = proposals.filter((p) => p.consist && p.consist.length).length; // ⚖ term-drift flags
     const pf = done - filled;
-    info('gpt-info', `✅ ${done} done${filled ? ` (${pf} proofread · ${filled} translated)` : ''} · ${changed} changed${tmN ? ` · 🧠 ${tmN} from memory` : ''}${failed ? ` · ${failed} failed` : ''}`, failed ? 'err' : 'good');
+    info('gpt-info', `✅ ${done} done${filled ? ` (${pf} proofread · ${filled} translated)` : ''} · ${changed} changed${tmN ? ` · 🧠 ${tmN} from memory` : ''}${dedupeN ? ` · 🧠 ${dedupeN} aligned` : ''}${consistN ? ` · ⚖ ${consistN} consistency` : ''}${failed ? ` · ${failed} failed` : ''}`, failed ? 'err' : 'good');
     renderReview();
     $('review-card').hidden = false;
     $('write-card').hidden = false;
@@ -909,11 +986,13 @@ async function doGpt() {
   }
 }
 
-let revFilter = 'changed';   // review view filter: 'changed' | 'all' | 'manual' (✋ paste-by-hand only)
+let revFilter = 'changed';   // 'changed' | 'all' | 'manual' (✋ paste-by-hand) | 'memrev' (🧠 memory — review) | 'consist' (⚖ consistency)
 function renderReview() {
   const box = $('review');
   const list = state.proposals.filter((p) =>
     revFilter === 'manual' ? p.manual :
+    revFilter === 'memrev' ? !!p.tmOverride :   // 🧠 memory differs from GPT — left unchecked for you to confirm
+    revFilter === 'consist' ? !!(p.consist && p.consist.length) :   // ⚖ in-task term drift — flag only
     revFilter === 'all' ? true :
     !sameRender(p.next, p.old));   // 'changed'
   box.innerHTML = list.map((p) => {
@@ -971,6 +1050,7 @@ function renderReview() {
         ${p.lockMiss ? `<span class="rc-warn" style="background:#b91c1c" title="MANDATORY locked term missing from the target — must be rendered exactly (a prefix is OK): ${esc(p.lockMiss.join(' · '))}. Fix the Hebrew, then this clears.">🔒 locked term</span>` : ''}
         ${p.fixApplied ? `<span class="rc-warn" style="background:#0e7490" title="Auto-corrected by your locked 🩹 Auto-fix rules: ${esc(p.fixApplied.join(' · '))}. Edit the text to revert.">✎ auto-fixed</span>` : ''}
         ${p.fuzzy && p.fuzzy.matches.length ? `<span class="rc-warn" style="background:#3b0764" title="No exact memory match, but ${p.fuzzy.matches.length} near-match(es) from your past work are shown below — click “use” to adopt one. Nothing is applied automatically.">🧠 ${p.fuzzy.matches.length} near-match${p.fuzzy.matches.length === 1 ? '' : 'es'}</span>` : ''}
+        ${p.consist && p.consist.length ? p.consist.map((c) => `<span class="rc-warn" style="background:#7c2d12" title="Consistency check: “${esc(c.en)}” was translated as “${esc(c.he)}” on its own (segment ${esc(String(c.from))}), but this segment's target doesn't appear to use that wording. Flag only — nothing was changed. Fix the Hebrew by hand if it should match, or click 🔒 lock to make “${esc(c.en)}” → “${esc(c.he)}” mandatory everywhere.">⚖ consistency: ${esc(c.en)}</span><button class="rc-lockterm" type="button" data-en="${esc(c.en)}" data-he="${esc(c.he)}" title="Lock “${esc(c.en)}” → “${esc(c.he)}” as a mandatory term (adds it to 🔒 Locked terms)">🔒 lock</button>`).join('') : ''}
         <div class="rc-ctl">${control}</div>
       </div>
       ${p.src ? `<div class="rc-src" dir="ltr">${hl(esc(p.src))}</div>` : ''}
@@ -984,7 +1064,7 @@ function renderReview() {
       ${newRow}
       ${copyBlock}
     </div>`;
-  }).join('') || `<div class="info">${revFilter === 'manual' ? 'No ✋ paste-by-hand (tagged/chip) segments in this task.' : 'No changes proposed.'}</div>`;
+  }).join('') || `<div class="info">${revFilter === 'manual' ? 'No ✋ paste-by-hand (tagged/chip) segments in this task.' : revFilter === 'memrev' ? 'No 🧠 memory — review rows — your remembered wording matched GPT (or no memory hit) on every segment.' : revFilter === 'consist' ? 'No ⚖ consistency flags — every term you translated on its own is rendered the same way where it recurs. (Only multi-word / ≥5-letter terms that also appear as a standalone segment are checked.)' : 'No changes proposed.'}</div>`;
 
   box.querySelectorAll('.rc-cb').forEach((cb) => cb.addEventListener('change', (e) => {
     const i = +e.target.closest('.rc').dataset.i; state.proposals[i].approved = e.target.checked; updateRevCount();
@@ -1018,6 +1098,13 @@ function renderReview() {
   });
   box.querySelectorAll('.rc-copy').forEach((b) => b.addEventListener('click', () => panelCopy(b.getAttribute('data-copy'), b)));
   box.querySelectorAll('.rc-write').forEach((b) => b.addEventListener('click', () => doWriteOne(+b.dataset.i, b)));
+  box.querySelectorAll('.rc-lockterm').forEach((b) => b.addEventListener('click', async () => {
+    b.disabled = true;
+    const r = await consistLock(b.dataset.en, b.dataset.he);
+    info('gpt-info', r.msg, r.ok ? 'good' : 'err');
+    if (r.ok) { b.textContent = '🔒 locked'; b.title = 'Locked as a mandatory term.'; }
+    else b.disabled = false;
+  }));
   box.querySelectorAll('.fz-use').forEach((b) => b.addEventListener('click', () => {
     const p = state.proposals[+b.dataset.i], m = p && p.fuzzy && p.fuzzy.matches[+b.dataset.j]; if (!m) return;
     p.next = m.suggest; p.edited = true; p.fuzzy = null;   // adopted → clear the near-match panel; your text now leads
@@ -5056,12 +5143,14 @@ async function init() {
   // Review VIEW filter (mutually exclusive) — mark the active one and re-render.
   const setRevFilter = (mode) => {
     revFilter = mode;
-    ['view-changed', 'view-all', 'view-manual'].forEach((id) => { const b = $(id); if (b) b.classList.toggle('active', (id === 'view-' + mode)); });
+    ['view-changed', 'view-all', 'view-manual', 'view-memrev', 'view-consist'].forEach((id) => { const b = $(id); if (b) b.classList.toggle('active', (id === 'view-' + mode)); });
     renderReview();
   };
   $('view-changed').addEventListener('click', () => setRevFilter('changed'));
   $('view-all').addEventListener('click', () => setRevFilter('all'));
   $('view-manual').addEventListener('click', () => setRevFilter('manual'));   // ✋ paste-by-hand only
+  $('view-memrev').addEventListener('click', () => setRevFilter('memrev'));   // 🧠 memory — review only
+  $('view-consist').addEventListener('click', () => setRevFilter('consist')); // ⚖ consistency flags only
   // Approve selection (does NOT change the view). Manual/tagged rows are copy-by-hand and never auto-written.
   $('sel-all').addEventListener('click', () => { state.proposals.forEach((p) => p.approved = !p.manual && !sameRender(p.next, p.old)); renderReview(); });
   $('sel-none').addEventListener('click', () => { state.proposals.forEach((p) => p.approved = false); renderReview(); });
