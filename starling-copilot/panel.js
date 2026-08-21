@@ -1072,10 +1072,11 @@ async function doWrite() {
     }
     const ok = results.filter((r) => r.ok).length;
     const bad = results.filter((r) => !r.ok);
+    const apiN = results.filter((r) => r.ok && r.via === 'api').length;   // typed write didn't stick → rescued (and confirmed) via API
     const okSegs = new Set(results.filter((r) => r.ok).map((r) => r.seg));
     const remembered = await tmRecordWritten(okSegs);
     if (remembered) tmRefresh();
-    info('write-info', `✅ Wrote ${ok}/${results.length}${bad.length ? ` · ${bad.length} failed` : ''}${remembered ? ` · 🧠 ${remembered} remembered` : ''}`, bad.length ? 'err' : 'good');
+    info('write-info', `✅ Wrote ${ok}/${results.length}${apiN ? ` · ${apiN} rescued via API (auto-confirmed)` : ''}${bad.length ? ` · ${bad.length} failed` : ''}${remembered ? ` · 🧠 ${remembered} remembered` : ''}`, bad.length ? 'err' : 'good');
     bad.forEach((b) => log(`write #${b.seg} failed: ${b.reason}`));
   } catch (e) {
     info('write-info', e.message, 'err');
@@ -1771,7 +1772,7 @@ function wbBuildIndex() {
 }
 const WB_FIELDS = [['key', 'Key'], ['valid', 'Valid (Y/N)'], ['final', 'Final Translation'], ['src', 'Source (EN)'], ['tgt', 'Current target'], ['lang', 'Language'], ['updated', 'Updated on Starling']];
 const STAR_KEY_URL = 'https://starling.bytedance.com/#/all-task?pageNum=1&pageSize=10&progress=all&translateTypeList=%5B%5D&sortType=1&order=0&sourceLocales=en&targetLocales=he-IL&textKeys=';
-const CS_EXPECT = 36;   // must match content.js CS_VERSION
+const CS_EXPECT = 37;   // must match content.js CS_VERSION
 
 // Direct call surface — invokes the page's window.__wb.* via chrome.scripting.executeScript.
 // This bypasses chrome.runtime messaging entirely, so a stale/duplicate content-script

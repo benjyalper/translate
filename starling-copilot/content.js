@@ -13,7 +13,7 @@
   // tab is running an older version, re-injects this file via chrome.scripting so stale tabs
   // self-heal (no page reload needed). Re-injection tears down the previous version's message
   // listener first (below) so there's never a double-listener race.
-  const CS_VERSION = 36;
+  const CS_VERSION = 37;
   if (window.__scVer === CS_VERSION) return;                         // this exact version already live here
   if (typeof window.__scCleanup === 'function') { try { window.__scCleanup(); } catch (e) {} }  // remove an older/stale one
   window.__scVer = CS_VERSION;
@@ -393,11 +393,42 @@
       return { seg, ok: false, reason: String(e && e.message || e) };
     }
   }
+  // Compare a saved target against what we intended, ignoring edge whitespace and invisible
+  // direction/zero-width marks (norm handles NBSP + trailing; this also drops RTL/LRM/BOM).
+  const stripInvis = (s) => String(s == null ? '' : s).replace(/[\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF\u00AD]/g, '');
+  const tgtSame = (a, b) => norm(stripInvis(a)) === norm(stripInvis(b));
   async function writeAll(edits) {
-    const results = [];
-    for (const e of edits) {
-      results.push(await writeOne(e));
-      await sleep(120);
+    // 1) Type each edit into the editor — fast, and it keeps the editor's own state live.
+    const dom = [];
+    for (const e of edits) { dom.push(await writeOne(e)); await sleep(120); }
+    // 2) VERIFY against the SERVER, not the live DOM. A React-controlled editor can accept
+    //    our typed text into the visible contenteditable yet never commit it to task state —
+    //    so it silently reverts and the server never gets it, even though writeOne saw the new
+    //    text. Re-read the task; for any segment whose SAVED target doesn't match what we meant,
+    //    RESCUE it through the API (confirmTextTaskTargetV2 carries the Content itself — the same
+    //    reliable path ⚡ uses). Rescued rows are also proofread-confirmed (that endpoint can't
+    //    save without confirming), flagged via:'api' so the panel can report it.
+    let byRank = null;
+    try { const t = await apiTask(taskId()); if (t && t.ok) byRank = new Map((t.rows || []).map((r) => [String(r.rank), r])); } catch (e) {}
+    if (!byRank) return dom;   // couldn't read the task to verify — fall back to the DOM result as-is
+    const results = [], rescue = [];
+    for (let i = 0; i < edits.length; i++) {
+      const e = edits[i], d = dom[i] || { seg: e.seg };
+      const row = byRank.get(String(e.seg));
+      if (row && tgtSame(row.target, e.text)) { results.push({ seg: e.seg, ok: true, via: 'dom' }); continue; }
+      rescue.push(e);
+      results.push({ seg: e.seg, ok: false, via: 'pending', reason: d.reason || 'the typed text did not persist to the task' });
+    }
+    if (rescue.length) {
+      let rr = null;
+      try { rr = await apiWriteConfirm(rescue, true); } catch (e) { rr = { ok: false, error: String(e && e.message || e) }; }
+      const rmap = new Map(((rr && rr.results) || []).map((x) => [String(x.seg), x]));
+      for (const r of results) {
+        if (r.via !== 'pending') continue;
+        const x = rmap.get(String(r.seg));
+        if (x && x.ok) { r.ok = true; r.via = 'api'; delete r.reason; }
+        else { r.via = 'fail'; r.reason = (x && (x.msg || x.reason)) || (rr && rr.error) || r.reason; }
+      }
     }
     return results;
   }
