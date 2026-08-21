@@ -4016,6 +4016,16 @@ function lkHl(raw, q) {
   while (i < raw.length) { const idx = lc.indexOf(lq, i); if (idx < 0) { out += esc(raw.slice(i)); break; } out += esc(raw.slice(i, idx)) + '<mark>' + esc(raw.slice(idx, idx + q.length)) + '</mark>'; i = idx + q.length; }
   return out;
 }
+// Build the exact deep-link Starling uses when you open a task from "My tasks" (the 👁 eye).
+// Route is `#/outside/translate?taskid=…&from=station&fromUrl=<back-link>`, NOT `#/editor?…`
+// (that only loaded the editor shell). `fromUrl` is the breadcrumb back-link and is itself a
+// hash-route whose array params are percent-encoded, then the whole thing is encoded again —
+// so this reproduces a real click byte-for-byte from just the task (sub)id.
+function starlingTaskUrl(tid) {
+  const t = String(tid);
+  const inner = '#/my-task?pageNum=1&pageSize=100&progress=all&translateTypeList=%5B%5D&taskIds=%5B%22' + t + '%22%5D';
+  return 'https://starling.bytedance.com/#/outside/translate?taskid=' + encodeURIComponent(t) + '&from=station&fromUrl=' + encodeURIComponent(inner);
+}
 function lkSearch(q) {
   const out = $('lk-out'); if (!out) return;
   q = (q || '').trim();
@@ -4078,8 +4088,8 @@ function lkSearch(q) {
   // ↗ task — open the Starling editor for the task this corpus example came from (new tab)
   out.querySelectorAll('.lk-open').forEach((b) => b.addEventListener('click', () => {
     const tid = b.getAttribute('data-task'); if (!tid) return;
-    try { chrome.tabs.create({ url: 'https://starling.bytedance.com/#/editor?taskid=' + encodeURIComponent(tid) }); }
-    catch (e) { window.open('https://starling.bytedance.com/#/editor?taskid=' + encodeURIComponent(tid), '_blank'); }
+    const url = starlingTaskUrl(tid);
+    try { chrome.tabs.create({ url }); } catch (e) { window.open(url, '_blank'); }
   }));
   // wire the "set preferred" buttons (q captured)
   if ($('lk-gloss')) $('lk-gloss').addEventListener('click', async () => {
