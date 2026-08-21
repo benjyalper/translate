@@ -13,7 +13,7 @@
   // tab is running an older version, re-injects this file via chrome.scripting so stale tabs
   // self-heal (no page reload needed). Re-injection tears down the previous version's message
   // listener first (below) so there's never a double-listener race.
-  const CS_VERSION = 35;
+  const CS_VERSION = 36;
   if (window.__scVer === CS_VERSION) return;                         // this exact version already live here
   if (typeof window.__scCleanup === 'function') { try { window.__scCleanup(); } catch (e) {} }  // remove an older/stale one
   window.__scVer = CS_VERSION;
@@ -350,25 +350,44 @@
     try {
       const cell = await scrollToSeg(seg);
       if (!cell) return { seg, ok: false, reason: 'row not found (virtualized/out of range)' };
-      cell.click();
-      await sleep(140);
-      // Document editor: the target cell IS the contenteditable. String editor:
-      // clicking mounts a descendant [contenteditable]. Handle both.
-      const rowScope = cell.closest('.cat-content__row,[data-row-key],[role="row"],tr') || cell;
-      let ed = (cell.matches && cell.matches(CFG.editor)) ? cell : (cell.querySelector(CFG.editor) || rowScope.querySelector(CFG.editor));
-      for (let i = 0; i < 4 && !ed; i++) {
+      // Preserve the source's edge whitespace; this is the exact string we expect the cell to hold.
+      const want = mirrorRowEdges(cell.closest('.cat-content__row,[data-row-key],[role="row"],tr') || cell, text);
+      // Type into the editor, then VERIFY the cell actually holds what we typed. Returning ok:true
+      // just because the editor mounted was wrong — a virtualized re-render, a caret that never
+      // landed in the contenteditable, or blur racing the input event can all leave the cell
+      // UNCHANGED while throwing nothing, so the panel counted it "written" when it wasn't. Now we
+      // compare (norm ignores edge-whitespace the editor may renormalize) and retry once; if it
+      // still hasn't stuck we report ok:false so the panel flags it instead of silently skipping.
+      let before = '', after = '', ed = null, wrote = false;
+      for (let attempt = 0; attempt < 2 && !wrote; attempt++) {
+        cell.click();
+        await sleep(attempt ? 220 : 140);
+        // Document editor: the target cell IS the contenteditable. String editor:
+        // clicking mounts a descendant [contenteditable]. Handle both.
+        const rowScope = cell.closest('.cat-content__row,[data-row-key],[role="row"],tr') || cell;
+        ed = (cell.matches && cell.matches(CFG.editor)) ? cell : (cell.querySelector(CFG.editor) || rowScope.querySelector(CFG.editor));
+        for (let i = 0; i < 4 && !ed; i++) {
+          await sleep(120);
+          ed = (document.activeElement && document.activeElement.isContentEditable) ? document.activeElement
+             : ((cell.matches && cell.matches(CFG.editor)) ? cell : cell.querySelector(CFG.editor));
+        }
+        if (!ed) { if (attempt) return { seg, ok: false, reason: 'editor did not mount on click' }; await sleep(160); continue; }
+        before = ed.textContent;
+        insertText(ed, want);
+        await sleep(160);
+        after = ed.textContent;
+        ed.blur();
         await sleep(120);
-        ed = (document.activeElement && document.activeElement.isContentEditable) ? document.activeElement
-           : ((cell.matches && cell.matches(CFG.editor)) ? cell : cell.querySelector(CFG.editor));
+        after = (ed.textContent || after);   // re-read post-blur in case the value settled late
+        // "Wrote" = exact match, OR the cell changed at all (placeholders become chips whose
+        // textContent can differ from the literal token, so an exact compare would false-fail —
+        // any change from `before` still means our text landed), OR it was already correct.
+        // The only real failure is a cell we meant to change that stayed byte-identical.
+        wrote = norm(after) === norm(want) || norm(after) !== norm(before) || norm(want) === norm(before);
+        if (!wrote) await sleep(160);
       }
-      if (!ed) return { seg, ok: false, reason: 'editor did not mount on click' };
-      const before = ed.textContent;
-      insertText(ed, mirrorRowEdges(rowScope, text));   // preserve the source's edge whitespace
-      await sleep(160);
-      const after = ed.textContent;
-      ed.blur();
-      await sleep(120);
-      const chips = (ed.querySelectorAll('[class*="placeholder"],[class*="tag"],[class*="chip"],[data-token],[data-tag]') || []).length;
+      const chips = ((ed && ed.querySelectorAll('[class*="placeholder"],[class*="tag"],[class*="chip"],[data-token],[data-tag]')) || []).length;
+      if (!wrote) return { seg, ok: false, reason: 'text did not stick after typing — the cell still shows its old value (retry, or paste it by hand)', before, after };
       return { seg, ok: true, before, after, chips };
     } catch (e) {
       return { seg, ok: false, reason: String(e && e.message || e) };
