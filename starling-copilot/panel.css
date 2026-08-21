@@ -170,6 +170,8 @@ textarea { font-family: ui-monospace, Menlo, Consolas, monospace; resize: vertic
 .lk-eg { font-size: .9em; opacity: .85; padding: 3px 0 6px 14px; position: relative; line-height: 1.45; }
 .lk-eg::before { content: "•"; position: absolute; left: 2px; top: 3px; opacity: .5; }
 .lk-t { display: block; margin-top: 1px; }
+.lk-open { display: inline-block; margin-top: 3px; font-size: .82em; line-height: 1; padding: 2px 6px; border: 1px solid var(--line, #4446); border-radius: 5px; background: transparent; color: inherit; opacity: .7; cursor: pointer; }
+.lk-open:hover { opacity: 1; background: rgba(120, 160, 240, .16); border-color: rgba(120, 160, 240, .5); }
 /* Auto-fix is HE→HE, so the target line keeps a direction cue — but a LEFT arrow, which
    in the RTL line sits at the start and points toward the corrected text (never the wrong-way →). */
 .lk-fix::before { content: "\2190\00a0"; opacity: .5; }

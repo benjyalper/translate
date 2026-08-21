@@ -4021,7 +4021,11 @@ function lkSearch(q) {
   q = (q || '').trim();
   if (q.length < 2) { out.innerHTML = '<div class="hint">Type an English or Hebrew word/phrase to see how it\'s normally translated across all your brains + the corpus.</div>'; return; }
   const heQ = /[א-ת]/.test(q), enQ = /[A-Za-z]/.test(q);
-  const eg = (s, t) => `<div class="lk-eg"><span dir="ltr">${lkHl(s, q)}</span><span class="lk-t" dir="rtl">${lkHl(t, q)}</span></div>`;
+  const taskName = (tid) => (CB.index && CB.index.tasksSeen && CB.index.tasksSeen[tid] && CB.index.tasksSeen[tid].name) || '';
+  // eg() renders one example line; pass tid to append a ↗ button that opens that task in Starling
+  // (only corpus results carry a task id — memory/glossary/auto-fix pass none, so no button there).
+  const eg = (s, t, tid) => `<div class="lk-eg"><span dir="ltr">${lkHl(s, q)}</span><span class="lk-t" dir="rtl">${lkHl(t, q)}</span>` +
+    (tid ? ` <button class="lk-open" data-task="${esc(tid)}" title="${esc('Open task ' + tid + (taskName(tid) ? ' — ' + taskName(tid) : '') + ' in Starling')}">↗ task</button>` : '') + `</div>`;
   let html = '', pref = '';
   // 1) Corpus concordance — the richest signal
   if (CB.index && CB.index.sources) {
@@ -4032,20 +4036,21 @@ function lkSearch(q) {
         const e = CB.index.sources[k]; if (!lkSeq(pmEnTokens(e.src), qtoks)) continue;
         const vs = e.variants.slice().sort((a, b) => b.n - a.n); const top = vs[0];
         const tasks = new Set(); for (const v of e.variants) for (const t of Object.keys(v.tasks || {})) tasks.add(t);
-        segs.push({ toks: pmHeTokens(top.tgt), tasks }); if (ex.length < 5) ex.push([e.src, top.tgt]);
+        const tid0 = Object.keys(top.tasks || {})[0] || '';   // a task that produced this exact top translation
+        segs.push({ toks: pmHeTokens(top.tgt), tasks }); if (ex.length < 5) ex.push([e.src, top.tgt, tid0]);
       }
       if (segs.length) {
         const tp = pmTopPhrase(segs), taskN = new Set(); segs.forEach((s) => s.tasks.forEach((t) => taskN.add(t)));
         if (tp) pref = tp.disp;   // real corpus surface (ביוטי), never the clitic-stripped base (יוטי)
         html += `<div class="cb-sec"><div class="cb-h">📦 Corpus — “${esc(q)}” in ${segs.length} segment(s) · ${taskN.size} task(s)</div>` +
           (tp ? `<div class="lk-hit">usually → <b dir="rtl">${esc(tp.disp)}</b> <span class="hint">(${Math.round(tp.cov * 100)}% of them)</span></div>` : '') +
-          ex.map((x) => eg(x[0], x[1])).join('') + `</div>`;
+          ex.map((x) => eg(x[0], x[1], x[2])).join('') + `</div>`;
       }
     }
     if (heQ) {
       const hits = [];
-      for (const k of keys) { const e = CB.index.sources[k]; const top = e.variants.slice().sort((a, b) => b.n - a.n)[0]; if (top && wbFold(top.tgt).includes(wbFold(q))) { hits.push([e.src, top.tgt]); if (hits.length >= 6) break; } }
-      if (hits.length) html += `<div class="cb-sec"><div class="cb-h">📦 Corpus — Hebrew “${esc(q)}” appears in</div>` + hits.map((x) => eg(x[0], x[1])).join('') + `</div>`;
+      for (const k of keys) { const e = CB.index.sources[k]; const top = e.variants.slice().sort((a, b) => b.n - a.n)[0]; if (top && wbFold(top.tgt).includes(wbFold(q))) { hits.push([e.src, top.tgt, Object.keys(top.tasks || {})[0] || '']); if (hits.length >= 6) break; } }
+      if (hits.length) html += `<div class="cb-sec"><div class="cb-h">📦 Corpus — Hebrew “${esc(q)}” appears in</div>` + hits.map((x) => eg(x[0], x[1], x[2])).join('') + `</div>`;
     }
   }
   // 2) Consistency memory — exact first, then contains
@@ -4070,6 +4075,12 @@ function lkSearch(q) {
       `<div class="hint"><b>Glossary</b> = advisory (GPT prefers it and inflects naturally — best for a slash form like אפוטרופוס/ית). <b>Lock</b> = mandatory (flags any run that's missing it). This sets it <b>going forward</b>; it doesn't rewrite past corpus/memory.</div></div>`;
   }
   out.innerHTML = html || `<div class="hint">No matches for “${esc(q)}” in the brains${CB.index && CB.index.sources ? ' or corpus' : ' (build the 📦 Corpus for richer results)'}.</div>`;
+  // ↗ task — open the Starling editor for the task this corpus example came from (new tab)
+  out.querySelectorAll('.lk-open').forEach((b) => b.addEventListener('click', () => {
+    const tid = b.getAttribute('data-task'); if (!tid) return;
+    try { chrome.tabs.create({ url: 'https://starling.bytedance.com/#/editor?taskid=' + encodeURIComponent(tid) }); }
+    catch (e) { window.open('https://starling.bytedance.com/#/editor?taskid=' + encodeURIComponent(tid), '_blank'); }
+  }));
   // wire the "set preferred" buttons (q captured)
   if ($('lk-gloss')) $('lk-gloss').addEventListener('click', async () => {
     const he = ($('lk-pref').value || '').trim(); if (!he) { lkInfo('Enter your preferred Hebrew first.', 'err'); return; }
