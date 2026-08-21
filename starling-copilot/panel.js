@@ -1070,14 +1070,28 @@ async function doWrite() {
       $('write-bar').style.width = Math.round(Math.min(i + CH, edits.length) / edits.length * 100) + '%';
       info('write-info', `Wrote ${Math.min(i + CH, edits.length)}/${edits.length}…`);
     }
-    const ok = results.filter((r) => r.ok).length;
-    const bad = results.filter((r) => !r.ok);
-    const apiN = results.filter((r) => r.ok && r.via === 'api').length;   // typed write didn't stick → rescued (and confirmed) via API
-    const okSegs = new Set(results.filter((r) => r.ok).map((r) => r.seg));
+    // Break results down by WHERE each write actually landed (server-verified), so the message
+    // tells the truth instead of a bare count: dom = typed + server-confirmed, api = rescued via
+    // API, unverified = couldn't re-read the task to check (may not have persisted), fail = lost.
+    const domN = results.filter((r) => r.via === 'dom').length;
+    const apiN = results.filter((r) => r.via === 'api').length;
+    const unv = results.filter((r) => r.via === 'unverified');
+    const bad = results.filter((r) => !r.ok && r.via !== 'unverified');
+    const okSegs = new Set(results.filter((r) => r.ok && r.via !== 'unverified').map((r) => r.seg));
     const remembered = await tmRecordWritten(okSegs);
     if (remembered) tmRefresh();
-    info('write-info', `✅ Wrote ${ok}/${results.length}${apiN ? ` · ${apiN} rescued via API (auto-confirmed)` : ''}${bad.length ? ` · ${bad.length} failed` : ''}${remembered ? ` · 🧠 ${remembered} remembered` : ''}`, bad.length ? 'err' : 'good');
-    bad.forEach((b) => log(`write #${b.seg} failed: ${b.reason}`));
+    results.forEach((r) => log(`write #${r.seg}: ${r.via}${r.ok ? '' : ' ✕'}${r.reason ? ' — ' + r.reason : ''}`));
+    if (unv.length) {
+      // The server read failed — we genuinely don't know if these landed. Say so; don't claim success.
+      info('write-info', `⚠ Wrote ${unv.length} via the editor but COULDN'T verify against Starling's server (it may not have saved). Reload the tab (Ctrl+R) and re-run ↩ Write, or use ⚡ Write·Confirm·Submit.`, 'err');
+    } else {
+      const parts = [];
+      if (domN) parts.push(`${domN} confirmed on the server`);
+      if (apiN) parts.push(`${apiN} rescued via API (auto-confirmed)`);
+      if (bad.length) parts.push(`${bad.length} failed`);
+      const allServer = domN + apiN === results.length && !bad.length;
+      info('write-info', `✅ ${results.length} segment(s): ${parts.join(' · ')}${remembered ? ` · 🧠 ${remembered} remembered` : ''}. ${allServer ? 'Starling’s server has them all — if the editor still shows old text, reload (Ctrl+R) to refresh the display.' : ''}`, bad.length ? 'err' : 'good');
+    }
   } catch (e) {
     info('write-info', e.message, 'err');
   } finally {
@@ -1772,7 +1786,7 @@ function wbBuildIndex() {
 }
 const WB_FIELDS = [['key', 'Key'], ['valid', 'Valid (Y/N)'], ['final', 'Final Translation'], ['src', 'Source (EN)'], ['tgt', 'Current target'], ['lang', 'Language'], ['updated', 'Updated on Starling']];
 const STAR_KEY_URL = 'https://starling.bytedance.com/#/all-task?pageNum=1&pageSize=10&progress=all&translateTypeList=%5B%5D&sortType=1&order=0&sourceLocales=en&targetLocales=he-IL&textKeys=';
-const CS_EXPECT = 37;   // must match content.js CS_VERSION
+const CS_EXPECT = 38;   // must match content.js CS_VERSION
 
 // Direct call surface — invokes the page's window.__wb.* via chrome.scripting.executeScript.
 // This bypasses chrome.runtime messaging entirely, so a stale/duplicate content-script

@@ -13,7 +13,7 @@
   // tab is running an older version, re-injects this file via chrome.scripting so stale tabs
   // self-heal (no page reload needed). Re-injection tears down the previous version's message
   // listener first (below) so there's never a double-listener race.
-  const CS_VERSION = 37;
+  const CS_VERSION = 38;
   if (window.__scVer === CS_VERSION) return;                         // this exact version already live here
   if (typeof window.__scCleanup === 'function') { try { window.__scCleanup(); } catch (e) {} }  // remove an older/stale one
   window.__scVer = CS_VERSION;
@@ -408,9 +408,14 @@
     //    RESCUE it through the API (confirmTextTaskTargetV2 carries the Content itself — the same
     //    reliable path ⚡ uses). Rescued rows are also proofread-confirmed (that endpoint can't
     //    save without confirming), flagged via:'api' so the panel can report it.
-    let byRank = null;
-    try { const t = await apiTask(taskId()); if (t && t.ok) byRank = new Map((t.rows || []).map((r) => [String(r.rank), r])); } catch (e) {}
-    if (!byRank) return dom;   // couldn't read the task to verify — fall back to the DOM result as-is
+    let byRank = null, verifyErr = '';
+    try { const t = await apiTask(taskId()); if (t && t.ok) byRank = new Map((t.rows || []).map((r) => [String(r.rank), r])); else verifyErr = (t && t.error) || 'read failed'; } catch (e) { verifyErr = String(e && e.message || e); }
+    if (!byRank) {
+      // Couldn't re-read the task to verify — DON'T silently claim success. Tag each 'unverified'
+      // so the panel warns the write may not have persisted, rather than trusting the DOM (the
+      // exact unreliable signal we're moving away from).
+      return dom.map((d) => ({ seg: d.seg, ok: d.ok, via: 'unverified', reason: d.reason || ('server verify failed: ' + verifyErr) }));
+    }
     const results = [], rescue = [];
     for (let i = 0; i < edits.length; i++) {
       const e = edits[i], d = dom[i] || { seg: e.seg };
@@ -1008,8 +1013,8 @@
   }
   async function apiTask(taskId) {
     try {
-      const u = API + 'getSourceTextListWithTargetText?limit=10000&sortType=1&offset=0&editMode=dual&taskId=' + encodeURIComponent(taskId);
-      const r = await fetch(u, { credentials: 'same-origin', headers: { accept: 'application/json' } });
+      const u = API + 'getSourceTextListWithTargetText?limit=10000&sortType=1&offset=0&editMode=dual&taskId=' + encodeURIComponent(taskId) + '&_=' + Date.now();
+      const r = await fetch(u, { credentials: 'same-origin', cache: 'no-store', headers: { accept: 'application/json' } });
       if (!r.ok) return { ok: false, error: 'HTTP ' + r.status };
       const j = await r.json();
       if (!j || j.status_code !== 1000) return { ok: false, error: 'status_code ' + (j && j.status_code) };
