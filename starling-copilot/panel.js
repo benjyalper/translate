@@ -814,8 +814,9 @@ async function doHarvest() {
     }
     const tagged = state.segments.filter((s) => s.tagged).length;
     const chips = state.segments.filter((s) => s.chip).length;
-    info('harvest-info', `Harvested ${state.segments.length}${filtered ? ` of ${all.length}` : ''} segments${filtered ? ' (filtered)' : ''}${tagged ? ` · ⚠ ${tagged} tagged${chips ? ` (${chips} chip → copy-by-hand)` : ''}` : ''}.`, 'good');
-    log(`harvest: ${state.segments.length}/${all.length} segments${sel ? ' (filtered)' : ''}, ${tagged} tagged, ${chips} chips`);
+    const recovered = all.filter((s) => s.apiOnly).length;   // rows the scroll dropped, refilled from the API
+    info('harvest-info', `Harvested ${state.segments.length}${filtered ? ` of ${all.length}` : ''} segments${filtered ? ' (filtered)' : ''}${tagged ? ` · ⚠ ${tagged} tagged${chips ? ` (${chips} chip → copy-by-hand)` : ''}` : ''}${recovered ? ` · ↺ ${recovered} recovered via API (the scroll missed ${recovered === 1 ? 'it' : 'them'})` : ''}.`, 'good');
+    log(`harvest: ${state.segments.length}/${all.length} segments${sel ? ' (filtered)' : ''}, ${tagged} tagged, ${chips} chips${recovered ? `, ${recovered} api-recovered` : ''}`);
     $('gpt-card').hidden = state.segments.length === 0;
     if (!all.length) info('harvest-info', 'No segments found — run Diagnostics in Settings to recalibrate selectors.', 'err');
   } catch (e) {
@@ -1793,7 +1794,7 @@ function wbBuildIndex() {
 }
 const WB_FIELDS = [['key', 'Key'], ['valid', 'Valid (Y/N)'], ['final', 'Final Translation'], ['src', 'Source (EN)'], ['tgt', 'Current target'], ['lang', 'Language'], ['updated', 'Updated on Starling']];
 const STAR_KEY_URL = 'https://starling.bytedance.com/#/all-task?pageNum=1&pageSize=10&progress=all&translateTypeList=%5B%5D&sortType=1&order=0&sourceLocales=en&targetLocales=he-IL&textKeys=';
-const CS_EXPECT = 38;   // must match content.js CS_VERSION
+const CS_EXPECT = 39;   // must match content.js CS_VERSION
 
 // Direct call surface — invokes the page's window.__wb.* via chrome.scripting.executeScript.
 // This bypasses chrome.runtime messaging entirely, so a stale/duplicate content-script

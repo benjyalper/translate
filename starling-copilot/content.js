@@ -13,7 +13,7 @@
   // tab is running an older version, re-injects this file via chrome.scripting so stale tabs
   // self-heal (no page reload needed). Re-injection tears down the previous version's message
   // listener first (below) so there's never a double-listener race.
-  const CS_VERSION = 38;
+  const CS_VERSION = 39;
   if (window.__scVer === CS_VERSION) return;                         // this exact version already live here
   if (typeof window.__scCleanup === 'function') { try { window.__scCleanup(); } catch (e) {} }  // remove an older/stale one
   window.__scVer = CS_VERSION;
@@ -209,6 +209,23 @@
         seg.fullSrc = m.fullSource || '';
         seg.shots = m.shots || [];
       }
+      // BACKFILL: the DOM scroll-scrape can drop a virtualized row, silently losing a whole
+      // segment (the API list is complete). Add any rank the scroll didn't return, flagged
+      // apiOnly so the panel can say so. We never saw the cell, so classify tag/chip
+      // conservatively from the text — anything tag-like stays copy-by-hand so a real inline
+      // tag can't be clobbered by an auto-write.
+      const have = new Set(segs.map((s) => String(s.seg)));
+      const TAGRUN = /[OC]-\d+(?:-\d+)+/;
+      for (const r of res.rows) {
+        const rank = String(r.rank == null ? '' : r.rank);
+        if (!rank || have.has(rank)) continue;
+        const src = r.source == null ? '' : String(r.source);
+        const tgt = r.target == null ? '' : String(r.target);
+        const tagLike = UNSAFE.test(src) || UNSAFE.test(tgt) || TAGRUN.test(src) || TAGRUN.test(tgt);
+        segs.push({ seg: r.rank, src, tgt, chip: tagLike, tagged: tagLike, apiOnly: true, key: r.key || '', context: r.comment || '', fullSrc: r.fullSource || '', shots: r.shots || [] });
+        have.add(rank);
+      }
+      segs.sort((a, b) => (parseInt(a.seg, 10) || 0) - (parseInt(b.seg, 10) || 0));
     } catch (e) { /* keep the plain DOM segments */ }
     return segs;
   }
