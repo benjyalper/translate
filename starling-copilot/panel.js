@@ -3514,16 +3514,20 @@ async function pmSave() { PM.updatedAt = Date.now(); try { await store.set({ plu
 function pmCount() { return PM && PM.map ? Object.keys(PM.map).length : 0; }
 function pmLookup(srcForms) { const k = cbPlKey(srcForms); return (k && PM.map[k]) ? PM.map[k] : null; }
 function pmRecord(srcForms, forms) { const k = cbPlKey(srcForms); if (!k || !forms || !Object.keys(forms).length) return false; const prev = PM.map[k]; PM.map[k] = { srcForms, forms, ts: Date.now(), n: (prev ? prev.n || 1 : 0) + 1 }; return true; }
-async function cbBuild() {
+async function cbBuild(opts) {
   if (CB.building) return;
-  CB.building = true; if ($('cb-build')) $('cb-build').disabled = true;
+  CB.building = true;
+  if ($('cb-build')) $('cb-build').disabled = true;
+  if ($('cb-update')) $('cb-update').disabled = true;
   try {
     const t = await wbActiveTab();
     if (!t || !/^https:\/\/starling\.bytedance\.com\//.test(t.url || '')) { cbInfo('Open a starling.bytedance.com tab (e.g. My tasks), then Build.', 'err'); return; }
     cbInfo('Reading My tasks…');
     const tasks = await cbFetchMyTasks(t.id);
     if (!tasks.length) { cbInfo('No Submitted tasks found (only taskStatus 2 is harvested).', 'err'); return; }
-    const force = $('cb-force') && $('cb-force').checked;
+    // ⟳ Update passes {force:false} so it can never trigger a from-scratch rebuild, whatever
+    // the checkbox says; 📦 Build (no opts) honours the checkbox as before.
+    const force = (opts && opts.force != null) ? opts.force : ($('cb-force') && $('cb-force').checked);
     const prior = force ? null : await store.get('corpusIndex', null);
     const index = (prior && prior.sources) ? prior : { builtAt: 0, taskCount: 0, pairCount: 0, tasksSeen: {}, sources: {}, plurals: {} };
     if (!index.sources) index.sources = {}; if (!index.tasksSeen) index.tasksSeen = {}; if (!index.plurals) index.plurals = {};
@@ -3560,7 +3564,36 @@ async function cbBuild() {
     CB.index = index; cbClassify(); cbRender(); cbBadge();
     cbInfo(`Done — harvested ${done} new task(s)${skippedWip ? ` · ${skippedWip} in-progress skipped (<95%)` : ''}${failed ? ` · ${failed} failed` : ''}. ${Object.keys(index.sources).length} unique sources. Review below, then Apply.`, 'good');
   } catch (e) { cbInfo('Build failed: ' + (e.message || e), 'err'); }
-  finally { CB.building = false; if ($('cb-build')) $('cb-build').disabled = false; }
+  finally {
+    CB.building = false;
+    if ($('cb-build')) $('cb-build').disabled = false;
+    if ($('cb-update')) $('cb-update').disabled = false;
+  }
+  cbNewCheck();   // re-count "new since build" (now 0, unless a task was submitted mid-build)
+}
+// ---- "new since last build" check --------------------------------------------
+// Best-effort, lazy: only runs when a starling.bytedance.com tab is active (it needs the
+// live session to read My tasks). Compares the Submitted list against index.tasksSeen and
+// surfaces how many tasks the corpus hasn't absorbed yet. Never throws into the UI.
+let cbChecking = false;
+function cbNewSet(n) {
+  const el = $('cb-new'); if (!el) return;
+  if (n == null) { el.hidden = true; el.textContent = ''; el.className = 'info'; return; }   // couldn't check (not on a Starling tab)
+  el.hidden = false;
+  if (n === 0) { el.textContent = '✓ Corpus is up to date — no new Submitted tasks.'; el.className = 'info good'; }
+  else { el.textContent = `🆕 ${n} new Submitted task${n === 1 ? '' : 's'} not in the corpus — click ⟳ Update to add ${n === 1 ? 'it' : 'them'}.`; el.className = 'info cb-hot'; }
+}
+async function cbNewCheck() {
+  if (cbChecking || CB.building) return;
+  cbChecking = true;
+  try {
+    const t = await wbActiveTab();
+    if (!t || !/^https:\/\/starling\.bytedance\.com\//.test(t.url || '')) { cbNewSet(null); return; }   // can't read My tasks from here
+    const tasks = await cbFetchMyTasks(t.id);
+    const seen = (CB.index && CB.index.tasksSeen) || {};
+    cbNewSet(tasks.filter((x) => !seen[x.id]).length);
+  } catch (e) { cbNewSet(null); }
+  finally { cbChecking = false; }
 }
 // Classify one source into a consistency bucket.
 function cbBucketOf(e) {
@@ -4975,7 +5008,12 @@ async function init() {
   CB.index = await store.get('corpusIndex', null);
   if (CB.index && CB.index.sources) { cbClassify(); cbRender(); }
   cbBadge();
-  if ($('cb-build')) $('cb-build').addEventListener('click', cbBuild);
+  if ($('cb-build')) $('cb-build').addEventListener('click', () => cbBuild());
+  if ($('cb-update')) $('cb-update').addEventListener('click', () => cbBuild({ force: false }));   // incremental-only, ignores "Rebuild from scratch"
+  // Lazily re-count "new since last build" each time the Corpus card is expanded (needs a live
+  // Starling tab; silently no-ops otherwise). Also check once now if it's already open.
+  if ($('cb-card')) $('cb-card').addEventListener('toggle', (e) => { if (e.target.open) cbNewCheck(); });
+  if ($('cb-card') && $('cb-card').open) cbNewCheck();
   if ($('cb-backup')) $('cb-backup').addEventListener('click', backupAll);
   if ($('cb-restore')) $('cb-restore').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) restoreAll(f); e.target.value = ''; });
   if ($('pm-run')) $('pm-run').addEventListener('click', pmRun);   // 🔤 phrase mining
