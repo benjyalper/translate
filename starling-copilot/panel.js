@@ -3460,9 +3460,22 @@ function setMode(m) {
 // ignored server-side; offset+limit works). The displayed "Weighted word count" column is
 // weightingWordCountV2. Sums it and multiplies by the editing rate. Fetch runs in the active
 // Starling tab's context (same-origin cookie) via executeScript — no content.js dependency.
-const PC = { rows: null };
+const PC = { rows: null, dateFields: [], dateField: '' };
 const PC_STATUS = { 1: 'In progress', 2: 'Submitted', 4: 'To be claimed' };   // Closed (3) is excluded from the word count entirely
 function pcInfo(m, k) { info('pc-info', m, k || ''); }
+// Guess which detected date column is the "first submitted" one (most→least specific).
+function pcPickDateField(fields) {
+  const pri = [/first.*submit/i, /submit.*first/i, /firstsubmit/i, /submit/i, /deliver/i, /finish/i, /complete/i, /update/i, /create/i];
+  for (const rx of pri) { const f = (fields || []).find((x) => rx.test(x)); if (f) return f; }
+  return (fields && fields[0]) || '';
+}
+// Fill the "By month of <field>" dropdown from the detected date columns (hidden if none).
+function pcFillDateSel() {
+  const sel = $('pc-datefield'), wrap = $('pc-datewrap'); if (!sel) return;
+  if (!PC.dateFields || !PC.dateFields.length) { if (wrap) wrap.hidden = true; sel.innerHTML = ''; return; }
+  sel.innerHTML = PC.dateFields.map((f) => `<option value="${esc(f)}"${f === PC.dateField ? ' selected' : ''}>${esc(f)}</option>`).join('');
+  if (wrap) wrap.hidden = false;
+}
 async function pcFetch() {
   const t = await wbActiveTab();
   if (!t || !/^https:\/\/starling\.bytedance\.com\//.test(t.url || '')) { pcInfo('Open any starling.bytedance.com tab (e.g. My tasks), then Compute.', 'err'); return; }
@@ -3471,10 +3484,27 @@ async function pcFetch() {
     const [r] = await chrome.scripting.executeScript({
       target: { tabId: t.id },
       func: async () => {
+        // A value is a date iff it lands in a sane year window (2000–2100). Handles epoch
+        // seconds (10-digit) / ms (13-digit), numeric or string, and ISO/parseable strings.
+        const parseDate = (v) => {
+          if (v == null) return null;
+          if (typeof v === 'number' && isFinite(v)) { const ms = v < 1e12 ? v * 1000 : v; const y = new Date(ms).getFullYear(); return (y >= 2000 && y <= 2100) ? ms : null; }
+          if (typeof v === 'string' && v.trim()) {
+            const s = v.trim();
+            if (/^\d{10}$/.test(s)) { const ms = Number(s) * 1000, y = new Date(ms).getFullYear(); return (y >= 2000 && y <= 2100) ? ms : null; }
+            if (/^\d{13}$/.test(s)) { const ms = Number(s), y = new Date(ms).getFullYear(); return (y >= 2000 && y <= 2100) ? ms : null; }
+            const t2 = Date.parse(s); if (!isNaN(t2)) { const y = new Date(t2).getFullYear(); return (y >= 2000 && y <= 2100) ? t2 : null; }
+          }
+          return null;
+        };
         try {
           const res = await fetch('/api/task/getMyTasks?offset=0&limit=5000&progress=all&translateTypeList=%5B%5D&_=' + Date.now(), { credentials: 'include', cache: 'no-store' });
           const j = await res.json(); const d = j.data || {};
-          const rows = (d.rows || []).map((x) => ({ s: x.taskStatus, w: Number(x.weightingWordCountV2) || 0 }));
+          const rows = (d.rows || []).map((x) => {
+            const dates = {};   // every field on the task row that parses as a date → epoch ms
+            for (const k of Object.keys(x)) { const dd = parseDate(x[k]); if (dd != null) dates[k] = dd; }
+            return { s: x.taskStatus, w: Number(x.weightingWordCountV2) || 0, dates };
+          });
           return { ok: true, count: d.count, rows };
         } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
       }
@@ -3482,6 +3512,11 @@ async function pcFetch() {
     const out = r && r.result;
     if (!out || !out.ok) throw new Error((out && out.error) || 'fetch failed');
     PC.rows = (out.rows || []).filter((r) => String(r.s) !== '3');   // drop Closed tasks — never counted
+    // Union of date-like field names across rows; default to the one that looks like "first submitted".
+    const fset = new Set(); for (const r of PC.rows) for (const k of Object.keys(r.dates || {})) fset.add(k);
+    PC.dateFields = [...fset].sort();
+    PC.dateField = pcPickDateField(PC.dateFields);
+    pcFillDateSel();
     pcInfo(`Loaded ${PC.rows.length} translation task(s) from My tasks (Closed excluded).`, 'good');
     pcRender();
   } catch (e) { pcInfo('Could not read My tasks — reload the extension, make sure a Starling tab is active, then try again. (' + e.message + ')', 'err'); }
@@ -3500,6 +3535,29 @@ function pcRender() {
   for (const r of PC.rows) { by[r.s] = by[r.s] || { n: 0, w: 0 }; by[r.s].n++; by[r.s].w += r.w; }
   const brk = Object.keys(by).sort().map((k) =>
     `<tr${String(k) === sel ? ' style="font-weight:700"' : ''}><td>${esc(PC_STATUS[k] || 'Status ' + k)}</td><td style="text-align:right">${by[k].n}</td><td style="text-align:right">${fmt(by[k].w)}</td><td style="text-align:right">${money(by[k].w * rate)}</td></tr>`).join('');
+  // Monthly breakdown by the chosen date column (respects the Tasks status filter).
+  let monthly = '';
+  if (PC.dateField && PC.dateFields && PC.dateFields.length) {
+    const mb = new Map();   // 'YYYY-MM' -> {n,w}; '' bucket = rows with no value for this field
+    for (const r of rows) {
+      const ms = r.dates && r.dates[PC.dateField];
+      let key = '';
+      if (ms) { const d = new Date(ms); key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
+      if (!mb.has(key)) mb.set(key, { n: 0, w: 0 });
+      const b = mb.get(key); b.n++; b.w += r.w;
+    }
+    const keys = [...mb.keys()].filter(Boolean).sort();
+    const monthLabel = (k) => { const [y, m] = k.split('-'); return new Date(Number(y), Number(m) - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' }); };
+    const mrows = keys.map((k) => `<tr><td>${monthLabel(k)}</td><td style="text-align:right">${mb.get(k).n}</td><td style="text-align:right">${fmt(mb.get(k).w)}</td><td style="text-align:right">${money(mb.get(k).w * rate)}</td></tr>`).join('');
+    const nd = mb.get('');
+    const ndRow = nd ? `<tr style="opacity:.6"><td>(no ${esc(PC.dateField)})</td><td style="text-align:right">${nd.n}</td><td style="text-align:right">${fmt(nd.w)}</td><td style="text-align:right">${money(nd.w * rate)}</td></tr>` : '';
+    monthly =
+      `<table style="width:100%;margin-top:14px;border-collapse:collapse;font-size:.92em">
+         <thead><tr style="text-align:left;border-bottom:1px solid #8884"><th>Month</th><th style="text-align:right">Tasks</th><th style="text-align:right">Weighted</th><th style="text-align:right">Pay</th></tr></thead>
+         <tbody>${mrows || `<tr><td colspan="4" class="hint">No dated tasks in this filter.</td></tr>`}${ndRow}</tbody>
+       </table>
+       <div class="hint" style="margin-top:6px">Grouped by month of <b>${esc(PC.dateField)}</b> (auto-detected date column — switch it in <b>By month of</b> above if that isn't “first submitted”). Respects the Tasks filter.</div>`;
+  }
   $('pc-out').hidden = false;
   $('pc-out').innerHTML =
     `<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:baseline;font-weight:600">
@@ -3511,6 +3569,7 @@ function pcRender() {
        <thead><tr style="text-align:left;border-bottom:1px solid #8884"><th>Status</th><th style="text-align:right">Tasks</th><th style="text-align:right">Weighted</th><th style="text-align:right">Pay</th></tr></thead>
        <tbody>${brk}</tbody>
      </table>
+     ${monthly}
      <div class="hint" style="margin-top:6px">Sums the <b>Weighted word count</b> column (weightingWordCountV2). Translation tasks only; bold row = current filter.</div>`;
 }
 
@@ -5229,6 +5288,7 @@ async function init() {
   $('pc-run').addEventListener('click', pcFetch);
   $('pc-rate').addEventListener('input', () => { if (PC.rows) pcRender(); });
   $('pc-status').addEventListener('change', () => { if (PC.rows) pcRender(); });
+  if ($('pc-datefield')) $('pc-datefield').addEventListener('change', (e) => { PC.dateField = e.target.value; if (PC.rows) pcRender(); });
   $('yc-detect').addEventListener('click', ycDetect);
   $('yc-harvest').addEventListener('click', ycHarvest);
   $('yc-propose').addEventListener('click', ycPropose);
