@@ -4228,6 +4228,82 @@ function starlingTaskUrl(tid) {
   const inner = '#/my-task?pageNum=1&pageSize=100&progress=all&translateTypeList=%5B%5D&taskIds=%5B%22' + t + '%22%5D';
   return 'https://starling.bytedance.com/#/outside/translate?taskid=' + encodeURIComponent(t) + '&from=station&fromUrl=' + encodeURIComponent(inner);
 }
+
+// ---- 🔎 Lookup — clitic-folded variant distribution -----------------------
+// Groups a corpus term's Hebrew renderings so inflections that differ only by a
+// leading clitic (ו/ב/ה/ל/כ/מ/ש) count as ONE variant, then shows each variant's
+// share. Folding is DATA-DRIVEN, not blind morphology: within a cluster a leading
+// letter is treated as a clitic (coloured, uncounted) only if the same word occurs
+// WITHOUT it elsewhere in the cluster — so the מ of משפחה (never seen as שפחה) is
+// left alone, while the ה of המשפחה (seen bare as משפחה) is folded and coloured.
+const LK_CLITIC = PM_HE_CLITIC;   // 'ובהלכמש'
+// Candidate bases of one word: the word itself + up to two leading clitics stripped
+// (kept ≥2 letters so we never strip a word down to a single letter).
+function lkBases(w) {
+  const out = [w]; let s = w;
+  for (let k = 0; k < 2; k++) { if (s.length >= 3 && LK_CLITIC.indexOf(s[0]) >= 0) { s = s.slice(1); out.push(s); } else break; }
+  return out;
+}
+// Cluster equal-length token arrays when every aligned word shares a base (clitic-tolerant).
+// Union-find over pairwise "all positions' base-sets intersect".
+function lkCluster(entries) {
+  const byLen = new Map();
+  entries.forEach((e, i) => { const L = e.toks.length; if (!byLen.has(L)) byLen.set(L, []); byLen.get(L).push(i); });
+  const parent = entries.map((_, i) => i);
+  const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+  const uni = (a, b) => { parent[find(a)] = find(b); };
+  for (const idxs of byLen.values()) {
+    const bs = idxs.map((i) => entries[i].toks.map((w) => new Set(lkBases(w))));
+    for (let a = 0; a < idxs.length; a++) for (let b = a + 1; b < idxs.length; b++) {
+      let ok = true;
+      for (let p = 0; p < bs[a].length; p++) { let hit = false; for (const x of bs[a][p]) if (bs[b][p].has(x)) { hit = true; break; } if (!hit) { ok = false; break; } }
+      if (ok) uni(idxs[a], idxs[b]);
+    }
+  }
+  const cl = new Map();
+  entries.forEach((e, i) => { const r = find(i); if (!cl.has(r)) cl.set(r, []); cl.get(r).push(e); });
+  return [...cl.values()];
+}
+// Render one cluster's representative surface, colouring the optional (clitic) prefix of each word.
+function lkClusterDisplay(members) {
+  const total = members.reduce((a, e) => a + e.n, 0);
+  const rep = members.slice().sort((a, b) => b.n - a.n || a.tgt.length - b.tgt.length || (a.tgt < b.tgt ? -1 : 1))[0];
+  const repToks = rep.toks;
+  const sameLen = members.every((m) => m.toks.length === repToks.length);
+  let html;
+  if (sameLen && repToks.length) {
+    html = repToks.map((w, p) => {
+      let common = new Set(lkBases(w));
+      for (const m of members) { const bset = new Set(lkBases(m.toks[p])); common = new Set([...common].filter((x) => bset.has(x))); }
+      // core = the LONGEST shared base that is still a suffix of w → strips only the truly-optional prefix.
+      let core = w;
+      for (const cand of [...common].sort((a, z) => z.length - a.length)) { if (w.endsWith(cand)) { core = cand; break; } }
+      const pre = w.slice(0, w.length - core.length);
+      return (pre ? `<span class="lk-clitic">${esc(pre)}</span>` : '') + esc(core);
+    }).join(' ');
+  } else { html = esc(rep.tgt); }
+  return { html, total, rep };
+}
+// Full distribution for the corpus sources matching the query.
+function lkVariantStats(sources) {
+  const surf = new Map();   // raw target surface -> total occurrences
+  for (const e of sources) for (const v of (e.variants || [])) { const t = String(v.tgt == null ? '' : v.tgt).trim(); if (!t) continue; surf.set(t, (surf.get(t) || 0) + (Number(v.n) || 1)); }
+  if (!surf.size) return null;
+  const entries = [...surf.entries()].map(([tgt, n]) => ({ tgt, n, toks: wbFold(tgt).split(/\s+/).filter(Boolean) }));
+  const grandTotal = entries.reduce((a, e) => a + e.n, 0) || 1;
+  const rows = lkCluster(entries).map((members) => { const d = lkClusterDisplay(members); return { html: d.html, n: d.total, pct: d.total / grandTotal, rep: d.rep.tgt }; })
+    .sort((a, b) => b.n - a.n || a.rep.length - b.rep.length);
+  return { rows, grandTotal, variants: rows.length };
+}
+// The stats block shown at the TOP of the corpus section.
+function lkStatsHtml(stats) {
+  const cap = 8, shown = stats.rows.slice(0, cap), rest = stats.rows.length - shown.length;
+  const bars = shown.map((r) => { const pct = Math.round(r.pct * 100);
+    return `<div class="lk-stat"><div class="lk-stat-he" dir="rtl">${r.html}</div><div class="lk-stat-track"><span style="width:${Math.max(2, pct)}%"></span></div><div class="lk-stat-pct">${pct}<span class="hint">% · ${r.n}</span></div></div>`;
+  }).join('');
+  return `<div class="lk-stats" title="How this term was translated across the corpus. Forms differing only by a leading clitic (ו/ב/ה/ל/כ/מ/ש) are grouped — the clitic is coloured and not counted as a separate variant. % = share of all ${stats.grandTotal} occurrence(s).">` +
+    bars + (rest > 0 ? `<div class="hint" style="margin-top:2px">+ ${rest} rarer variant${rest === 1 ? '' : 's'}</div>` : '') + `</div>`;
+}
 function lkSearch(q) {
   const out = $('lk-out'); if (!out) return;
   q = (q || '').trim();
@@ -4243,9 +4319,10 @@ function lkSearch(q) {
   if (CB.index && CB.index.sources) {
     const keys = Object.keys(CB.index.sources);
     if (enQ) {
-      const qtoks = pmEnTokens(q), segs = [], ex = [];
+      const qtoks = pmEnTokens(q), segs = [], ex = [], matched = [];
       for (const k of keys) {
         const e = CB.index.sources[k]; if (!lkSeq(pmEnTokens(e.src), qtoks)) continue;
+        matched.push(e);
         const vs = e.variants.slice().sort((a, b) => b.n - a.n); const top = vs[0];
         const tasks = new Set(); for (const v of e.variants) for (const t of Object.keys(v.tasks || {})) tasks.add(t);
         const tid0 = Object.keys(top.tasks || {})[0] || '';   // a task that produced this exact top translation
@@ -4254,8 +4331,9 @@ function lkSearch(q) {
       if (segs.length) {
         const tp = pmTopPhrase(segs), taskN = new Set(); segs.forEach((s) => s.tasks.forEach((t) => taskN.add(t)));
         if (tp) pref = tp.disp;   // real corpus surface (ביוטי), never the clitic-stripped base (יוטי)
+        const stats = lkVariantStats(matched);   // clitic-folded % distribution — shown on top
         html += `<div class="cb-sec"><div class="cb-h">📦 Corpus — “${esc(q)}” in ${segs.length} segment(s) · ${taskN.size} task(s)</div>` +
-          (tp ? `<div class="lk-hit">usually → <b dir="rtl">${esc(tp.disp)}</b> <span class="hint">(${Math.round(tp.cov * 100)}% of them)</span></div>` : '') +
+          (stats ? lkStatsHtml(stats) : (tp ? `<div class="lk-hit">usually → <b dir="rtl">${esc(tp.disp)}</b> <span class="hint">(${Math.round(tp.cov * 100)}% of them)</span></div>` : '')) +
           ex.map((x) => eg(x[0], x[1], x[2])).join('') + `</div>`;
       }
     }

@@ -168,6 +168,13 @@ textarea { font-family: ui-monospace, Menlo, Consolas, monospace; resize: vertic
 #pm-card > summary { color: #d8b56a; }
 #lk-card > summary { color: #6ab0f0; }
 .lk-hit { margin: 2px 0 4px; }
+.lk-stats { margin: 4px 0 8px; padding: 6px 8px; border: 1px solid var(--line, #333); border-radius: 8px; background: rgba(120,160,240,.06); }
+.lk-stat { display: grid; grid-template-columns: minmax(90px, 1.4fr) 2fr auto; gap: 8px; align-items: center; padding: 2px 0; }
+.lk-stat-he { font-size: .96em; font-weight: 600; }
+.lk-stat-track { height: 8px; border-radius: 4px; background: rgba(128,128,128,.22); overflow: hidden; }
+.lk-stat-track > span { display: block; height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--acc, #6366f1), var(--acc2, #8b5cf6)); }
+.lk-stat-pct { font-variant-numeric: tabular-nums; font-weight: 700; font-size: .9em; text-align: right; white-space: nowrap; }
+.lk-clitic { color: #f0883e; font-weight: 700; }
 .lk-eg { font-size: .9em; opacity: .85; padding: 3px 0 6px 14px; position: relative; line-height: 1.45; }
 .lk-eg::before { content: "•"; position: absolute; left: 2px; top: 3px; opacity: .5; }
 .lk-t { display: block; margin-top: 1px; }
