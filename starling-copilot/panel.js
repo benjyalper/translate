@@ -3701,7 +3701,7 @@ async function cbBuild(opts) {
     const index = (prior && prior.sources) ? prior : { builtAt: 0, taskCount: 0, pairCount: 0, tasksSeen: {}, sources: {}, plurals: {} };
     if (!index.sources) index.sources = {}; if (!index.tasksSeen) index.tasksSeen = {}; if (!index.plurals) index.plurals = {};
     const todo = tasks.filter((x) => force || !index.tasksSeen[x.id]);
-    if (!todo.length) { CB.index = index; cbClassify(); cbRender(); cbBadge(); cbInfo(`Corpus already covers all ${tasks.length} Submitted task(s) — nothing new. Tick “Rebuild” to redo from scratch.`, 'good'); return; }
+    if (!todo.length) { CB.index = index; cbClassify(); cbRender(); cbBadge(); clBadge(); cbInfo(`Corpus already covers all ${tasks.length} Submitted task(s) — nothing new. Tick “Rebuild” to redo from scratch.`, 'good'); return; }
     const CH = 6; let done = 0, failed = 0, skippedWip = 0;
     if ($('cb-bar')) $('cb-bar').style.width = '0%';
     for (let i = 0; i < todo.length; i += CH) {
@@ -3730,7 +3730,7 @@ async function cbBuild(opts) {
     index.taskCount = Object.keys(index.tasksSeen).length;
     index.pairCount = Object.values(index.tasksSeen).reduce((a, x) => a + (x.pairs || 0), 0);
     try { await store.set({ corpusIndex: index }); } catch (e) {}
-    CB.index = index; cbClassify(); cbRender(); cbBadge();
+    CB.index = index; cbClassify(); cbRender(); cbBadge(); clBadge();
     cbInfo(`Done — harvested ${done} new task(s)${skippedWip ? ` · ${skippedWip} in-progress skipped (<95%)` : ''}${failed ? ` · ${failed} failed` : ''}. ${Object.keys(index.sources).length} unique sources. Review below, then Apply.`, 'good');
   } catch (e) { cbInfo('Build failed: ' + (e.message || e), 'err'); }
   finally {
@@ -4204,6 +4204,165 @@ async function pmRefine() {
   }
 }
 
+// ---- 📚 LEARN FROM THE WHOLE CORPUS ---------------------------------------
+// One GPT pass over EVERY pair in the built corpus → rules, terms, expressions,
+// exceptions + conflicts, reconciled against the current brain. Two phases so it
+// stays careful AND cheap: (1) EXTRACT candidates from the pairs alone (no brain
+// in the prompt), recency-ordered newest-submitted-first with an evolution timeline
+// for sources you rendered several ways over time; (2) RECONCILE the deduped
+// candidates against the existing brain in one bounded pass — already-covered ones
+// are dropped, contradictions become ⚠ conflicts. Findings land in the same
+// Style-Brain review list (merge or discard); a full backup downloads first.
+const CL = { running: false, cancel: false };
+function clInfo(m, k) { info('cl-info', m, k || ''); }
+function clBadge() { const el = $('cl-badge'); if (!el) return; const ix = CB.index; el.textContent = (ix && ix.sources) ? `· ${Object.keys(ix.sources).length} sources ready` : '· build the corpus first'; }
+// Fetch getMyTasks once → map every task id to its first-submitted date (ms).
+// Same same-origin fetch the 💰 Word count uses; {} on failure → id-order fallback.
+async function clFetchDates() {
+  try {
+    const t = await wbActiveTab();
+    if (!t || !/^https:\/\/starling\.bytedance\.com\//.test(t.url || '')) return {};
+    const [r] = await chrome.scripting.executeScript({
+      target: { tabId: t.id },
+      func: async () => {
+        const parseDate = (v) => { if (v == null) return null; if (typeof v === 'number' && isFinite(v)) { const ms = v < 1e12 ? v * 1000 : v; const y = new Date(ms).getFullYear(); return (y >= 2000 && y <= 2100) ? ms : null; } if (typeof v === 'string' && v.trim()) { const s = v.trim(); if (/^\d{10}$/.test(s)) { const ms = Number(s) * 1000, y = new Date(ms).getFullYear(); return (y >= 2000 && y <= 2100) ? ms : null; } if (/^\d{13}$/.test(s)) { const ms = Number(s), y = new Date(ms).getFullYear(); return (y >= 2000 && y <= 2100) ? ms : null; } const t2 = Date.parse(s); if (!isNaN(t2)) { const y = new Date(t2).getFullYear(); return (y >= 2000 && y <= 2100) ? t2 : null; } } return null; };
+        try {
+          const res = await fetch('/api/task/getMyTasks?offset=0&limit=5000&progress=all&translateTypeList=%5B%5D&_=' + Date.now(), { credentials: 'include', cache: 'no-store' });
+          const j = await res.json(); const d = j.data || {};
+          const rows = (d.rows || []).map((x) => {
+            const ids = [], dates = {};
+            for (const k of Object.keys(x)) { const val = x[k]; const dd = parseDate(val); if (dd != null) dates[k] = dd; else if ((typeof val === 'number' || typeof val === 'string') && /^\d{10,13}$/.test(String(val))) ids.push(String(val)); }
+            return { ids, dates };
+          });
+          return { ok: true, rows };
+        } catch (e) { return { ok: false }; }
+      }
+    });
+    const out = r && r.result; if (!out || !out.ok) return {};
+    const fset = new Set(); for (const row of out.rows) for (const k of Object.keys(row.dates || {})) fset.add(k);
+    const field = pcPickDateField([...fset]);
+    const map = {};
+    for (const row of out.rows) { const dt = field ? row.dates[field] : null; if (dt == null) continue; for (const id of row.ids) { if (!(id in map) || dt > map[id]) map[id] = dt; } }
+    return map;
+  } catch (e) { return {}; }
+}
+// Latest submit date among the tasks that produced this variant (id fallback: Starling ids are ~monotonic).
+function clVariantDateMs(v, dateMap) {
+  let best = -1;
+  for (const tid of Object.keys(v.tasks || {})) { const d = dateMap[tid]; const val = (d != null) ? d : (parseInt(tid, 10) || 0); if (val > best) best = val; }
+  return best;
+}
+// Recency-ordered learn pairs. Canonical = newest rendering; contested sources carry a distinct-rendering timeline.
+function clGatherPairs(sources, dateMap, allSources) {
+  const pairs = [];
+  for (const k of Object.keys(sources)) {
+    const e = sources[k]; const vs = (e.variants || []).slice(); if (!vs.length) continue;
+    for (const v of vs) v._d = clVariantDateMs(v, dateMap);
+    vs.sort((a, b) => (b._d - a._d) || (b.n - a.n));
+    const canon = vs[0];
+    const contested = vs.length > 1 && vs.some((v) => wbFold(v.tgt) !== wbFold(canon.tgt));
+    if (!allSources && !contested) continue;
+    const pair = { src: e.src, tgt: canon.tgt, d: canon._d, contested: !!contested };
+    if (contested) {
+      const seen = new Set(), tl = [];
+      for (const v of vs.slice().sort((a, b) => a._d - b._d)) { const f = wbFold(v.tgt); if (!f || seen.has(f)) continue; seen.add(f); tl.push(v.tgt); }
+      if (tl.length > 1) pair.timeline = tl;
+    }
+    pairs.push(pair);
+  }
+  pairs.sort((a, b) => (b.d - a.d));   // newest submitted first
+  return pairs;
+}
+// Phase 1 — EXTRACT from the pairs alone (no existing brain shown; that's phase 2).
+function clSysExtract() {
+  return 'You learn TikTok Hebrew (he-IL) localization conventions from APPROVED en→he translation pairs — the submitted, proofread source of truth. Infer GENERALIZABLE, actionable conventions a translator/proofreader should reuse: term mappings, register/tone (e.g. singular gender-neutral slash form vs plural), punctuation, placeholder/tag handling, brand casing, and EXCEPTIONS (context-dependent choices). ' +
+    'The pairs are ordered NEWEST-submitted first — later work is more reviewed, so when pairs disagree prefer the newer wording. Some pairs show an EVOLUTION timeline (oldest→newest renderings of the SAME source): learn the CORRECTION it implies (as a rule or a glossary term), and if the difference is context-dependent, record it as an exception in "rules". ' +
+    'Output COMPACT rules (≤ ~30 words each, imperative and specific), each categorized as one of: ' + BRAIN_CATS.join(' | ') + '. Put exact recurring EN→HE term equivalences in "glossary" (with a short "note"). ' +
+    'Extract ONLY high-confidence patterns the pairs actually demonstrate — do NOT invent generic localization common sense. If the pairs CONTRADICT each other in a way newer-vs-older does not resolve, put it in "conflicts" with "conflictsWith" describing the clash and cite the evidence. ' +
+    'Keep Hebrew in Hebrew; never translate the rule text itself. Return ONLY JSON: {"rules":[{"cat":"…","text":"…"}],"glossary":[{"en":"…","he":"…","note":"…"}],"conflicts":[{"cat":"…","text":"…","conflictsWith":"…"}]}.';
+}
+// Phase 2 — RECONCILE candidate rules against the existing brain.
+function clSysReconcile() {
+  return 'You are reconciling CANDIDATE localization rules (distilled from a translation corpus) against an EXISTING, curated brain of rules. For each candidate: ' +
+    'if it is ALREADY COVERED by an existing rule (same substance, even if worded differently), DROP it. ' +
+    'If it CONTRADICTS an existing rule, output it under "conflicts" with "conflictsWith" naming/quoting the clashing existing rule. ' +
+    'Otherwise (genuinely new and compatible) keep it under "rules". ' +
+    'Do not invent new rules; only classify the candidates given. Keep Hebrew in Hebrew. Return ONLY JSON: {"rules":[{"cat":"…","text":"…"}],"conflicts":[{"cat":"…","text":"…","conflictsWith":"…"}]}.';
+}
+async function clGpt(key, model, sys, user, tempState) {
+  const callGpt = async () => {
+    const body = { model, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: sys }, { role: 'user', content: user }] };
+    if (!tempState.drop) body.temperature = 0.1;
+    const r = await fetch('https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await r.json(); if (!r.ok) throw new Error((data.error && data.error.message) || ('HTTP ' + r.status)); return data;
+  };
+  try { return await callGpt(); }
+  catch (e1) { if (!tempState.drop && /temperature/i.test(e1.message || '')) { tempState.drop = true; return await callGpt(); } throw e1; }
+}
+async function clRun() {
+  if (CL.running) return;
+  const key = await store.get('key', '');
+  if (!key) { clInfo('Add your OpenAI key in Settings first.', 'err'); if ($('settings')) $('settings').open = true; return; }
+  if (!CB.index || !CB.index.sources || !Object.keys(CB.index.sources).length) { clInfo('Build the 📦 Corpus first.', 'err'); return; }
+  const allSources = !($('cl-all') && !$('cl-all').checked);
+  clInfo('Reading submission dates…');
+  const dateMap = await clFetchDates();
+  const haveDates = Object.keys(dateMap).length;
+  const pairs = clGatherPairs(CB.index.sources, dateMap, allSources);
+  if (!pairs.length) { clInfo(allSources ? 'No pairs in the corpus.' : 'No contested/evolved sources — tick “All sources” to learn from everything.', 'err'); return; }
+  const batches = Math.ceil(pairs.length / HV_BATCH), contestedN = pairs.filter((p) => p.timeline).length;
+  if (!confirm(`Learn from ${pairs.length} corpus pair(s) — ~${batches} extraction call(s) on ${$('model').value}, then a short reconcile pass` + (contestedN ? `. ${contestedN} source(s) carry an evolution timeline` : '') + (haveDates ? '' : ' (no submit dates found — ordering by task id)') + `.\n\nA full backup of every brain downloads first. Findings go to the 🧠 Style Brain review list — nothing changes until you click Merge.\n\nProceed?`)) { clInfo('Cancelled.', ''); return; }
+  try { backupAll(); } catch (e) {}
+  CL.running = true; CL.cancel = false; if ($('cl-run')) $('cl-run').disabled = true; if ($('cl-cancel')) $('cl-cancel').hidden = false;
+  const model = $('model').value, temp = { drop: false };
+  const agg = { rules: [], glossary: [], conflicts: [] }; let done = 0;
+  try {
+    // Phase 1 — extract
+    for (let i = 0; i < pairs.length; i += HV_BATCH) {
+      if (CL.cancel) { clInfo(`Stopped at ${done}/${pairs.length}. Distilling what was gathered…`, 'err'); break; }
+      const chunk = pairs.slice(i, i + HV_BATCH);
+      clInfo(`Extracting ${i + 1}–${Math.min(i + HV_BATCH, pairs.length)} of ${pairs.length}…`);
+      const doc = chunk.map((p, j) => { let s = `${j + 1}. EN: ${p.src}\n   HE: ${p.tgt}`; if (p.timeline) s += `\n   (evolved oldest→newest: ${p.timeline.join('  →  ')})`; return s; }).join('\n');
+      const user = 'APPROVED en→he PAIRS (newest submitted first):\n' + doc;
+      let data; try { data = await clGpt(key, model, clSysExtract(), user, temp); } catch (e) { if (/401|invalid/i.test(e.message || '')) throw e; done = Math.min(i + HV_BATCH, pairs.length); continue; }
+      let o = {}; try { o = JSON.parse(data.choices[0].message.content); } catch (e) { done = Math.min(i + HV_BATCH, pairs.length); continue; }
+      (o.rules || []).forEach((x) => agg.rules.push(x)); (o.glossary || []).forEach((x) => agg.glossary.push(x)); (o.conflicts || []).forEach((x) => agg.conflicts.push(x));
+      done = Math.min(i + HV_BATCH, pairs.length);
+      if (i + HV_BATCH < pairs.length) await new Promise((r) => setTimeout(r, 120));
+    }
+    // Dedupe candidates
+    const seenR = new Set(), candRules = [];
+    for (const x of agg.rules) { const t = String(x.text || '').trim(); const kk = (x.cat || '') + '|' + wbNorm(t).toLowerCase(); if (!t || seenR.has(kk)) continue; seenR.add(kk); candRules.push({ cat: x.cat || 'misc', text: t }); }
+    const seenG = new Set(), glossary = [];
+    for (const x of agg.glossary) { const en = String(x.en || '').trim(), he = String(x.he || '').trim(); if (!en || !he) continue; const kk = en.toLowerCase(); if (seenG.has(kk)) continue; seenG.add(kk); glossary.push({ en, he, note: String(x.note || '').trim(), accept: true }); }
+    const seenC = new Set(), conflicts = [];
+    for (const x of agg.conflicts) { const t = String(x.text || '').trim(); const kk = wbNorm(t).toLowerCase(); if (!t || seenC.has(kk)) continue; seenC.add(kk); conflicts.push({ cat: x.cat || 'misc', text: t, conflictsWith: String(x.conflictsWith || '').trim(), accept: false }); }
+    // Phase 2 — reconcile candidate rules against the existing brain (bounded pass)
+    let keptRules = candRules.map((r) => ({ cat: r.cat, text: r.text, accept: true }));
+    const existingRules = (BRAIN.rules || []).map((r) => '- [' + r.cat + '] ' + r.text);
+    if (candRules.length && existingRules.length && !CL.cancel) {
+      const kept = [], REC = 60;
+      for (let i = 0; i < candRules.length; i += REC) {
+        clInfo(`Reconciling ${i + 1}–${Math.min(i + REC, candRules.length)} of ${candRules.length} candidates against your brain…`);
+        const cand = candRules.slice(i, i + REC).map((r, j) => `${j + 1}. [${r.cat}] ${r.text}`).join('\n');
+        const user = 'EXISTING BRAIN RULES:\n' + existingRules.join('\n') + '\n\nCANDIDATE RULES to classify:\n' + cand;
+        let data; try { data = await clGpt(key, model, clSysReconcile(), user, temp); } catch (e) { kept.push(...candRules.slice(i, i + REC)); continue; }
+        let o = {}; try { o = JSON.parse(data.choices[0].message.content); } catch (e) { kept.push(...candRules.slice(i, i + REC)); continue; }
+        (o.rules || []).forEach((x) => { const t = String(x.text || '').trim(); if (t) kept.push({ cat: x.cat || 'misc', text: t }); });
+        (o.conflicts || []).forEach((x) => { const t = String(x.text || '').trim(); if (t) conflicts.push({ cat: x.cat || 'misc', text: t, conflictsWith: String(x.conflictsWith || '').trim(), accept: false }); });
+        if (i + REC < candRules.length) await new Promise((r) => setTimeout(r, 120));
+      }
+      // re-dedupe kept rules
+      const s2 = new Set(); keptRules = [];
+      for (const x of kept) { const kk = (x.cat || '') + '|' + wbNorm(x.text).toLowerCase(); if (s2.has(kk)) continue; s2.add(kk); keptRules.push({ cat: x.cat || 'misc', text: x.text, accept: true }); }
+    }
+    brainProposal = { rules: keptRules, glossary, conflicts, sourceLabel: 'corpus learn (' + done + ' pairs)' };
+    brainRenderReview(); if ($('brain-card')) $('brain-card').open = true; const bp = $('brain-review'); if (bp) bp.scrollIntoView({ block: 'nearest' });
+    clInfo(`From ${done} pair(s): ${keptRules.length} new rule(s) · ${glossary.length} term(s)${conflicts.length ? ` · ⚠ ${conflicts.length} conflict(s)` : ''} — review & merge in 🧠 Style Brain above, or Discard to keep the brain as-is (a backup was downloaded first).`, 'good');
+  } catch (e) { clInfo('Corpus learn failed: ' + (e.message || e), 'err'); }
+  finally { CL.running = false; if ($('cl-run')) $('cl-run').disabled = false; if ($('cl-cancel')) $('cl-cancel').hidden = true; }
+}
+
 // ---- 🔎 LOOKUP: "how do I normally translate this?" across every brain -----
 // Read-only concordance. EN query → the corpus's dominant rendering + examples,
 // plus matching memory / glossary / locked / auto-fix. HE query → reverse (where
@@ -4416,7 +4575,7 @@ async function restoreAll(file) {
     if (o.lockedTerms) { LOCK = o.lockedTerms; if (!LOCK.terms) LOCK.terms = []; await lockSave(); lockRefresh(); }
     if (o.autoFix) { FIX = o.autoFix; if (!FIX.rules) FIX.rules = []; await fixSave(); fixRefresh(); }
     if (o.pluralMemory) { PM = o.pluralMemory; if (!PM.map) PM.map = {}; await pmSave(); }
-    if (o.corpusIndex) { CB.index = o.corpusIndex; try { await store.set({ corpusIndex: CB.index }); } catch (e) {} cbClassify(); cbRender(); cbBadge(); }
+    if (o.corpusIndex) { CB.index = o.corpusIndex; try { await store.set({ corpusIndex: CB.index }); } catch (e) {} cbClassify(); cbRender(); cbBadge(); clBadge(); }
     cbInfo('Restored all brains from the backup. (The pre-restore state was also downloaded, just in case.)', 'good');
   } catch (e) { cbInfo('Restore failed: ' + (e.message || e), 'err'); }
 }
@@ -5264,6 +5423,9 @@ async function init() {
   if ($('cb-backup')) $('cb-backup').addEventListener('click', backupAll);
   if ($('cb-restore')) $('cb-restore').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) restoreAll(f); e.target.value = ''; });
   if ($('pm-run')) $('pm-run').addEventListener('click', pmRun);   // 🔤 phrase mining
+  if ($('cl-run')) $('cl-run').addEventListener('click', clRun);   // 📚 learn from whole corpus
+  if ($('cl-cancel')) $('cl-cancel').addEventListener('click', () => { CL.cancel = true; });
+  clBadge();
   if ($('lk-q')) { let lkT = null; $('lk-q').addEventListener('input', (e) => { clearTimeout(lkT); const v = e.target.value; lkT = setTimeout(() => lkSearch(v), 180); }); }   // 🔎 lookup
 
   $('harvest').addEventListener('click', doHarvest);
