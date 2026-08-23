@@ -4688,6 +4688,9 @@ async function plWrite() {
 // ---- Style Brain: ingest UI (paste / grab) → distill → review → merge ------
 const BRAIN_CATS = ['register', 'address', 'punctuation', 'tone', 'numbers', 'format', 'placeholders', 'glossary', 'misc'];
 let brainProposal = null;   // { rules:[{cat,text,accept}], glossary:[{en,he,note,accept}], conflicts:[{cat,text,conflictsWith,accept}] }
+// Persist a pending review proposal (e.g. a corpus-learn run's findings) so it survives closing the panel.
+function bpSave() { try { store.set({ brainReview: brainProposal || null }); } catch (e) {} }
+async function bpLoad() { try { const p = await store.get('brainReview', null); if (p && ((p.rules && p.rules.length) || (p.glossary && p.glossary.length) || (p.conflicts && p.conflicts.length))) brainProposal = p; } catch (e) {} return brainProposal; }
 const brainUid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 function brainInfo(msg, kind) { info('brain-info', msg, kind || ''); }
 
@@ -4745,6 +4748,7 @@ async function brainDistill() {
 }
 
 function brainRenderReview() {
+  bpSave();   // persist the current proposal (or clear storage when null) so a review survives closing the panel
   const box = $('brain-review'); if (!box) return;
   if (!brainProposal) { box.hidden = true; return; }
   const P = brainProposal;
@@ -4762,7 +4766,7 @@ function brainRenderReview() {
     (t === 'rule' ? P.rules : t === 'gloss' ? P.glossary : P.conflicts)[i].accept = cb.checked;
   }));
   if ($('brain-merge')) $('brain-merge').addEventListener('click', brainMerge);
-  if ($('brain-discard')) $('brain-discard').addEventListener('click', () => { brainProposal = null; box.hidden = true; brainInfo('Discarded — nothing was added.', ''); });
+  if ($('brain-discard')) $('brain-discard').addEventListener('click', () => { brainProposal = null; bpSave(); box.hidden = true; brainInfo('Discarded — nothing was added.', ''); });
 }
 
 async function brainMerge() {
@@ -4781,7 +4785,7 @@ async function brainMerge() {
   }
   await brainSave();
   const n = addR.length + (addG.length - clashes.length);
-  brainProposal = null; $('brain-review').hidden = true; $('brain-input').value = ''; brainRefresh();
+  brainProposal = null; bpSave(); $('brain-review').hidden = true; $('brain-input').value = ''; brainRefresh();
   if (clashes.length) confAdd(clashes);
   brainInfo(`Merged ${n} item(s). Brain now has ${BRAIN.rules.length} rules · ${BRAIN.glossary.length} terms — active on the next Run.` + (clashes.length ? ` ⚠ ${clashes.length} term(s) clash with an existing entry — resolve them in the orange ⚠ panel.` : ''), clashes.length ? 'err' : 'good');
 }
@@ -5017,7 +5021,10 @@ async function lrnDistill() {
 // Fed by: lrnToMemory (memory), brainMerge (distilled glossary), and the manual add fields.
 let CONF = [];   // {kind:'mem'|'gloss'|'plural'|'lockmem', label?, en?, note?, source?, srcKey?, src?, oldVal?, newVal?, memVal?, lockEn?, lockHe?}
 function confInfo(m, k) { info('conf-info', m, k || ''); }
-function confAdd(items) { for (const it of items) CONF.push(it); confRender(); }
+// Persist the orange conflict tickets so unresolved ones survive closing the panel / reloading the extension.
+function confSave() { try { store.set({ conflicts: CONF }); } catch (e) {} }
+async function confLoad() { try { const c = await store.get('conflicts', []); if (Array.isArray(c)) CONF = c; } catch (e) {} return CONF; }
+function confAdd(items) { for (const it of items) CONF.push(it); confSave(); confRender(); }
 function confRender() {
   const box = $('conf-card'); if (!box) return;
   if (!CONF.length) { box.hidden = true; if ($('conf-list')) $('conf-list').innerHTML = ''; if ($('conf-count')) $('conf-count').textContent = ''; return; }
@@ -5069,7 +5076,7 @@ async function confResolve(i, keep) {
     if (c.kind === 'mem') { TM.map[c.srcKey] = { src: c.src, tgt: val, ts: Date.now(), n: 1 }; await tmSave(); tmRefresh(); }
     else { BRAIN.glossary = (BRAIN.glossary || []).filter((g) => (g.en || '').toLowerCase() !== c.en.toLowerCase()); BRAIN.glossary.push({ id: brainUid(), en: c.en, he: val, note: c.note || '', source: c.source || 'adjudicated', ts: Date.now() }); await brainSave(); brainRefresh(); }
   }
-  CONF.splice(i, 1); confRender();
+  CONF.splice(i, 1); confSave(); confRender();
   confInfo(CONF.length ? `Saved. ${CONF.length} conflict(s) left.` : 'Saved. All conflicts resolved.', 'good');
 }
 
@@ -5367,6 +5374,10 @@ async function init() {
 
   // Locked terms (mandatory "must" glossary)
   await lockLoad(); lockRefresh();
+
+  // Restore unresolved conflict tickets + any pending review proposal (so they survive closing the panel).
+  await confLoad(); confRender();
+  await bpLoad(); if (brainProposal) { brainRenderReview(); if ($('brain-card')) $('brain-card').open = true; }
   if ($('lock-add')) $('lock-add').addEventListener('click', async () => {
     const en = ($('lock-en').value || '').trim(), he = ($('lock-he').value || '').trim(), note = ($('lock-note').value || '').trim();
     if (!en || !he) { lockInfo('Both EN and HE are required for a locked term.', 'err'); return; }
