@@ -4363,6 +4363,76 @@ async function clRun() {
   finally { CL.running = false; if ($('cl-run')) $('cl-run').disabled = false; if ($('cl-cancel')) $('cl-cancel').hidden = true; }
 }
 
+// ---- 🧹 CONSOLIDATE RULES -------------------------------------------------
+// One GPT pass over the EXISTING Style-Brain rules (per category) that merges
+// duplicates, drops near-repeats and tightens wording WITHOUT losing coverage —
+// so a brain that's grown to thousands of rules stays tight enough for GPT to
+// actually follow (and cheap to send). Glossary / locked / memory / auto-fix are
+// untouched. Auto-backs-up first; you review the result and click Replace.
+const CLS = { result: null, running: false, cancel: false };
+function clsInfo(m, k) { info('cls-info', m, k || ''); }
+function clsBadge() { const el = $('cls-n'); if (el) el.textContent = (BRAIN && BRAIN.rules) ? BRAIN.rules.length : 0; }
+function clsSys() {
+  return 'You consolidate a large set of he-IL (Hebrew) TikTok localization RULES into a MINIMAL, non-redundant ruleset a translator/proofreader follows. Merge rules that mean the same thing, drop exact and near duplicates, and tighten each to <= ~25 words, imperative and specific. KEEP every DISTINCT piece of guidance — never lose coverage and never invent new rules. If two rules genuinely contradict, keep the more specific / more actionable one and record the drop in "notes". Preserve all Hebrew verbatim; never translate the rule text. Return ONLY JSON: {"rules":[{"cat":"…","text":"…"}],"notes":[{"text":"…"}]} — notes briefly describe the merges, drops and contradictions.';
+}
+// Consolidate one category's rule texts — chunked, with a final cross-chunk merge pass.
+async function clsConsolidateList(key, model, cat, texts, temp, notes) {
+  const CHUNK = 100;
+  const runOnce = async (list) => {
+    const user = 'CATEGORY: ' + cat + '\nRULES:\n' + list.map((t, i) => `${i + 1}. ${t}`).join('\n');
+    let data; try { data = await clGpt(key, model, clsSys(), user, temp); } catch (e) { if (/401|invalid/i.test(e.message || '')) throw e; return list.map((t) => ({ cat, text: t })); }
+    let o = {}; try { o = JSON.parse(data.choices[0].message.content); } catch (e) { return list.map((t) => ({ cat, text: t })); }
+    (o.notes || []).forEach((n) => { const t = String(n.text || '').trim(); if (t) notes.push(t); });
+    const rules = (o.rules || []).map((r) => ({ cat: (r.cat || cat), text: String(r.text || '').trim() })).filter((r) => r.text);
+    return rules.length ? rules : list.map((t) => ({ cat, text: t }));
+  };
+  if (texts.length <= CHUNK) return await runOnce(texts);
+  const acc = [];
+  for (let i = 0; i < texts.length; i += CHUNK) { if (CLS.cancel) break; clsInfo(`Consolidating [${cat}] ${i + 1}–${Math.min(i + CHUNK, texts.length)} of ${texts.length}…`); acc.push(...await runOnce(texts.slice(i, i + CHUNK))); }
+  const accTexts = acc.map((r) => r.text);
+  if (accTexts.length > 1 && accTexts.length <= CHUNK && !CLS.cancel) { clsInfo(`Merging [${cat}] across chunks…`); return await runOnce(accTexts); }
+  return acc;
+}
+async function clsRun() {
+  if (CLS.running) return;
+  const key = await store.get('key', ''); if (!key) { clsInfo('Add your OpenAI key in Settings first.', 'err'); if ($('settings')) $('settings').open = true; return; }
+  const rules = (BRAIN.rules || []); if (rules.length < 8) { clsInfo(`Only ${rules.length} rule(s) — consolidation is only worth it on a big brain.`, 'err'); return; }
+  if (!confirm(`Consolidate ${rules.length} rules with ${$('model').value}? A full brain backup downloads first; you review the result and click Replace — nothing changes until then. Proceed?`)) { clsInfo('Cancelled.', ''); return; }
+  try { backupAll(); } catch (e) {}
+  CLS.running = true; CLS.cancel = false; if ($('cls-run')) $('cls-run').disabled = true; if ($('cls-cancel')) $('cls-cancel').hidden = false;
+  const model = $('model').value, temp = { drop: false };
+  const byCat = new Map(); for (const r of rules) { const c = r.cat || 'misc'; if (!byCat.has(c)) byCat.set(c, []); byCat.get(c).push(String(r.text || '').trim()); }
+  const outRules = [], notes = [];
+  try {
+    for (const [cat, texts] of byCat) { if (CLS.cancel) break; outRules.push(...await clsConsolidateList(key, model, cat, texts, temp, notes)); }
+    const seen = new Set(), finalRules = [];
+    for (const r of outRules) { const t = String(r.text || '').trim(); if (!t) continue; const kk = (r.cat || 'misc') + '|' + wbNorm(t).toLowerCase(); if (seen.has(kk)) continue; seen.add(kk); finalRules.push({ cat: r.cat || 'misc', text: t }); }
+    CLS.result = { before: rules.length, rules: finalRules, notes };
+    clsRender();
+    clsInfo(`Consolidated ${rules.length} → ${finalRules.length} rule(s)${CLS.cancel ? ' (cancelled — partial)' : ''}. Review below, then Replace (a backup was downloaded first).`, 'good');
+  } catch (e) { clsInfo('Consolidate failed: ' + (e.message || e), 'err'); }
+  finally { CLS.running = false; if ($('cls-run')) $('cls-run').disabled = false; if ($('cls-cancel')) $('cls-cancel').hidden = true; }
+}
+function clsRender() {
+  const box = $('cls-review'); if (!box) return; const R = CLS.result; if (!R) { box.hidden = true; return; }
+  const rows = R.rules.map((r, i) => `<div class="bl-row"><button class="cls-del" data-i="${i}" title="Drop this consolidated rule (keeps your current brain until you Replace)">✕</button><span class="bi-cat">${esc(r.cat)}</span><span class="bi-text" dir="auto">${esc(r.text)}</span></div>`).join('');
+  const notes = R.notes.length ? `<details class="sub" style="margin-top:6px"><summary>What changed — ${R.notes.length} note(s)</summary>${R.notes.slice(0, 300).map((n) => `<div class="hint" dir="auto">• ${esc(n)}</div>`).join('')}</details>` : '';
+  box.innerHTML = `<div class="brain-sec">Consolidated ruleset — ${R.before} → <b>${R.rules.length}</b> rules (drop any with ✕ before replacing)</div><div class="brain-list">${rows}</div>${notes}<div class="row" style="margin-top:6px"><button id="cls-apply" class="btn sm">✅ Replace all rules with these ${R.rules.length}</button><button id="cls-discard" class="btn sm ghost">Discard</button></div>`;
+  box.hidden = false;
+  box.querySelectorAll('.cls-del').forEach((b) => b.addEventListener('click', () => { CLS.result.rules.splice(+b.dataset.i, 1); clsRender(); }));
+  if ($('cls-apply')) $('cls-apply').addEventListener('click', clsApply);
+  if ($('cls-discard')) $('cls-discard').addEventListener('click', () => { CLS.result = null; box.hidden = true; clsInfo('Discarded — your rules are unchanged.', ''); });
+}
+async function clsApply() {
+  const R = CLS.result; if (!R || !R.rules.length) { clsInfo('Nothing to apply.', 'err'); return; }
+  if (!confirm(`Replace your ${R.before} rules with these ${R.rules.length}? Glossary, locked terms, memory and auto-fix are untouched. The pre-consolidation backup is already in your Downloads, so this is reversible. Proceed?`)) return;
+  const now = Date.now();
+  BRAIN.rules = R.rules.map((r) => ({ id: brainUid(), cat: r.cat || 'misc', text: r.text, source: 'consolidated', ts: now }));
+  await brainSave(); brainRefresh(); clsBadge();
+  const before = R.before; CLS.result = null; if ($('cls-review')) $('cls-review').hidden = true;
+  clsInfo(`Replaced. Brain now has ${BRAIN.rules.length} rules (was ${before}) — active on the next Run.`, 'good');
+}
+
 // ---- 🔎 LOOKUP: "how do I normally translate this?" across every brain -----
 // Read-only concordance. EN query → the corpus's dominant rendering + examples,
 // plus matching memory / glossary / locked / auto-fix. HE query → reverse (where
@@ -4699,6 +4769,7 @@ function brainRefresh() {
   const badge = $('brain-badge'); if (badge) badge.textContent = (rn || gn) ? `· ${rn} rules · ${gn} terms` : '· empty (built-in guide only)';
   if ($('brain-rules-n')) $('brain-rules-n').textContent = rn;
   if ($('brain-gloss-n')) $('brain-gloss-n').textContent = gn;
+  clsBadge();   // keep the 🧹 Consolidate button's rule count in sync
   const list = $('brain-list'); if (!list) return;
   const q = (($('brain-search') && $('brain-search').value) || '').trim().toLowerCase();
   const rMatch = (r) => !q || `${r.cat || ''} ${r.text || ''}`.toLowerCase().includes(q);
@@ -5437,6 +5508,9 @@ async function init() {
   if ($('cl-run')) $('cl-run').addEventListener('click', clRun);   // 📚 learn from whole corpus
   if ($('cl-cancel')) $('cl-cancel').addEventListener('click', () => { CL.cancel = true; });
   clBadge();
+  if ($('cls-run')) $('cls-run').addEventListener('click', clsRun);   // 🧹 consolidate rules
+  if ($('cls-cancel')) $('cls-cancel').addEventListener('click', () => { CLS.cancel = true; });
+  clsBadge();
   if ($('lk-q')) { let lkT = null; $('lk-q').addEventListener('input', (e) => { clearTimeout(lkT); const v = e.target.value; lkT = setTimeout(() => lkSearch(v), 180); }); }   // 🔎 lookup
 
   $('harvest').addEventListener('click', doHarvest);

@@ -98,6 +98,13 @@
           <button id="hv-distill" class="btn sm">🧠 Distill rules &amp; terms (review)</button>
         </div>
       </details>
+      <details class="sub" id="brain-consolidate">
+        <summary>🧹 Consolidate rules <span class="hint">— merge duplicates &amp; tighten</span></summary>
+        <p class="hint">One GPT pass over your <b>existing</b> rules, per category: merges rules that say the same thing, drops near-duplicates, and tightens wording — <b>without losing coverage</b>. Why it matters: a brain applied as a 1,000+-line wall gets <b>skimmed</b> by GPT (attention dilution) and costs a fortune to send on every batch; a tight ruleset is actually followed. Glossary, locked terms, memory and auto-fix are left untouched. A <b>full backup downloads first</b>; you review the result and click Replace — nothing changes until then, and the backup makes it reversible.</p>
+        <div class="row" style="margin-top:6px"><button id="cls-run" class="btn sm">🧹 Consolidate <span id="cls-n"></span> rules</button><button id="cls-cancel" class="btn sm ghost" hidden>Cancel</button></div>
+        <div id="cls-info" class="info"></div>
+        <div id="cls-review" hidden style="margin-top:8px"></div>
+      </details>
       <details class="sub" id="brain-manual">
         <summary>➕ Add a rule / term manually</summary>
         <p class="hint">Type a rule (pick a category) or an EN→HE term and it's merged straight into the brain — no GPT, no doc needed. Active on the next Run.</p>
