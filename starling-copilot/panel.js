@@ -4370,6 +4370,10 @@ async function clRun() {
 // actually follow (and cheap to send). Glossary / locked / memory / auto-fix are
 // untouched. Auto-backs-up first; you review the result and click Replace.
 const CLS = { result: null, running: false, cancel: false };
+// Persist the pending consolidate review so it survives closing/reopening the panel
+// (like the corpus-learn tickets). Only the un-applied proposal is stored; Replace/Discard clear it.
+function clsSave() { try { store.set({ consolidateReview: CLS.result || null }); } catch (e) {} }
+async function clsLoad() { try { const r = await store.get('consolidateReview', null); if (r && r.rules && r.rules.length) CLS.result = r; } catch (e) {} return CLS.result; }
 function clsInfo(m, k) { info('cls-info', m, k || ''); }
 function clsBadge() { const el = $('cls-n'); if (el) el.textContent = (BRAIN && BRAIN.rules) ? BRAIN.rules.length : 0; }
 function clsSys() {
@@ -4408,6 +4412,7 @@ async function clsRun() {
     const seen = new Set(), finalRules = [];
     for (const r of outRules) { const t = String(r.text || '').trim(); if (!t) continue; const kk = (r.cat || 'misc') + '|' + wbNorm(t).toLowerCase(); if (seen.has(kk)) continue; seen.add(kk); finalRules.push({ cat: r.cat || 'misc', text: t }); }
     CLS.result = { before: rules.length, rules: finalRules, notes };
+    clsSave();
     clsRender();
     clsInfo(`Consolidated ${rules.length} → ${finalRules.length} rule(s)${CLS.cancel ? ' (cancelled — partial)' : ''}. Review below, then Replace (a backup was downloaded first).`, 'good');
   } catch (e) { clsInfo('Consolidate failed: ' + (e.message || e), 'err'); }
@@ -4419,9 +4424,9 @@ function clsRender() {
   const notes = R.notes.length ? `<details class="sub" style="margin-top:6px"><summary>What changed — ${R.notes.length} note(s)</summary>${R.notes.slice(0, 300).map((n) => `<div class="hint" dir="auto">• ${esc(n)}</div>`).join('')}</details>` : '';
   box.innerHTML = `<div class="brain-sec">Consolidated ruleset — ${R.before} → <b>${R.rules.length}</b> rules (drop any with ✕ before replacing)</div><div class="brain-list">${rows}</div>${notes}<div class="row" style="margin-top:6px"><button id="cls-apply" class="btn sm">✅ Replace all rules with these ${R.rules.length}</button><button id="cls-discard" class="btn sm ghost">Discard</button></div>`;
   box.hidden = false;
-  box.querySelectorAll('.cls-del').forEach((b) => b.addEventListener('click', () => { CLS.result.rules.splice(+b.dataset.i, 1); clsRender(); }));
+  box.querySelectorAll('.cls-del').forEach((b) => b.addEventListener('click', () => { CLS.result.rules.splice(+b.dataset.i, 1); clsSave(); clsRender(); }));
   if ($('cls-apply')) $('cls-apply').addEventListener('click', clsApply);
-  if ($('cls-discard')) $('cls-discard').addEventListener('click', () => { CLS.result = null; box.hidden = true; clsInfo('Discarded — your rules are unchanged.', ''); });
+  if ($('cls-discard')) $('cls-discard').addEventListener('click', () => { CLS.result = null; clsSave(); box.hidden = true; clsInfo('Discarded — your rules are unchanged.', ''); });
 }
 async function clsApply() {
   const R = CLS.result; if (!R || !R.rules.length) { clsInfo('Nothing to apply.', 'err'); return; }
@@ -4429,7 +4434,7 @@ async function clsApply() {
   const now = Date.now();
   BRAIN.rules = R.rules.map((r) => ({ id: brainUid(), cat: r.cat || 'misc', text: r.text, source: 'consolidated', ts: now }));
   await brainSave(); brainRefresh(); clsBadge();
-  const before = R.before; CLS.result = null; if ($('cls-review')) $('cls-review').hidden = true;
+  const before = R.before; CLS.result = null; clsSave(); if ($('cls-review')) $('cls-review').hidden = true;
   clsInfo(`Replaced. Brain now has ${BRAIN.rules.length} rules (was ${before}) — active on the next Run.`, 'good');
 }
 
@@ -5449,6 +5454,7 @@ async function init() {
   // Restore unresolved conflict tickets + any pending review proposal (so they survive closing the panel).
   await confLoad(); confRender();
   await bpLoad(); if (brainProposal) { brainRenderReview(); if ($('brain-card')) $('brain-card').open = true; }
+  await clsLoad(); if (CLS.result) { clsRender(); if ($('brain-card')) $('brain-card').open = true; if ($('brain-consolidate')) $('brain-consolidate').open = true; }
   if ($('lock-add')) $('lock-add').addEventListener('click', async () => {
     const en = ($('lock-en').value || '').trim(), he = ($('lock-he').value || '').trim(), note = ($('lock-note').value || '').trim();
     if (!en || !he) { lockInfo('Both EN and HE are required for a locked term.', 'err'); return; }
