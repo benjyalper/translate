@@ -735,6 +735,98 @@ async function consistLock(en, he) {
   return { ok: true, msg: `Locked: “${en}” → “${he}”.` };
 }
 
+// ---- TERM BASE: Starling's own inline term references ---------------------
+// Starling underlines source words that have an approved term entry (span.highlight-text-term);
+// hovering shows EN→HE + part-of-speech + a DNT ("do not translate") / Brand-name flag.
+// "⬇ Grab term base" reads them straight from the open task (MAIN-world React vnode — the
+// popover data is preloaded, no hovering needed) and splits them into two tiers:
+//   • DNT / brand terms  → routed into 🔒 Locked terms as keep-as-is (strict; lockCheck enforces).
+//   • translatable terms → kept HERE as SOFT hints: injected per-segment into the GPT prompt as a
+//     PREFERRED default that may bend when grammar/context requires (a Noun used as a verb,
+//     "due to"→עקב, …), and surfaced as a review flag on deviation — never forced.
+// The whole thing is gated by TB.enabled (the toggle) — off = the term base is ignored on Run.
+let TB = { enabled: true, terms: [], updatedAt: 0 };
+async function tbLoad() { try { TB = await store.get('termBase', { enabled: true, terms: [], updatedAt: 0 }); } catch (e) {} if (!TB || !TB.terms) TB = { enabled: true, terms: [], updatedAt: 0 }; if (TB.enabled === undefined) TB.enabled = true; return TB; }
+async function tbSave() { TB.updatedAt = Date.now(); try { await store.set({ termBase: TB }); } catch (e) {} }
+function tbCount() { return TB && TB.terms ? TB.terms.length : 0; }
+function tbUid() { return 'tb' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
+// Translatable terms whose EN appears in this source (boundary-aware) → the per-segment hint list.
+function tbHintsFor(src) {
+  if (!TB || !TB.enabled || !(TB.terms || []).length) return [];
+  const out = [];
+  for (const t of TB.terms) { if (t && t.en && t.he && lockSrcHas(src, t.en)) { const h = { en: t.en, he: t.he }; if (t.pos) h.pos = t.pos; out.push(h); } }
+  return out;
+}
+// Post-run SOFT flag: a term's approved HE is absent from the target. Context may legitimately
+// explain it (verb form, different sense) — so this is review-only, never a rewrite.
+function tbCheck(proposals) {
+  for (const p of proposals) p.termHint = null;
+  if (!TB || !TB.enabled || !(TB.terms || []).length) return;
+  for (const p of proposals) {
+    if (p.manual) continue;
+    const miss = [];
+    for (const t of TB.terms) {
+      if (!t.en || !t.he) continue;
+      if (lockSrcHas(p.src, t.en) && !lockTgtHas(p.next, t.he)) miss.push({ en: t.en, he: t.he });
+    }
+    p.termHint = miss.length ? miss : null;
+  }
+}
+// Read the open task's term references from the page's MAIN world (executeScript world:'MAIN'
+// — the popover data is preloaded on each span's React vnode, so no hover simulation is needed).
+async function tbGrab() {
+  const t = await activeTab();
+  if (!t) { tbInfo('Open your Starling task tab first.', 'err'); return; }
+  tbInfo('Reading term references from the task…');
+  let scraped = [];
+  try {
+    const [r] = await chrome.scripting.executeScript({
+      target: { tabId: t.id },
+      world: 'MAIN',
+      func: () => {
+        const POS = /^(Noun|Verb|Proper noun|Adjective|Adverb|Phrase|Abbreviation|Pronoun|Preposition|Interjection)$/i;
+        const getVnode = (span) => { const fk = Object.keys(span).find((k) => k.startsWith('__reactFiber$')); if (!fk) return null; let f = span[fk], hops = 0; while (f && hops < 8) { const p = f.memoizedProps; if (p && p.content && p.content.$$typeof) return p.content; f = f.return; hops++; } return null; };
+        const leavesOf = (n, d, out) => { if (!n || d > 16) return; if (typeof n === 'string') { const s = n.trim(); if (s) out.push(s); return; } if (Array.isArray(n)) { n.forEach((x) => leavesOf(x, d + 1, out)); return; } if (typeof n === 'object' && n.props) leavesOf(n.props.children, d + 1, out); };
+        const parse = (word, texts) => {
+          const dnt = texts.includes('DNT') || texts.includes('Brand name');
+          const entries = [];
+          for (let i = 0; i < texts.length; i++) { if (texts[i] === '->' || texts[i] === '→') { const en = (i > 0 ? texts[i - 1] : '') || '', he = (i + 1 < texts.length ? texts[i + 1] : '') || ''; if (en && !POS.test(en) && en !== 'DNT' && en !== 'Brand name') entries.push({ en, he }); } }
+          let ent = entries.find((e) => e.en.toLowerCase() === word.toLowerCase()) || entries[0] || null;
+          let he = ent ? ent.he : (dnt ? word : '');
+          if (dnt && (!he || he === 'Brand name')) he = word;
+          const pos = texts.find((x) => POS.test(x)) || '';
+          const def = texts.find((x) => /\s/.test(x) && x.length > 15 && !POS.test(x)) || '';
+          return { en: word, he, pos, dnt, def };
+        };
+        const spans = Array.from(document.querySelectorAll('span.highlight-text-term'));
+        const map = new Map();
+        for (const sp of spans) { const word = (sp.textContent || '').trim(); if (!word) continue; const vn = getVnode(sp); if (!vn) continue; const texts = []; leavesOf(vn, 0, texts); const e = parse(word, texts); const key = word.toLowerCase(); if (!map.has(key) && e.he) map.set(key, e); }
+        return [...map.values()];
+      }
+    });
+    scraped = (r && r.result) || [];
+  } catch (e) { tbInfo('Scrape failed: ' + e.message + ' — open the task’s String editor and try again.', 'err'); return; }
+  if (!scraped.length) { tbInfo('No term references found here. Open a task’s String editor — terms are the dotted-underline words in the Source column.', 'err'); return; }
+  let softN = 0, lockedN = 0, updatedN = 0, alreadyN = 0;
+  for (const e of scraped) {
+    const en = String(e.en || '').trim(); if (!en) continue;
+    if (e.dnt) {                                   // DNT / brand → 🔒 Locked (keep-as-is, dedupe by en)
+      if (!(LOCK.terms || []).some((x) => (x.en || '').toLowerCase() === en.toLowerCase())) { LOCK.terms.push({ id: brainUid(), en, he: (String(e.he || '').trim() || en), note: 'DNT · term base', ts: Date.now() }); lockedN++; }
+      else alreadyN++;                             // DNT term already in 🔒 Locked — dedupe, but report it (not a miss)
+    } else {                                        // translatable → soft term hint (overwrite same en)
+      const he = String(e.he || '').trim(); if (!he) continue;
+      const prev = (TB.terms || []).find((x) => (x.en || '').toLowerCase() === en.toLowerCase());
+      if (prev && wbFold(prev.he) !== wbFold(he)) updatedN++;
+      TB.terms = (TB.terms || []).filter((x) => (x.en || '').toLowerCase() !== en.toLowerCase());
+      TB.terms.push({ id: tbUid(), en, he, pos: e.pos || '', def: e.def || '', ts: Date.now() });
+      softN++;
+    }
+  }
+  await tbSave(); if (lockedN) await lockSave();
+  tbRefresh(); if (lockedN && typeof lockRefresh === 'function') lockRefresh();
+  tbInfo(`Grabbed ${scraped.length} term(s): ${softN} translatable (soft hints)${lockedN ? ` · 🔒 ${lockedN} DNT locked` : ''}${alreadyN ? ` · 🔒 ${alreadyN} DNT already locked` : ''}${updatedN ? ` · ${updatedN} updated` : ''}.`, 'good');
+}
+
 // ---- AUTO-FIX: deterministic post-GPT rewriter ("smart scanner") -----------
 // A curated dictionary of locked Hebrew corrections applied to every target AFTER
 // the GPT run (and after memory/locked-term checks) — e.g. a plural imperative GPT
@@ -809,6 +901,7 @@ function sysPrompt(mode, plural, tiktok) {
     '  • "key" = the string\'s resource key; its suffix/segments hint at the UI ROLE — resolve the register/role dilemma (gerund vs imperative) from it instead of guessing: suffixes like "_title"/"_heading"/"_desc"/"_subtitle" ⇒ a title/label/body → GERUND (שם פעולה); "_btn"/"_button"/"_cta" ⇒ a button → GERUND; "_toast"/"_tip"/"_tooltip"/"_hint"/"_placeholder" ⇒ inline instruction → IMPERATIVE slash; a list/enum namespace (e.g. "reasonForDispute", "...Reasons...") ⇒ a selectable option → short noun/nominal phrase. When "key" or "context" makes the role clear, do NOT set "flag".\n' +
     '  • "context" = a human note from the string owner explaining the meaning, intent, what a term does or does NOT mean, or which tokens are variables. Treat it as AUTHORITATIVE and follow it, but never translate the note itself. Because it is written for THIS specific string, it OUTRANKS any general house-style rule or glossary term (built-in OR ingested from a style doc) whenever they conflict for this item — the per-item note wins.\n' +
     '  • "fullSource" = the COMPLETE source string when "src" is only a split fragment of it. Use it to understand the fragment in context, but translate ONLY the "src" fragment — do NOT translate, add, or repeat the rest of "fullSource".\n' +
+    '  • "terms" = client-approved term references whose English appears in THIS segment, each as {"en","he","pos"}. Render each listed term with the given Hebrew BY DEFAULT (it is the approved glossary form). BUT deviate when the grammar or sense of this segment clearly requires a different form — e.g. a term listed as a Noun that is used here as a VERB (use the natural verb form: "Highlight"→נקודת שיא as a noun, but הדגש/י when it means "to highlight"), or a word used in a different sense ("Due"→לתשלום, but עקב in "due to …"). These are STRONG DEFAULTS, not locked terms: the per-item "context" note and correct Hebrew grammar still win. Never echo this field.\n' +
     (plural
       ? '- FORM OF ADDRESS: Hebrew MUST be in לשון רבים — plural, gender-neutral forms (e.g. הצטרפו, שלמו, לחצו, קראו ואשרו) — never masculine singular and never slash forms like שלם/י.\n'
       : '- FORM OF ADDRESS: use the SINGULAR, gender-neutral second person with a slash for both genders (לחץ/י, את/ה, בחר/י). Put the final letter (אות סופית) BEFORE the slash. If the masculine and feminine suffixes differ, write BOTH words in full to avoid a malformed feminine (התחל/התחילי, not התחל/י). Use the imperative when the source is imperative. NEVER use the plural form of address (לשון רבים) and NEVER use masculine-singular alone — even when the source number/gender is ambiguous, DEFAULT to this singular gender-slash form. Convert any plural imperative to it: הצטרפו→הצטרף/י, נסו→נסה/י, חכו→חכה/י, היכנסו→היכנס/י, שלמו→שלם/י, לחצו→לחץ/י, קראו→קרא/י; and when the stem differs write both words IN FULL: בדקו→בדוק/בדקי, אמרו→אמור/אמרי, שמרו→שמור/שמרי.\n') +
@@ -941,6 +1034,8 @@ async function doGpt() {
           if (s.key) it.key = String(s.key);                 // role hint (…_title/_btn/_toast/…)
           if (s.context) it.context = String(s.context);     // translator note from Starling
           if (s.fullSrc) it.fullSource = String(s.fullSrc);  // complete string when src is a split fragment
+          const th = tbHintsFor(String(s.src || ''));         // Starling term-base hints for this source (soft; gated by TB.enabled)
+          if (th.length) it.terms = th;
           return it;
         });
         try {
@@ -971,13 +1066,15 @@ async function doGpt() {
     fixApply(proposals);  // deterministic post-GPT rewrites (plural imperative → your singular slash form, etc.)
     lockCheck(proposals); // flag rows where a MANDATORY locked term is missing from the target (sees the fixed text)
     consistCheck(proposals); // flag in-task term drift (Case 2) — never rewrites; you review + one-click lock
+    tbCheck(proposals);   // 🏷 flag rows where a Starling term-base term's approved HE is missing (soft — context may explain it)
     state.proposals = proposals;
     const changed = proposals.filter((p) => !sameRender(p.next, p.old)).length;
     const tmN = proposals.filter((p) => p.tm).length;         // remembered wording (cross-task memory)
     const dedupeN = proposals.filter((p) => p.dedupe).length; // aligned to one wording within this task
     const consistN = proposals.filter((p) => p.consist && p.consist.length).length; // ⚖ term-drift flags
+    const termN = proposals.filter((p) => p.termHint && p.termHint.length).length;   // 🏷 term-base deviations
     const pf = done - filled;
-    info('gpt-info', `✅ ${done} done${filled ? ` (${pf} proofread · ${filled} translated)` : ''} · ${changed} changed${tmN ? ` · 🧠 ${tmN} from memory` : ''}${dedupeN ? ` · 🧠 ${dedupeN} aligned` : ''}${consistN ? ` · ⚖ ${consistN} consistency` : ''}${failed ? ` · ${failed} failed` : ''}`, failed ? 'err' : 'good');
+    info('gpt-info', `✅ ${done} done${filled ? ` (${pf} proofread · ${filled} translated)` : ''} · ${changed} changed${tmN ? ` · 🧠 ${tmN} from memory` : ''}${dedupeN ? ` · 🧠 ${dedupeN} aligned` : ''}${consistN ? ` · ⚖ ${consistN} consistency` : ''}${termN ? ` · 🏷 ${termN} term-base` : ''}${failed ? ` · ${failed} failed` : ''}`, failed ? 'err' : 'good');
     renderReview();
     $('review-card').hidden = false;
     $('write-card').hidden = false;
@@ -993,6 +1090,7 @@ function renderReview() {
     revFilter === 'manual' ? p.manual :
     revFilter === 'memrev' ? !!p.tmOverride :   // 🧠 memory differs from GPT — left unchecked for you to confirm
     revFilter === 'consist' ? !!(p.consist && p.consist.length) :   // ⚖ in-task term drift — flag only
+    revFilter === 'termrev' ? !!(p.termHint && p.termHint.length) : // 🏷 term-base deviation — flag only
     revFilter === 'all' ? true :
     !sameRender(p.next, p.old));   // 'changed'
   box.innerHTML = list.map((p) => {
@@ -1051,6 +1149,7 @@ function renderReview() {
         ${p.fixApplied ? `<span class="rc-warn" style="background:#0e7490" title="Auto-corrected by your locked 🩹 Auto-fix rules: ${esc(p.fixApplied.join(' · '))}. Edit the text to revert.">✎ auto-fixed</span>` : ''}
         ${p.fuzzy && p.fuzzy.matches.length ? `<span class="rc-warn" style="background:#3b0764" title="No exact memory match, but ${p.fuzzy.matches.length} near-match(es) from your past work are shown below — click “use” to adopt one. Nothing is applied automatically.">🧠 ${p.fuzzy.matches.length} near-match${p.fuzzy.matches.length === 1 ? '' : 'es'}</span>` : ''}
         ${p.consist && p.consist.length ? p.consist.map((c) => `<span class="rc-warn" style="background:#7c2d12" title="Consistency check: “${esc(c.en)}” was translated as “${esc(c.he)}” on its own (segment ${esc(String(c.from))}), but this segment's target doesn't appear to use that wording. Flag only — nothing was changed. Fix the Hebrew by hand if it should match, or click 🔒 lock to make “${esc(c.en)}” → “${esc(c.he)}” mandatory everywhere.">⚖ consistency: ${esc(c.en)}</span><button class="rc-lockterm" type="button" data-en="${esc(c.en)}" data-he="${esc(c.he)}" title="Lock “${esc(c.en)}” → “${esc(c.he)}” as a mandatory term (adds it to 🔒 Locked terms)">🔒 lock</button>`).join('') : ''}
+        ${p.termHint && p.termHint.length ? p.termHint.map((c) => `<span class="rc-warn" style="background:#155e75" title="Starling term base: “${esc(c.en)}” is approved as “${esc(c.he)}”, but this target doesn't appear to use that wording. This is a SOFT hint — a different form can be correct here (e.g. the term used as a verb, or a different sense). Nothing was changed; fix by hand only if it should match.">🏷 term: ${esc(c.en)}</span>`).join('') : ''}
         <div class="rc-ctl">${control}</div>
       </div>
       ${p.src ? `<div class="rc-src" dir="ltr">${hl(esc(p.src))}</div>` : ''}
@@ -1064,7 +1163,7 @@ function renderReview() {
       ${newRow}
       ${copyBlock}
     </div>`;
-  }).join('') || `<div class="info">${revFilter === 'manual' ? 'No ✋ paste-by-hand (tagged/chip) segments in this task.' : revFilter === 'memrev' ? 'No 🧠 memory — review rows — your remembered wording matched GPT (or no memory hit) on every segment.' : revFilter === 'consist' ? 'No ⚖ consistency flags — every term you translated on its own is rendered the same way where it recurs. (Only multi-word / ≥5-letter terms that also appear as a standalone segment are checked.)' : 'No changes proposed.'}</div>`;
+  }).join('') || `<div class="info">${revFilter === 'manual' ? 'No ✋ paste-by-hand (tagged/chip) segments in this task.' : revFilter === 'memrev' ? 'No 🧠 memory — review rows — your remembered wording matched GPT (or no memory hit) on every segment.' : revFilter === 'consist' ? 'No ⚖ consistency flags — every term you translated on its own is rendered the same way where it recurs. (Only multi-word / ≥5-letter terms that also appear as a standalone segment are checked.)' : revFilter === 'termrev' ? 'No 🏷 term-base flags — every Starling term whose English appears was rendered with its approved Hebrew (or the term base is empty / the toggle is off).' : 'No changes proposed.'}</div>`;
 
   box.querySelectorAll('.rc-cb').forEach((cb) => cb.addEventListener('change', (e) => {
     const i = +e.target.closest('.rc').dataset.i; state.proposals[i].approved = e.target.checked; updateRevCount();
@@ -5327,6 +5426,52 @@ async function fixImport(file) {
   } catch (e) { fixInfo('Import failed: ' + e.message, 'err'); }
 }
 
+// ---- TERM BASE UI ---------------------------------------------------------
+function tbInfo(msg, cls) { const el = $('tb-info'); if (el) { el.textContent = msg || ''; el.className = 'info' + (cls ? ' ' + cls : ''); } }
+function tbRefresh() {
+  const on = !!(TB && TB.enabled);
+  const b = $('tb-badge'); if (b) b.textContent = (tbCount() ? `· ${tbCount()} term${tbCount() === 1 ? '' : 's'}` : '· empty') + (on ? '' : ' · off');
+  const t = $('tb-toggle'); if (t) t.checked = on;
+  const st = $('tb-state'); if (st) st.textContent = on ? '' : '— off (terms kept; tick to use them again)';
+  const n = $('tb-count-n'); if (n) n.textContent = tbCount();
+  tbRenderList($('tb-search') ? $('tb-search').value : '');
+}
+function tbRenderList(filter) {
+  const box = $('tb-list'); if (!box) return;
+  const q = (filter || '').toLowerCase().trim();
+  const rows = (TB.terms || [])
+    .filter((t) => !q || (t.en || '').toLowerCase().includes(q) || (t.he || '').toLowerCase().includes(q))
+    .sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  box.innerHTML = rows.length
+    ? rows.map((t) => `<div class="bl-row"><button class="bl-del" data-tid="${esc(t.id)}" title="Remove this term">✕</button><span class="bi-text"><span dir="ltr">${esc(t.en)}</span> → <span dir="rtl">${esc(t.he)}</span>${t.pos ? ` <span class="hint">— ${esc(t.pos)}</span>` : ''}</span></div>`).join('')
+    : '<div class="hint">No terms yet — open a task and click ⬇ Grab term base.</div>';
+  box.querySelectorAll('.bl-del').forEach((btn) => btn.addEventListener('click', async () => {
+    const id = btn.getAttribute('data-tid'); TB.terms = (TB.terms || []).filter((t) => String(t.id) !== id);
+    await tbSave(); tbRefresh(); tbInfo('Removed 1 term.', '');
+  }));
+}
+function tbExport() {
+  const blob = new Blob([JSON.stringify(TB, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'term-base-' + new Date().toISOString().slice(0, 10) + '.json'; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+async function tbImport(file) {
+  try {
+    const o = JSON.parse(await file.text());
+    const arr = o && Array.isArray(o.terms) ? o.terms : (Array.isArray(o) ? o : null);
+    if (!arr) throw new Error('not a term-base JSON.');
+    let n = 0;
+    for (const t of arr) {
+      const en = String(t.en || '').trim(), he = String(t.he || '').trim(); if (!en || !he) continue;
+      TB.terms = (TB.terms || []).filter((x) => (x.en || '').toLowerCase() !== en.toLowerCase());
+      TB.terms.push({ id: tbUid(), en, he, pos: String(t.pos || '').trim(), def: String(t.def || '').trim(), ts: Date.now() }); n++;
+    }
+    await tbSave(); tbRefresh();
+    tbInfo(`Imported ${n} term(s) — ${tbCount()} total.`, 'good');
+  } catch (e) { tbInfo('Import failed: ' + e.message, 'err'); }
+}
+
 async function init() {
   $('key').value = await store.get('key', '');
   $('model').value = await store.get('model', 'gpt-5.4');
@@ -5498,6 +5643,21 @@ async function init() {
     FIX = { rules: [], enabled: FIX.enabled, seeded: true, updatedAt: 0 }; await fixSave(); fixRefresh(); fixInfo('All auto-fix rules cleared.', '');
   });
 
+  // Term base (Starling's inline term references)
+  await tbLoad(); tbRefresh();
+  if ($('tb-grab')) $('tb-grab').addEventListener('click', async () => { $('tb-grab').disabled = true; try { await tbGrab(); } finally { $('tb-grab').disabled = false; } });
+  if ($('tb-toggle')) $('tb-toggle').addEventListener('change', async (e) => {
+    TB.enabled = e.target.checked; await tbSave(); tbRefresh();
+    tbInfo(TB.enabled ? 'On — term references guide the next Run and DNT terms stay locked.' : 'Off — term base ignored on Run (terms kept).', '');
+  });
+  if ($('tb-export')) $('tb-export').addEventListener('click', tbExport);
+  if ($('tb-import')) $('tb-import').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) tbImport(f); e.target.value = ''; });
+  if ($('tb-search')) $('tb-search').addEventListener('input', (e) => tbRenderList(e.target.value));
+  if ($('tb-clear')) $('tb-clear').addEventListener('click', async () => {
+    if (!clearPass('every stored term reference')) return;
+    TB = { enabled: TB.enabled, terms: [], updatedAt: 0 }; await tbSave(); tbRefresh(); tbInfo('Term base cleared (DNT terms already sent to Locked terms remain).', '');
+  });
+
   // 📦 Corpus builder + full backup/restore
   CB.index = await store.get('corpusIndex', null);
   if (CB.index && CB.index.sources) { cbClassify(); cbRender(); }
@@ -5533,7 +5693,7 @@ async function init() {
   // Review VIEW filter (mutually exclusive) — mark the active one and re-render.
   const setRevFilter = (mode) => {
     revFilter = mode;
-    ['view-changed', 'view-all', 'view-manual', 'view-memrev', 'view-consist'].forEach((id) => { const b = $(id); if (b) b.classList.toggle('active', (id === 'view-' + mode)); });
+    ['view-changed', 'view-all', 'view-manual', 'view-memrev', 'view-consist', 'view-termrev'].forEach((id) => { const b = $(id); if (b) b.classList.toggle('active', (id === 'view-' + mode)); });
     renderReview();
   };
   $('view-changed').addEventListener('click', () => setRevFilter('changed'));
@@ -5541,6 +5701,7 @@ async function init() {
   $('view-manual').addEventListener('click', () => setRevFilter('manual'));   // ✋ paste-by-hand only
   $('view-memrev').addEventListener('click', () => setRevFilter('memrev'));   // 🧠 memory — review only
   $('view-consist').addEventListener('click', () => setRevFilter('consist')); // ⚖ consistency flags only
+  if ($('view-termrev')) $('view-termrev').addEventListener('click', () => setRevFilter('termrev')); // 🏷 term-base flags only
   // Approve selection (does NOT change the view). Manual/tagged rows are copy-by-hand and never auto-written.
   $('sel-all').addEventListener('click', () => { state.proposals.forEach((p) => p.approved = !p.manual && !sameRender(p.next, p.old)); renderReview(); });
   $('sel-none').addEventListener('click', () => { state.proposals.forEach((p) => p.approved = false); renderReview(); });
