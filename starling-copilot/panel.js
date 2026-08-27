@@ -777,13 +777,13 @@ function tbCheck(proposals) {
 async function tbGrab() {
   const t = await activeTab();
   if (!t) { tbInfo('Open your Starling task tab first.', 'err'); return; }
-  tbInfo('Reading term references from the task…');
+  tbInfo('Scanning the task (scrolling through every segment)…');
   let scraped = [];
   try {
     const [r] = await chrome.scripting.executeScript({
       target: { tabId: t.id },
       world: 'MAIN',
-      func: () => {
+      func: async () => {
         const POS = /^(Noun|Verb|Proper noun|Adjective|Adverb|Phrase|Abbreviation|Pronoun|Preposition|Interjection)$/i;
         const getVnode = (span) => { const fk = Object.keys(span).find((k) => k.startsWith('__reactFiber$')); if (!fk) return null; let f = span[fk], hops = 0; while (f && hops < 8) { const p = f.memoizedProps; if (p && p.content && p.content.$$typeof) return p.content; f = f.return; hops++; } return null; };
         const leavesOf = (n, d, out) => { if (!n || d > 16) return; if (typeof n === 'string') { const s = n.trim(); if (s) out.push(s); return; } if (Array.isArray(n)) { n.forEach((x) => leavesOf(x, d + 1, out)); return; } if (typeof n === 'object' && n.props) leavesOf(n.props.children, d + 1, out); };
@@ -798,9 +798,34 @@ async function tbGrab() {
           const def = texts.find((x) => /\s/.test(x) && x.length > 15 && !POS.test(x)) || '';
           return { en: word, he, pos, dnt, def };
         };
-        const spans = Array.from(document.querySelectorAll('span.highlight-text-term'));
+        // The segment list is a VIRTUALIZED list — only the rows currently scrolled into
+        // view exist in the DOM, so a single snapshot only captures on-screen terms. Find
+        // the scroller (the scrollable ancestor of a rendered term span, else the tallest
+        // scroll area on the page) and walk it top→bottom, parsing the term spans that mount
+        // at each step, so ONE grab captures every task term regardless of scroll position.
         const map = new Map();
-        for (const sp of spans) { const word = (sp.textContent || '').trim(); if (!word) continue; const vn = getVnode(sp); if (!vn) continue; const texts = []; leavesOf(vn, 0, texts); const e = parse(word, texts); const key = word.toLowerCase(); if (!map.has(key) && e.he) map.set(key, e); }
+        const collect = () => { for (const sp of document.querySelectorAll('span.highlight-text-term')) { const word = (sp.textContent || '').trim(); if (!word) continue; const key = word.toLowerCase(); if (map.has(key)) continue; const vn = getVnode(sp); if (!vn) continue; const texts = []; leavesOf(vn, 0, texts); const e = parse(word, texts); if (e.he) map.set(key, e); } };
+        const pickScroller = () => {
+          const sp = document.querySelector('span.highlight-text-term');
+          if (sp) { let n = sp; while (n && n !== document.body) { const s = getComputedStyle(n); if ((s.overflowY === 'auto' || s.overflowY === 'scroll') && n.scrollHeight > n.clientHeight + 30) return n; n = n.parentElement; } }
+          let best = null, bh = 0; document.querySelectorAll('*').forEach((el) => { const s = getComputedStyle(el); if ((s.overflowY === 'auto' || s.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 30 && el.scrollHeight > bh) { bh = el.scrollHeight; best = el; } }); return best;
+        };
+        const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+        const sc = pickScroller();
+        if (!sc) { collect(); return [...map.values()]; }              // no scroller → read what's on screen
+        const orig = sc.scrollTop, fire = () => sc.dispatchEvent(new Event('scroll', { bubbles: true }));
+        sc.scrollTop = 0; fire(); await sleep(220); collect();
+        const step = Math.max(200, Math.floor(sc.clientHeight * 0.8));
+        let pos = 0, last = -1, stuck = 0, guard = 0;
+        while (guard++ < 200) {
+          pos += step; if (pos > sc.scrollHeight) pos = sc.scrollHeight;
+          sc.scrollTop = pos; fire(); await sleep(170); collect();
+          const at = sc.scrollTop;
+          if (at <= last + 1) { if (++stuck >= 2) break; } else stuck = 0;  // scroll no longer advances → bottom reached
+          last = at;
+        }
+        collect();
+        sc.scrollTop = orig; fire();                                    // restore the user's scroll position
         return [...map.values()];
       }
     });
