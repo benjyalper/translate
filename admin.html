@@ -4912,6 +4912,16 @@ function trMarkSdlprojAsReturn(sdlprojXml) {
   out = out.replace(/(\bPackageType=")ProjectPackage(")/, '$1ReturnPackage$2');
   out = out.replace(/(\bPackageGuid=")[^"]*(")/, '$1' + trNewGuid() + '$2');
 
+  // Stamp the TRANSLATOR as the package creator/owner. The incoming .sdlppx
+  // carries the PM's identity (e.g. PMC20250513-1, SIMON\wu555); a Studio-made
+  // return package shows the translator instead. Cosmetic — import binds on the
+  // project Guid, not this — but it stops the PM seeing their own name as the
+  // "creator" of the package you send back. Edit TR_RETURN_OWNER to your real
+  // Trados machine\username if you want it to match your Studio exactly.
+  const TR_RETURN_OWNER = 'BENJY\\Benjy';   // Trados MACHINE\\username form
+  out = out.replace(/(\bOwner=")[^"]*(")/, (m, a, b) => a + TR_RETURN_OWNER + b);
+  out = out.replace(/(\bPackageCreatedBy=")[^"]*(")/, (m, a, b) => a + TR_RETURN_OWNER + b);
+
   // 1. Strip <AutomaticTask>…</AutomaticTask> blocks. Trados Studio's own
   //    return packages carry only the ManualTask — the automatic tasks
   //    (Analysis, PerfectMatch, ProjectTm, etc.) were the PM's work.
@@ -6017,10 +6027,18 @@ async function trTranslate() {
     // transform the .sdlproj so its ManualTask reads as Completed
     // (see trMarkSdlprojAsReturn). Without those two, Julia can't import.
     const outZip = new JSZip();
+    // A return package carries the bilingual .sdlxliff, not the original source
+    // document. Trados Studio's own return packages omit the native source file
+    // (e.g. the .docx) and keep only the "<name>.sdlxliff" beside it. Collect the
+    // sdlxliff paths so we can drop each native source doc that has one.
+    const sdlxliffPaths = new Set();
+    zip.forEach((relPath, entry) => { if (!entry.dir && /\.sdlxliff$/i.test(relPath)) sdlxliffPaths.add(relPath.toLowerCase()); });
     const copyPromises = [];
     zip.forEach((relPath, entry) => {
       if (entry.dir) return;
       if (trIsReturnPackageJunk(relPath)) return;
+      // Skip the native source document — its bilingual "<name>.sdlxliff" is kept.
+      if (sdlxliffPaths.has((relPath + '.sdlxliff').toLowerCase())) return;
       if (/\.sdlproj$/i.test(relPath)) {
         copyPromises.push(entry.async('string').then(txt => {
           outZip.file(relPath, trMarkSdlprojAsReturn(txt));
