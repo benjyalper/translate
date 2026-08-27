@@ -4918,7 +4918,7 @@ function trMarkSdlprojAsReturn(sdlprojXml) {
   // project Guid, not this — but it stops the PM seeing their own name as the
   // "creator" of the package you send back. Edit TR_RETURN_OWNER to your real
   // Trados machine\username if you want it to match your Studio exactly.
-  const TR_RETURN_OWNER = 'BENJY\\Benjy';   // Trados MACHINE\\username form
+  const TR_RETURN_OWNER = 'DESKTOP-6NRFLQ2\\Benjy';   // Trados MACHINE\\username (Benjy's Studio machine)
   out = out.replace(/(\bOwner=")[^"]*(")/, (m, a, b) => a + TR_RETURN_OWNER + b);
   out = out.replace(/(\bPackageCreatedBy=")[^"]*(")/, (m, a, b) => a + TR_RETURN_OWNER + b);
 
