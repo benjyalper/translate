@@ -4882,9 +4882,35 @@ function trRewriteTargetLangAttr(xml, newLang) {
 //
 // Symptom before this ran: PM reports "can't open your return package"
 // on files that structurally look fine but never register as delivered.
+// Fresh lowercase UUID v4 for a return package's PackageGuid. crypto.randomUUID
+// where available, hand-rolled fallback otherwise.
+function trNewGuid() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = Math.random() * 16 | 0;
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+}
+
 function trMarkSdlprojAsReturn(sdlprojXml) {
   if (!sdlprojXml) return sdlprojXml;
   let out = sdlprojXml;
+
+  // 0. Convert the PACKAGE HEADER from a project package to a return package.
+  //    The incoming .sdlppx's root <PackageProject> carries PackageType=
+  //    "ProjectPackage"; Trados' Import Return Package ONLY accepts
+  //    PackageType="ReturnPackage". Re-zipping the project (even with the task
+  //    marked done, below) leaves it typed as a project package, so the PM's
+  //    Studio rejects it — "…contains a project that does not exist in your
+  //    setup". Verified by diffing a Studio-made return package against its own
+  //    source project package (same MK EN2 project): the ONLY header changes are
+  //    PackageType → ReturnPackage and a FRESH PackageGuid (a return package is a
+  //    NEW package, not a re-use of the outgoing project package's GUID — reusing
+  //    it can make Studio think it already has this package). The project-level
+  //    Guid is deliberately left untouched: THAT is the link back to the PM's
+  //    original project, and it must match for the import to bind.
+  out = out.replace(/(\bPackageType=")ProjectPackage(")/, '$1ReturnPackage$2');
+  out = out.replace(/(\bPackageGuid=")[^"]*(")/, '$1' + trNewGuid() + '$2');
 
   // 1. Strip <AutomaticTask>…</AutomaticTask> blocks. Trados Studio's own
   //    return packages carry only the ManualTask — the automatic tasks
