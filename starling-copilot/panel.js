@@ -777,7 +777,7 @@ function tbCheck(proposals) {
 async function tbGrab() {
   const t = await activeTab();
   if (!t) { tbInfo('Open your Starling task tab first.', 'err'); return; }
-  tbInfo('Scanning the task (scrolling through every segment)…');
+  tbInfo('Scanning the task for term references…');
   let scraped = [];
   try {
     const [r] = await chrome.scripting.executeScript({
@@ -805,6 +805,47 @@ async function tbGrab() {
         // at each step, so ONE grab captures every task term regardless of scroll position.
         const map = new Map();
         const collect = () => { for (const sp of document.querySelectorAll('span.highlight-text-term')) { const word = (sp.textContent || '').trim(); if (!word) continue; const key = word.toLowerCase(); if (map.has(key)) continue; const vn = getVnode(sp); if (!vn) continue; const texts = []; leavesOf(vn, 0, texts); const e = parse(word, texts); if (e.he) map.set(key, e); } };
+        // ---- Document editor (CAT /doc/editor) path -----------------------------------------
+        // The Document editor uses a different term markup (span.cat-content__term, no preloaded
+        // vnode) and holds EVERY segment's term matches in its redux store — so we read them all
+        // in one shot, no scrolling. Each segment carries a `termMap` { sourceWord: [entry…] };
+        // entry.langItemMap.{source,target}.content give EN/HE, tags[].tag === "DNT" (or
+        // description "Brand name") marks do-not-translate, partOfSpeech is a numeric code.
+        // Falls through to the String-editor scroll-walk below when this isn't a doc task.
+        try {
+          const POS_CODE = { 1: 'Noun', 2: 'Verb', 3: 'Adjective', 4: 'Adverb', 6: 'Proper noun' };
+          const anchor = document.querySelector('.cat-content__term, [class*="cat-content__source"], [class*="cat-content"]');
+          let store = null;
+          if (anchor) {
+            let n = anchor;
+            for (let up = 0; n && up < 18 && !store; up++, n = n.parentElement) {
+              const fk = Object.keys(n).find((k) => k.startsWith('__reactFiber$')); if (!fk) continue;
+              let f = n[fk], hops = 0;
+              while (f && hops < 16) { const p = f.memoizedProps; if (p && p.docEditor && p.docEditor.taskDetail) { store = p.docEditor; break; } f = f.return; hops++; }
+            }
+          }
+          const segs = store && store.taskDetail && store.taskDetail.segmentInfo && store.taskDetail.segmentInfo.segments;
+          if (segs && segs.length) {
+            for (const s of segs) {
+              const tm = (s && s.termMap) || {};
+              for (const key of Object.keys(tm)) {
+                const arr = tm[key] || []; const e = arr[0]; if (!e) continue;
+                const lim = e.langItemMap || {};
+                const en = String(((lim.source && lim.source.content) || (lim.en && lim.en.content) || key || '')).trim(); if (!en) continue;
+                const dnt = arr.some((x) => ((x.tags || []).some((t) => String(t.tag).toUpperCase() === 'DNT')) || x.description === 'Brand name');
+                let he = String(((lim.target && lim.target.content) || (lim['he-IL'] && lim['he-IL'].content) || '')).trim();
+                if (dnt && !he) he = en;
+                if (!he) continue;
+                const posCode = e.partOfSpeech != null ? e.partOfSpeech : (lim.source && lim.source.partOfSpeech);
+                const pos = POS_CODE[posCode] || '';
+                const def = (e.description && e.description !== 'Brand name') ? e.description : '';
+                const kk = en.toLowerCase();
+                if (!map.has(kk)) map.set(kk, { en, he, pos, dnt, def });
+              }
+            }
+            return [...map.values()];   // doc editor: whole task read from the store, no scroll
+          }
+        } catch (e) { /* not a doc task, or store shape changed → fall through to String editor */ }
         const pickScroller = () => {
           const sp = document.querySelector('span.highlight-text-term');
           if (sp) { let n = sp; while (n && n !== document.body) { const s = getComputedStyle(n); if ((s.overflowY === 'auto' || s.overflowY === 'scroll') && n.scrollHeight > n.clientHeight + 30) return n; n = n.parentElement; } }
