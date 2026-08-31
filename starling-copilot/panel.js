@@ -5039,15 +5039,52 @@ async function brainMerge() {
 // with brain conflicts surfaced as decision tickets. No content.js change: apiTask already exists.
 function hvInfo(m, k) { info('hv-info', m, k); }
 function hvExtractId(s) { const m = String(s || '').match(/taskid=(\d+)/i) || String(s || '').match(/\b(\d{5,})\b/); return m ? m[1] : ''; }
+// Document-editor (/doc/editor) fallback: the string content API 1002s on doc tasks, but the
+// open editor's redux store holds every segment (source + confirmed target). Read it straight
+// from the active tab's store (same approach as ⬇ Grab term base). Returns API_TASK-shaped rows.
+async function hvDocRows(id) {
+  let tab; try { tab = await wbActiveTab(); } catch (e) { return { ok: false, error: 'no active tab' }; }
+  if (!tab || !/\/doc\/editor\//.test(tab.url || '')) return { ok: false, error: 'the Document editor for this task isn’t the active tab — open it, let it load, and try again' };
+  if (id && !String(tab.url || '').includes(String(id))) return { ok: false, error: 'the open Document editor is a different task than the id requested' };
+  try {
+    const [r] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      world: 'MAIN',
+      func: () => {
+        try {
+          const anchor = document.querySelector('.cat-content__term, [class*="cat-content__source"], [class*="cat-content"]');
+          let store = null, node = anchor;
+          for (let up = 0; node && up < 18 && !store; up++, node = node.parentElement) {
+            const fk = Object.keys(node).find((k) => k.startsWith('__reactFiber$')); if (!fk) continue;
+            let f = node[fk], hops = 0;
+            while (f && hops < 16) { const p = f.memoizedProps; if (p && p.docEditor && p.docEditor.taskDetail) { store = p.docEditor; break; } f = f.return; hops++; }
+          }
+          if (!store) return { ok: false, error: 'doc store not found (let the editor finish loading, then retry)' };
+          const segs = (((store.taskDetail || {}).segmentInfo || {}).segments) || [];
+          const txt = (o) => (o ? (o.Text != null ? o.Text : (o.text != null ? o.text : '')) : '');
+          const rows = segs.map((s) => ({ status: (s.Status != null ? s.Status : s.status), source: String(txt(s.Source) || txt(s.source) || ''), target: String(txt(s.Target) || txt(s.target) || ''), key: '' }));
+          const td = store.taskDetail || {};
+          return { ok: true, rows, taskName: td.TaskName || td.taskName || td.name || '' };
+        } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+      }
+    });
+    return (r && r.result) || { ok: false, error: 'no result' };
+  } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+}
 async function hvHarvest() {
   let id = hvExtractId($('hv-task').value) || $('hv-task').value.trim();
   if (!id) { try { const t = await wbActiveTab(); id = hvExtractId(t && t.url); } catch (e) {} }
   if (!id) { hvInfo('Open a Starling task (its URL has taskid=…), or paste a task id / editor URL.', 'err'); return; }
   $('hv-harvest').disabled = true; hvInfo('Reading task ' + id + '…');
   try {
+    let rows, taskNameOverride = '';
     const res = await wbCall('API_TASK', { taskId: id });
-    if (!res || !res.ok) throw new Error((res && res.error) || 'read failed');
-    const rows = res.rows || [];
+    if (res && res.ok) { rows = res.rows || []; }
+    else {   // string API failed (e.g. 1002 on a /doc/editor task) → read the open doc editor's store
+      const doc = await hvDocRows(id);
+      if (doc && doc.ok) { rows = doc.rows; taskNameOverride = doc.taskName || ''; }
+      else throw new Error((res && res.error) || (doc && doc.error) || 'read failed');
+    }
     const pairs = [], seen = new Set();
     let confirmed = 0;
     for (const r of rows) {
@@ -5058,7 +5095,7 @@ async function hvHarvest() {
       const dk = src + '' + tgt; if (seen.has(dk)) continue; seen.add(dk);   // de-dupe identical pairs
       pairs.push({ src, tgt, key: r.key || '' });
     }
-    HV = { pairs, taskId: id, taskName: res.taskName || ('task ' + id) };
+    HV = { pairs, taskId: id, taskName: (res && res.ok && res.taskName) || taskNameOverride || ('task ' + id) };
     if (!pairs.length) { $('hv-actions').hidden = true; hvInfo(`Read ${rows.length} segments · ${confirmed} confirmed — none had both a source and target to learn from.`, 'err'); return; }
     $('hv-actions').hidden = false;
     hvInfo(`Harvested ${pairs.length} confirmed pair(s) (of ${rows.length} segments). Add them to memory, or distill rules & terms.`, 'good');
