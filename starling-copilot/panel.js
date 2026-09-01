@@ -3797,7 +3797,8 @@ async function cbFetchMyTasks(tabId) {
         const res = await fetch('/api/task/getMyTasks?offset=0&limit=5000&progress=all&translateTypeList=%5B%5D&_=' + Date.now(), { credentials: 'include', cache: 'no-store' });
         const j = await res.json(); const d = j.data || {};
         // subtaskId is the id the editor/content endpoints use (the sibling taskId is often 0).
-        const rows = (d.rows || []).map((x) => ({ id: String(x.subtaskId || x.subTaskId || x.id || ''), name: x.taskName || '', status: x.taskStatus }));
+        // taskType 1 = Document editor, 2 = String editor. createTime = unix SECONDS (string).
+        const rows = (d.rows || []).map((x) => ({ id: String(x.subtaskId || x.subTaskId || x.id || ''), name: x.taskName || '', status: x.taskStatus, taskType: x.taskType, createTime: Number(x.createTime) || 0 }));
         return { ok: true, rows };
       } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
     }
@@ -3807,40 +3808,93 @@ async function cbFetchMyTasks(tabId) {
   // Submitted (status 2) always; In-progress (status 1) too when the toggle is on — those are
   // then gated by a ≥95% confirmed ratio measured per task during harvest.
   const inProg = $('cb-inprogress') && $('cb-inprogress').checked;
-  return (out.rows || []).filter((x) => x.id && (String(x.status) === '2' || (inProg && String(x.status) === '1')));
+  let rows = (out.rows || []).filter((x) => x.id && (String(x.status) === '2' || (inProg && String(x.status) === '1')));
+  // Optional 📅 "created on/after" filter: learn only from tasks created on or after the chosen
+  // day. createTime is unix SECONDS; the input is a local YYYY-MM-DD (see cbSinceUnix).
+  const since = cbSinceUnix();
+  if (since) rows = rows.filter((x) => x.createTime && x.createTime >= since);
+  return rows;
 }
-// Harvest a chunk of task ids → { [id]: { pairs:[{src,tgt,key}] } | { error } }. Confirmed
-// (status 3), non-plural (no textExtra), non-empty only. Tagged rows are KEPT (per settings).
-async function cbFetchTasks(ids, tabId) {
+// Parse the corpus 📅 "created on/after" input → unix SECONDS at local midnight (0 if unset/invalid).
+function cbSinceUnix() {
+  const el = $('cb-since'); if (!el || !el.value) return 0;
+  const ms = new Date(el.value + 'T00:00:00').getTime();   // local midnight of the chosen day
+  return isNaN(ms) ? 0 : Math.floor(ms / 1000);
+}
+// Harvest a chunk of tasks → { [id]: { pairs:[{src,tgt,key}], plurals, total, confirmed } | { error } }.
+// Confirmed (status 3), non-empty only. String-editor tasks (taskType 2) go through the content API
+// (getSourceTextListWithTargetText, with the plural/textExtra lane). Document-editor tasks (taskType 1)
+// 1002 on that API, so they read from getDocTaskDetailOnline instead (data.segmentInfo.segments →
+// Source.Text / Target.Text, per-segment Status; that endpoint needs task-id/task-type/starling-origin
+// headers, which the doc editor itself sends). A task the string API 1002s on is retried as a doc task,
+// so a wrong/missing taskType still resolves. Takes the task objects (need id + taskType), not bare ids.
+async function cbFetchTasks(tasks, tabId) {
   const [r] = await chrome.scripting.executeScript({
-    target: { tabId }, args: [ids],
-    func: async (ids) => {
-      const URL_ = 'https://starling.bytedance.com/api/text/getSourceTextListWithTargetText';
+    target: { tabId }, args: [tasks],
+    func: async (tasks) => {
+      const STR_URL = 'https://starling.bytedance.com/api/text/getSourceTextListWithTargetText';
+      const DOC_URL = 'https://starling.bytedance.com/api/editor/getDocTaskDetailOnline';
       // Non-empty CLDR forms from a textExtra field ({zero,one,two,few,many,other}).
       const formsOf = (o) => { const e = o && o.textExtra; if (!e) return {}; let v; try { v = typeof e === 'string' ? JSON.parse(e) : e; } catch (_) { return {}; } if (!v || typeof v !== 'object') return {}; const out = {}; for (const k of Object.keys(v)) { const val = String(v[k] == null ? '' : v[k]); if (val.trim()) out[k] = val; } return out; };
-      const out = {};
-      for (const id of ids) {
-        try {
-          const res = await fetch(URL_ + '?limit=10000&sortType=1&offset=0&editMode=dual&taskId=' + encodeURIComponent(id), { credentials: 'include', cache: 'no-store', headers: { accept: 'application/json' } });
-          if (!res.ok) { out[id] = { error: 'HTTP ' + res.status }; continue; }
-          const j = await res.json();
-          if (!j || j.status_code !== 1000) { out[id] = { error: 'sc ' + (j && j.status_code) }; continue; }
-          const rows = (j.data && j.data.rows) || [];
-          const pairs = [], plurals = []; let confirmed = 0;
-          for (const row of rows) {
-            const s = row.sourceText || {}, t = row.targetText || (s.targetTexts && s.targetTexts[0]) || {};
-            if (t.status === 3) confirmed++;
-            const sf = formsOf(s), tf = formsOf(t);
-            if (Object.keys(sf).length || Object.keys(tf).length) {   // plural row → plural lane
-              if (t.status === 3 && Object.keys(sf).length && Object.keys(tf).length) plurals.push({ srcForms: sf, tgtForms: tf, key: s.key || '' });
-              continue;
-            }
-            if (t.status !== 3) continue;               // proofread-confirmed only
-            const src = s.content == null ? '' : String(s.content), tgt = t.content == null ? '' : String(t.content);
-            if (!src.trim() || !tgt.trim()) continue;
-            pairs.push({ src, tgt, key: s.key || '' });
+      const txt = (o) => (o ? (o.Text != null ? o.Text : (o.text != null ? o.text : '')) : '');
+      async function readString(id) {
+        const res = await fetch(STR_URL + '?limit=10000&sortType=1&offset=0&editMode=dual&taskId=' + encodeURIComponent(id), { credentials: 'include', cache: 'no-store', headers: { accept: 'application/json' } });
+        if (!res.ok) return { httpError: res.status };
+        const j = await res.json(); return { sc: j && j.status_code, j };
+      }
+      async function readDoc(id) {
+        const res = await fetch(DOC_URL + '?docTaskId=' + encodeURIComponent(id), { credentials: 'include', cache: 'no-store', headers: { accept: 'application/json', 'content-type': 'application/json', 'starling-origin': 'https://starling.bytedance.com', 'task-id': String(id), 'task-type': 1 } });
+        if (!res.ok) return { httpError: res.status };
+        const j = await res.json(); return { sc: j && j.status_code, j };
+      }
+      function parseString(j) {
+        const rows = (j.data && j.data.rows) || [];
+        const pairs = [], plurals = []; let confirmed = 0;
+        for (const row of rows) {
+          const s = row.sourceText || {}, t = row.targetText || (s.targetTexts && s.targetTexts[0]) || {};
+          if (t.status === 3) confirmed++;
+          const sf = formsOf(s), tf = formsOf(t);
+          if (Object.keys(sf).length || Object.keys(tf).length) {   // plural row → plural lane
+            if (t.status === 3 && Object.keys(sf).length && Object.keys(tf).length) plurals.push({ srcForms: sf, tgtForms: tf, key: s.key || '' });
+            continue;
           }
-          out[id] = { pairs, plurals, total: rows.length, confirmed };
+          if (t.status !== 3) continue;               // proofread-confirmed only
+          const src = s.content == null ? '' : String(s.content), tgt = t.content == null ? '' : String(t.content);
+          if (!src.trim() || !tgt.trim()) continue;
+          pairs.push({ src, tgt, key: s.key || '' });
+        }
+        return { pairs, plurals, total: rows.length, confirmed };
+      }
+      function parseDoc(j) {
+        const d = j.data || {};
+        const segs = (d.segmentInfo && d.segmentInfo.segments) || d.segments || [];
+        const pairs = []; let confirmed = 0;   // the doc detail has no CLDR plural lane
+        for (const sg of segs) {
+          const st = (sg.Status != null ? sg.Status : sg.status);
+          if (st === 3) confirmed++;
+          if (st !== 3) continue;                     // proofread-confirmed only
+          const src = String(txt(sg.Source) || txt(sg.source) || '').trim();
+          const tgt = String(txt(sg.Target) || txt(sg.target) || '').trim();
+          if (!src || !tgt) continue;
+          pairs.push({ src, tgt, key: sg.SegmentID || sg.segmentID || '' });
+        }
+        return { pairs, plurals: [], total: segs.length, confirmed };
+      }
+      const out = {};
+      for (const task of tasks) {
+        const id = task.id;
+        try {
+          if (String(task.taskType) !== '1') {          // treat as a String-editor task first
+            const r1 = await readString(id);
+            if (r1.httpError) { out[id] = { error: 'HTTP ' + r1.httpError }; continue; }
+            if (r1.sc === 1000) { out[id] = parseString(r1.j); continue; }
+            if (r1.sc !== 1002) { out[id] = { error: 'sc ' + r1.sc }; continue; }
+            // sc 1002 → no permission on the string API = it's really a Document-editor task; fall through
+          }
+          const r2 = await readDoc(id);                 // Document-editor task
+          if (r2.httpError) { out[id] = { error: 'HTTP ' + r2.httpError }; continue; }
+          if (r2.sc !== 1000) { out[id] = { error: 'doc sc ' + r2.sc }; continue; }
+          out[id] = parseDoc(r2.j);
         } catch (e) { out[id] = { error: String((e && e.message) || e) }; }
       }
       return out;
@@ -3892,7 +3946,7 @@ async function cbBuild(opts) {
     if (!t || !/^https:\/\/starling\.bytedance\.com\//.test(t.url || '')) { cbInfo('Open a starling.bytedance.com tab (e.g. My tasks), then Build.', 'err'); return; }
     cbInfo('Reading My tasks…');
     const tasks = await cbFetchMyTasks(t.id);
-    if (!tasks.length) { cbInfo('No Submitted tasks found (only taskStatus 2 is harvested).', 'err'); return; }
+    if (!tasks.length) { const el = $('cb-since'); cbInfo('No Submitted tasks found (only taskStatus 2 is harvested)' + (el && el.value ? ` created on/after ${el.value} — clear the 📅 date to widen` : '') + '.', 'err'); return; }
     // ⟳ Update passes {force:false} so it can never trigger a from-scratch rebuild, whatever
     // the checkbox says; 📦 Build (no opts) honours the checkbox as before.
     const force = (opts && opts.force != null) ? opts.force : ($('cb-force') && $('cb-force').checked);
@@ -3905,7 +3959,7 @@ async function cbBuild(opts) {
     if ($('cb-bar')) $('cb-bar').style.width = '0%';
     for (let i = 0; i < todo.length; i += CH) {
       const chunk = todo.slice(i, i + CH);
-      const res = await cbFetchTasks(chunk.map((x) => x.id), t.id);
+      const res = await cbFetchTasks(chunk, t.id);   // pass task objects (cbFetchTasks needs taskType)
       for (const task of chunk) {
         const rr = res[task.id];
         if (!rr || rr.error) { failed++; continue; }
@@ -5801,6 +5855,9 @@ async function init() {
   cbBadge();
   if ($('cb-build')) $('cb-build').addEventListener('click', () => cbBuild());
   if ($('cb-update')) $('cb-update').addEventListener('click', () => cbBuild({ force: false }));   // incremental-only, ignores "Rebuild from scratch"
+  // 📅 date filter: clear resets to all tasks; changing the date re-checks the "new tasks" badge.
+  if ($('cb-since-clear')) $('cb-since-clear').addEventListener('click', () => { if ($('cb-since')) $('cb-since').value = ''; cbNewCheck(); });
+  if ($('cb-since')) $('cb-since').addEventListener('change', () => cbNewCheck());
   // Lazily re-count "new since last build" each time the Corpus card is expanded (needs a live
   // Starling tab; silently no-ops otherwise). Also check once now if it's already open.
   if ($('cb-card')) $('cb-card').addEventListener('toggle', (e) => { if (e.target.open) cbNewCheck(); });
