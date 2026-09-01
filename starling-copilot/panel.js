@@ -746,12 +746,13 @@ async function consistLock(en, he) {
 async function icSweepGpt(items, key, model) {
   const sys =
     'You are a he-IL (Hebrew) localization INTERNAL-CONSISTENCY checker for ONE translation task. ' +
-    'You receive a set of segments, each {"i":<id>,"src":<English source>,"he":<its Hebrew translation>}. ' +
-    'Find cases where the SAME recurring English word, verb, or fixed collocation is translated with DIFFERENT Hebrew wordings across segments — avoidable SYNONYM DRIFT (same meaning, different word), e.g. "take (time)" rendered "אורך" in one segment and "לוקח" in another. ' +
-    'For each drifting segment pick ONE consistent Hebrew rendering (prefer the wording that reads most naturally; on a tie, the one used in more segments), then rewrite THAT segment\'s "he" to adopt it while CHANGING NOTHING ELSE — keep the meaning, every placeholder ({x}, %s, <g>…), every number/currency, and all punctuation identical. ' +
-    'Do NOT flag differences that the grammar or sense of a specific segment requires (singular vs plural, a noun vs a verb use of the same word, a genuinely different meaning), and do NOT flag glossary/term choices. Only flag real, avoidable lexical inconsistency. ' +
-    'Return ONLY JSON: {"flags":[{"i":<id>,"concept":"<the recurring English word/phrase>","reason":"<short, e.g. take time: אורך vs לוקח>","suggest":"<the full corrected Hebrew for segment i>"}]}. ' +
-    'Return an empty "flags" array if everything is already consistent. No commentary, no markdown, no code fences.';
+    'You receive segments, each {"i":<id>,"src":<English source>,"he":<its Hebrew translation>}. ' +
+    'Find GROUPS where the SAME recurring English word or fixed collocation is translated with DIFFERENT Hebrew renderings across segments — avoidable synonym drift, e.g. "information" rendered "מידע" in one segment and "פרטים" in another. ' +
+    'For each group return: "concept" (the English word/phrase that drifts); "reason" (short, e.g. "information: מידע vs פרטים"); "renderings" — the competing Hebrew renderings (2–4, most natural first); and "members" — EVERY segment in which the concept appears with one of those renderings. ' +
+    'For EACH member return "i" and "rewrites": an array PARALLEL to "renderings", where rewrites[k] is that segment\'s FULL Hebrew rewritten so the concept uses renderings[k] — grammatically correct (adjust only the words the change forces: gender, number, prefixes, the definite ה\"א) and CHANGING NOTHING ELSE (keep the meaning, every placeholder {x}/%s/<g>…, every number/currency, and all punctuation identical). If a rendering already fits a segment as-is, its rewrite is that segment\'s current "he". ' +
+    'Do NOT choose a winner — offer the renderings and let the human pick. Only report GENUINE avoidable drift where the SAME meaning is expressed by different words; do NOT report differences the grammar or sense of a segment requires (singular vs plural of a different meaning, a noun vs a verb use), and do NOT report glossary/term choices. ' +
+    'Return ONLY JSON: {"groups":[{"concept":"information","reason":"information: מידע vs פרטים","renderings":["מידע","פרטים"],"members":[{"i":3,"rewrites":["…מידע…","…פרטים…"]}]}]}. ' +
+    'Return an empty "groups" array if everything is already consistent. No commentary, no markdown, no code fences.';
   const r = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' },
@@ -760,7 +761,7 @@ async function icSweepGpt(items, key, model) {
   const data = await r.json();
   if (!r.ok) throw new Error((data.error && data.error.message) || ('GPT error ' + r.status));
   const parsed = JSON.parse(data.choices?.[0]?.message?.content || '{}');
-  return parsed.flags || [];
+  return parsed.groups || [];
 }
 async function icSweep() {
   const props = (state.proposals || []).filter((p) => !p.manual && String(p.next || '').trim());
@@ -773,19 +774,32 @@ async function icSweep() {
   try {
     for (const p of state.proposals) p.icDrift = null;              // clear any prior sweep
     const items = props.map((p) => ({ i: state.proposals.indexOf(p), src: String(p.src || ''), he: stripTags(String(p.next == null ? '' : p.next)) }));
-    const flags = await icSweepGpt(items, key, model);
-    let n = 0;
-    for (const f of (flags || [])) {
-      const p = state.proposals[Number(f.i)]; if (!p || p.manual) continue;
-      const suggest = String(f.suggest == null ? '' : f.suggest).trim();
-      if (!suggest || sameRender(suggest, p.next)) continue;        // no real change → not a useful flag
-      p.icDrift = { reason: String(f.reason || f.concept || 'inconsistent wording'), concept: String(f.concept || ''), suggest };
-      n++;
+    const groups = await icSweepGpt(items, key, model);
+    let n = 0, gi = 0;
+    for (const g of (groups || [])) {
+      const renderings = (g.renderings || []).map((x) => String(x == null ? '' : x).trim()).filter(Boolean);
+      if (renderings.length < 2) continue;
+      const gid = 'g' + (gi++) + '·' + (g.concept || '');
+      // Stage each member with a full rewrite per rendering (grammatically-correct, from GPT).
+      const staged = [];
+      for (const m of (g.members || [])) {
+        const p = state.proposals[Number(m.i)]; if (!p || p.manual) continue;
+        const rw = m.rewrites || [];
+        const options = renderings.map((he, k) => ({ he, suggest: String(rw[k] == null ? '' : rw[k]).trim() })).filter((o) => o.suggest);
+        if (options.length < 2) continue;                            // need a real choice
+        if (options.every((o) => sameRender(o.suggest, options[0].suggest))) continue;   // the renderings don't actually differ here
+        staged.push({ p, options });
+      }
+      if (staged.length < 2) continue;                               // a real drift group spans ≥2 segments
+      for (const s of staged) {
+        s.p.icDrift = { concept: String(g.concept || ''), reason: String(g.reason || g.concept || 'inconsistent wording'), group: gid, options: s.options };
+        n++;
+      }
     }
     renderReview();
     if (n && $('view-icdrift')) $('view-icdrift').click();          // jump to the drift view
     info('gpt-info', n
-      ? `⚖ ${n} internal-consistency drift flag(s) — review below; “use unified” adopts a wording (nothing auto-applied).`
+      ? `⚖ ${n} segment(s) drift across ${gi} term(s) — pick a rendering below; it standardizes every segment using that term (nothing auto-applied).`
       : '⚖ No internal-consistency drift found — recurring wording is consistent across the task.', n ? '' : 'good');
   } catch (e) { info('gpt-info', 'Consistency sweep failed: ' + (e.message || e), 'err'); }
   finally { if (btn) { btn.disabled = false; btn.textContent = prev || '🧹 Sweep drift'; } }
@@ -1280,7 +1294,7 @@ function renderReview() {
         ${p.fuzzy && p.fuzzy.matches.length ? `<span class="rc-warn" style="background:#3b0764" title="No exact memory match, but ${p.fuzzy.matches.length} near-match(es) from your past work are shown below — click “use” to adopt one. Nothing is applied automatically.">🧠 ${p.fuzzy.matches.length} near-match${p.fuzzy.matches.length === 1 ? '' : 'es'}</span>` : ''}
         ${p.consist && p.consist.length ? p.consist.map((c) => `<span class="rc-warn" style="background:#7c2d12" title="Consistency check: “${esc(c.en)}” was translated as “${esc(c.he)}” on its own (segment ${esc(String(c.from))}), but this segment's target doesn't appear to use that wording. Flag only — nothing was changed. Fix the Hebrew by hand if it should match, or click 🔒 lock to make “${esc(c.en)}” → “${esc(c.he)}” mandatory everywhere.">⚖ consistency: ${esc(c.en)}</span><button class="rc-lockterm" type="button" data-en="${esc(c.en)}" data-he="${esc(c.he)}" title="Lock “${esc(c.en)}” → “${esc(c.he)}” as a mandatory term (adds it to 🔒 Locked terms)">🔒 lock</button>`).join('') : ''}
         ${p.termHint && p.termHint.length ? p.termHint.map((c) => `<span class="rc-warn" style="background:#155e75" title="Starling term base: “${esc(c.en)}” is approved as “${esc(c.he)}”, but this target doesn't appear to use that wording. This is a SOFT hint — a different form can be correct here (e.g. the term used as a verb, or a different sense). Nothing was changed; fix by hand only if it should match.">🏷 term: ${esc(c.en)}</span>`).join('') : ''}
-        ${p.icDrift ? `<span class="rc-warn" style="background:#7c2d12" title="Internal-consistency sweep: ${esc(p.icDrift.reason)}. GPT proposes a unified wording (below) so this recurring choice matches the rest of the task. Flag only — nothing was changed; click “use unified” to adopt it.">⚖ drift${p.icDrift.concept ? ': ' + esc(p.icDrift.concept) : ''}</span>` : ''}
+        ${p.icDrift ? `<span class="rc-warn" style="background:#7c2d12" title="Internal-consistency drift: ${esc(p.icDrift.reason)}. Pick which Hebrew rendering to standardize on (buttons below) — it updates EVERY segment in this task that uses this term. Flag only; nothing changes until you choose.">⚖ drift${p.icDrift.concept ? ': ' + esc(p.icDrift.concept) : ''}</span>` : ''}
         <div class="rc-ctl">${control}</div>
       </div>
       ${p.src ? `<div class="rc-src" dir="ltr">${hl(esc(p.src))}</div>` : ''}
@@ -1290,7 +1304,9 @@ function renderReview() {
       ${p.fuzzy && p.fuzzy.matches.length ? `<div class="rc-fuzzy" title="Near-matches from your Consistency memory — review-only. “use” drops the wording into the target for you to adjust.">` +
         p.fuzzy.matches.map((m, j) => `<div class="fz-m"><div class="fz-meta"><span class="fz-score">${m.tier === 'template' ? 'template' : Math.round(m.score * 100) + '%'}</span> <span class="fz-src" dir="ltr">${hl(esc(m.src))}</span></div><div class="fz-body"><div class="fz-tgt" dir="rtl">${esc(m.suggest)}</div><button class="fz-use" type="button" data-i="${idx}" data-j="${j}" title="Use this wording (fills the target — edit as needed)">use</button></div></div>`).join('') +
         `</div>` : ''}
-      ${p.icDrift ? `<div class="rc-fuzzy" title="Internal-consistency suggestion — review-only. “use unified” drops it into the target for you to adjust."><div class="fz-m"><div class="fz-meta"><span class="fz-score">⚖ unify</span> <span class="fz-src" dir="ltr">${esc(p.icDrift.reason)}</span></div><div class="fz-body"><div class="fz-tgt" dir="rtl">${esc(p.icDrift.suggest)}</div><button class="ic-use" type="button" data-i="${idx}" title="Adopt this unified wording (fills the target — edit as needed)">use unified</button></div></div></div>` : ''}
+      ${p.icDrift ? `<div class="rc-fuzzy" title="Pick the Hebrew rendering to standardize on — it updates every segment in this task that uses “${esc(p.icDrift.concept)}”. Nothing auto-applied."><div class="fz-m"><div class="fz-meta"><span class="fz-score">⚖ unify</span> <span class="fz-src" dir="ltr">${esc(p.icDrift.reason)}</span></div><div class="ic-opts">` +
+        p.icDrift.options.map((o) => `<button class="ic-use" type="button" data-i="${idx}" data-he="${esc(o.he)}" dir="rtl" title="Use “${esc(o.he)}” everywhere “${esc(p.icDrift.concept)}” appears in this task (rewrites each segment grammatically).">use ${esc(o.he)}</button>`).join('') +
+        `</div></div></div>` : ''}
       ${changed && String(p.old).trim() ? `<div class="rc-old" dir="rtl">${hl(esc(p.old))}</div>` : ''}
       ${newRow}
       ${copyBlock}
@@ -1344,8 +1360,16 @@ function renderReview() {
   }));
   box.querySelectorAll('.ic-use').forEach((b) => b.addEventListener('click', () => {
     const p = state.proposals[+b.dataset.i]; if (!p || !p.icDrift) return;
-    p.next = p.icDrift.suggest; p.edited = true; p.icDrift = null;   // adopted the unified wording; clear the drift flag
-    if (!p.manual) p.approved = !sameRender(p.next, p.old);
+    const he = b.getAttribute('data-he'), group = p.icDrift.group;
+    let cnt = 0;                                                     // standardize EVERY segment in this drift group on the chosen rendering
+    for (const q of state.proposals) {
+      if (!q.icDrift || q.icDrift.group !== group) continue;
+      const opt = q.icDrift.options.find((o) => o.he === he); if (!opt) continue;
+      q.next = opt.suggest; q.edited = true; q.icDrift = null;
+      if (!q.manual) q.approved = !sameRender(q.next, q.old);
+      cnt++;
+    }
+    if (cnt) info('gpt-info', `⚖ Standardized ${cnt} segment(s) on “${he}”.`, 'good');
     renderReview();
   }));
   updateRevCount();
