@@ -1323,10 +1323,36 @@ async function doWrite() {
       $('write-bar').style.width = Math.round(Math.min(i + CH, edits.length) / edits.length * 100) + '%';
       info('write-info', `Wrote ${Math.min(i + CH, edits.length)}/${edits.length}…`);
     }
-    // Break results down by WHERE each write actually landed (server-verified), so the message
+    // Doc-editor rescue: Starling's read-back API (getSourceTextListWithTargetText) returns 1002
+    // for Document-editor tasks, so those writes come back "unverified" even when they landed.
+    // Verify them the way the doc grab/harvest do — read the open editor's redux store and
+    // fold-match each unverified segment's target text against what we wrote. A match = it saved.
+    try {
+      const stillUnv = results.filter((r) => r.via === 'unverified');
+      if (stillUnv.length) {
+        await new Promise((r) => setTimeout(r, 450));   // let the editor commit the typed text into its redux store
+        const doc = await hvDocRows(null);   // null id → verify against whatever doc task is open
+        if (doc && doc.ok && Array.isArray(doc.rows)) {
+          const bySrc = new Map();           // folded source → [folded targets] (a source can repeat)
+          for (const row of doc.rows) {
+            const k = wbFold(row.source || ''); if (!k) continue;
+            if (!bySrc.has(k)) bySrc.set(k, []);
+            bySrc.get(k).push(wbFold(row.target || ''));
+          }
+          for (const r of stillUnv) {
+            const p = (state.proposals || []).find((x) => x.seg === r.seg); if (!p) continue;
+            const want = wbFold(p.next || ''); if (!want) continue;
+            const cands = bySrc.get(wbFold(p.src || '')) || [];
+            if (cands.some((t) => t === want)) { r.via = 'store'; r.ok = true; r.reason = 'verified in the doc editor'; }
+          }
+        }
+      }
+    } catch (e) { /* leave them unverified — the message below will say so */ }
+    // Break results down by WHERE each write actually landed (verified), so the message
     // tells the truth instead of a bare count: dom = typed + server-confirmed, api = rescued via
-    // API, unverified = couldn't re-read the task to check (may not have persisted), fail = lost.
+    // API, store = confirmed by re-reading the doc editor, unverified = couldn't check, fail = lost.
     const domN = results.filter((r) => r.via === 'dom').length;
+    const storeN = results.filter((r) => r.via === 'store').length;
     const apiN = results.filter((r) => r.via === 'api').length;
     const unv = results.filter((r) => r.via === 'unverified');
     const bad = results.filter((r) => !r.ok && r.via !== 'unverified');
@@ -1347,10 +1373,11 @@ async function doWrite() {
       const parts = [];
       if (domN) parts.push(`${domN} confirmed on the server`);
       if (apiN) parts.push(`${apiN} rescued via API (auto-confirmed)`);
+      if (storeN) parts.push(`${storeN} confirmed in the doc editor`);
       if (bad.length) parts.push(`${bad.length} failed`);
-      const allServer = domN + apiN === results.length && !bad.length;
+      const allOk = domN + apiN + storeN === results.length && !bad.length;
       const newNote = filledSegs.size ? ` · ✍ ${newOk}/${filledSegs.size} new translation${filledSegs.size === 1 ? '' : 's'} written${newBad ? ` (${newBad} NOT written — see log)` : ''}` : '';
-      info('write-info', `✅ ${results.length} segment(s): ${parts.join(' · ')}${newNote}${remembered ? ` · 🧠 ${remembered} remembered` : ''}. ${allServer ? 'Starling’s server has them all — if the editor still shows old text, reload (Ctrl+R) to refresh the display.' : ''}`, (bad.length || newBad) ? 'err' : 'good');
+      info('write-info', `✅ ${results.length} segment(s): ${parts.join(' · ')}${newNote}${remembered ? ` · 🧠 ${remembered} remembered` : ''}. ${allOk ? (storeN ? 'All verified — if the editor still shows old text, reload (Ctrl+R) to refresh the display.' : 'Starling’s server has them all — if the editor still shows old text, reload (Ctrl+R) to refresh the display.') : ''}`, (bad.length || newBad) ? 'err' : 'good');
     }
   } catch (e) {
     info('write-info', e.message, 'err');
