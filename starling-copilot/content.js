@@ -13,7 +13,7 @@
   // tab is running an older version, re-injects this file via chrome.scripting so stale tabs
   // self-heal (no page reload needed). Re-injection tears down the previous version's message
   // listener first (below) so there's never a double-listener race.
-  const CS_VERSION = 39;
+  const CS_VERSION = 40;
   if (window.__scVer === CS_VERSION) return;                         // this exact version already live here
   if (typeof window.__scCleanup === 'function') { try { window.__scCleanup(); } catch (e) {} }  // remove an older/stale one
   window.__scVer = CS_VERSION;
@@ -428,6 +428,23 @@
     let byRank = null, verifyErr = '';
     try { const t = await apiTask(taskId()); if (t && t.ok) byRank = new Map((t.rows || []).map((r) => [String(r.rank), r])); else verifyErr = (t && t.error) || 'read failed'; } catch (e) { verifyErr = String(e && e.message || e); }
     if (!byRank) {
+      // Document-editor tasks 1002 the string content API (getSourceTextListWithTargetText), so we
+      // can NEVER server-verify them — every doc write would be tagged 'unverified' and warn even
+      // when it saved fine. Unlike the string editor's controlled input (which can accept typed text
+      // into the visible cell yet silently revert), the doc editor commits on blur: its store's
+      // segment Target.Text mirrors the target cell. So for doc tasks, trust the DOM check writeOne
+      // ALREADY did — it read the cell right after typing, while the row was guaranteed visible — and
+      // count a segment whose cell holds our text (tgtSame on `after`) as written. A cell that didn't
+      // take the text still stays 'unverified'. String-editor tasks keep the strict behaviour: a
+      // failed API read there means genuinely unknown, so they stay 'unverified'.
+      const isDoc = /\/doc\/editor\//.test(location.href);
+      if (isDoc) {
+        return dom.map((d, i) => {
+          const e = edits[i] || {};
+          if (d && d.after != null && tgtSame(d.after, e.text)) return { seg: d.seg, ok: true, via: 'dom' };
+          return { seg: d.seg, ok: false, via: 'unverified', reason: d.reason || 'typed text did not stick in the editor cell' };
+        });
+      }
       // Couldn't re-read the task to verify — DON'T silently claim success. Tag each 'unverified'
       // so the panel warns the write may not have persisted, rather than trusting the DOM (the
       // exact unreliable signal we're moving away from).
