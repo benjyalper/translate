@@ -300,6 +300,7 @@ function onXliffFile(input) {
       info('harvest-info', `Loaded ${segs.length}${filtered ? ` of ${all.length}` : ''} segments from ${f.name}${filtered ? ' (filtered)' : ''}${tagged ? ` · ⚠ ${tagged} with tags` : ''}.`, 'good');
       log(`xliff: ${segs.length}/${all.length} segments from ${f.name}${sel ? ' (filtered)' : ''}`);
       $('gpt-card').hidden = false;
+      runCoverage();
     } catch (e) { info('harvest-info', 'Could not parse XLIFF: ' + e.message, 'err'); }
   };
   r.readAsText(f);
@@ -1101,6 +1102,39 @@ function parseSegSel(str) {
   };
 }
 
+// Coverage preview under the Run button — how many of your STORED terms actually
+// match the harvested sources, so you see what will guide the run BEFORE spending
+// the GPT call. Mirrors exactly what gets fed on Run:
+//   🔒 locked   → mandatory, in the system prompt (lockText)
+//   🏷 term hint → soft per-segment "terms" field (tbHintsFor; gated by the toggle)
+//   📖 glossary  → advisory, in the system prompt (brainText)
+// "covering N/total" counts segments carrying ≥1 locked or term-base match.
+function runCoverage() {
+  const el = $('run-coverage'); if (!el) return;
+  const segs = (state && state.segments) || [];
+  if (!segs.length) { el.textContent = ''; el.className = 'cov'; return; }
+  const srcs = segs.map((s) => String(s.src || ''));
+  const covered = new Set();
+  const scan = (en) => { let hit = false; srcs.forEach((src, i) => { if (lockSrcHas(src, en)) { hit = true; covered.add(i); } }); return hit; };
+  const seen = (en) => srcs.some((src) => lockSrcHas(src, en));   // glossary is global — count matches, don't mark coverage
+  const tbOn = !!(TB && TB.enabled);
+  let lockN = 0, tbN = 0, glossN = 0;
+  for (const t of (LOCK && LOCK.terms) || []) if (t && t.en && scan(t.en)) lockN++;
+  if (tbOn) for (const t of (TB && TB.terms) || []) if (t && t.en && t.he && scan(t.en)) tbN++;
+  for (const g of (BRAIN && BRAIN.glossary) || []) if (g && g.en && seen(g.en)) glossN++;
+  if (!lockN && !tbN && !glossN) {
+    el.className = 'cov cov-none';
+    el.textContent = `⚖ No stored terms match these ${segs.length} segment(s) — ⬇ grab a term base, or add 🔒 locked terms, to guide the run.`;
+    return;
+  }
+  const parts = [];
+  if (lockN) parts.push(`🔒 ${lockN} locked`);
+  parts.push(tbOn ? `🏷 ${tbN} term hint${tbN === 1 ? '' : 's'}` : '🏷 term base off');
+  if (glossN) parts.push(`📖 ${glossN} glossary`);
+  el.className = 'cov';
+  el.textContent = `⚖ Will guide this run: ${parts.join(' · ')} — covering ${covered.size}/${segs.length} segment(s).`;
+}
+
 async function doHarvest() {
   info('harvest-info', 'Harvesting… (scrolling the segment list)');
   $('harvest').disabled = true;
@@ -1121,6 +1155,7 @@ async function doHarvest() {
     info('harvest-info', `Harvested ${state.segments.length}${filtered ? ` of ${all.length}` : ''} segments${filtered ? ' (filtered)' : ''}${tagged ? ` · ⚠ ${tagged} tagged${chips ? ` (${chips} chip → copy-by-hand)` : ''}` : ''}${recovered ? ` · ↺ ${recovered} recovered via API (the scroll missed ${recovered === 1 ? 'it' : 'them'})` : ''}.`, 'good');
     log(`harvest: ${state.segments.length}/${all.length} segments${sel ? ' (filtered)' : ''}, ${tagged} tagged, ${chips} chips${recovered ? `, ${recovered} api-recovered` : ''}`);
     $('gpt-card').hidden = state.segments.length === 0;
+    runCoverage();   // preview which stored terms will guide the run
     if (!all.length) info('harvest-info', 'No segments found — run Diagnostics in Settings to recalibrate selectors.', 'err');
   } catch (e) {
     info('harvest-info', e.message, 'err');
@@ -5631,6 +5666,7 @@ function lockRefresh() {
   const b = $('lock-badge'); if (b) b.textContent = lockCount() ? `· ${lockCount()} term${lockCount() === 1 ? '' : 's'}` : '· empty';
   const n = $('lock-count-n'); if (n) n.textContent = lockCount();
   lockRenderList($('lock-search') ? $('lock-search').value : '');
+  if (typeof runCoverage === 'function') runCoverage();   // keep the Run-button preview in sync
 }
 function lockRenderList(filter) {
   const box = $('lock-list'); if (!box) return;
@@ -5723,6 +5759,7 @@ function tbRefresh() {
   const st = $('tb-state'); if (st) st.textContent = on ? '' : '— off (terms kept; tick to use them again)';
   const n = $('tb-count-n'); if (n) n.textContent = tbCount();
   tbRenderList($('tb-search') ? $('tb-search').value : '');
+  if (typeof runCoverage === 'function') runCoverage();   // keep the Run-button preview in sync
 }
 function tbRenderList(filter) {
   const box = $('tb-list'); if (!box) return;

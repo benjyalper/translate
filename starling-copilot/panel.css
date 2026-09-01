@@ -122,6 +122,9 @@ textarea { font-family: ui-monospace, Menlo, Consolas, monospace; resize: vertic
 .info.err { color: #fca5a5; }
 .info.good { color: #86efac; }
 .info.cb-hot { color: #fcd34d; }
+.cov { font-size: 11px; color: var(--dim); margin-top: 6px; min-height: 1em; line-height: 1.4; }
+.cov:empty { display: none; }
+.cov.cov-none { color: var(--dim2); }
 
 .prog { height: 5px; border-radius: 99px; background: #0a0a12; overflow: hidden; margin: 8px 0; }
 .prog i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--acc), var(--acc2)); transition: width .2s; }
