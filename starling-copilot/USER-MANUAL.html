@@ -1,0 +1,629 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Starling Copilot Manual</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&family=Heebo:wght@400;500;700&display=swap">
+<style>
+  :root{
+    --ground:#fbfbfe; --surface:#ffffff; --surface-2:#f4f4fb; --line:#e5e5f0; --line-2:#d9d9e8;
+    --ink:#1a1a26; --ink-2:#4a4a5e; --ink-3:#77778e;
+    --acc:#5b5be6; --acc-2:#8b5cf6; --acc-soft:#ecebff; --acc-ink:#4a41d6;
+    --good:#0f8a4d; --good-soft:#e3f6ea; --warn:#b45309; --warn-soft:#fdf0dc; --bad:#c2334d; --bad-soft:#fbe4e8;
+    --shadow:0 1px 2px rgba(26,26,38,.04),0 8px 24px rgba(46,41,120,.06);
+    --mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:"IBM Plex Sans","Heebo",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    --display:"Sora","IBM Plex Sans",system-ui,sans-serif;
+    --heb:"Heebo","IBM Plex Sans",system-ui,sans-serif;
+  }
+  :root:not([data-theme="light"]){ }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){
+      --ground:#0f0f17; --surface:#16161f; --surface-2:#1c1c28; --line:#292936; --line-2:#34344a;
+      --ink:#e7e7f2; --ink-2:#adadc4; --ink-3:#7c7c96;
+      --acc:#8f8ff2; --acc-2:#a78bfa; --acc-soft:#211f3a; --acc-ink:#c3c0ff;
+      --good:#4ade80; --good-soft:#12261b; --warn:#fbbf24; --warn-soft:#2a2010; --bad:#fb7185; --bad-soft:#2c1420;
+      --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#0f0f17; --surface:#16161f; --surface-2:#1c1c28; --line:#292936; --line-2:#34344a;
+    --ink:#e7e7f2; --ink-2:#adadc4; --ink-3:#7c7c96;
+    --acc:#8f8ff2; --acc-2:#a78bfa; --acc-soft:#211f3a; --acc-ink:#c3c0ff;
+    --good:#4ade80; --good-soft:#12261b; --warn:#fbbf24; --warn-soft:#2a2010; --bad:#fb7185; --bad-soft:#2c1420;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px rgba(0,0,0,.35);
+  }
+
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+  body{
+    margin:0; background:var(--ground); color:var(--ink);
+    font-family:var(--sans); font-size:16px; line-height:1.65;
+    -webkit-font-smoothing:antialiased;
+  }
+  .layout{display:grid; grid-template-columns:288px minmax(0,1fr); gap:0; max-width:1240px; margin:0 auto}
+
+  /* ---- Sidebar ---- */
+  .side{
+    position:sticky; top:0; align-self:start; height:100vh; overflow-y:auto;
+    padding:28px 20px 40px; border-right:1px solid var(--line);
+    background:linear-gradient(180deg,var(--surface-2),var(--ground));
+  }
+  .brand{display:flex; align-items:center; gap:11px; margin-bottom:6px}
+  .brand .mark{
+    width:38px;height:38px;border-radius:11px;flex:none;
+    background:linear-gradient(135deg,var(--acc),var(--acc-2));
+    display:grid;place-items:center;font-size:20px;box-shadow:var(--shadow)}
+  .brand .nm{font-family:var(--display);font-weight:700;font-size:16px;letter-spacing:-.01em;line-height:1.15}
+  .brand .sb{font-size:11.5px;color:var(--ink-3);letter-spacing:.02em}
+  .toc{margin-top:22px;display:flex;flex-direction:column;gap:1px}
+  .toc a{
+    display:flex;gap:9px;align-items:baseline;text-decoration:none;color:var(--ink-2);
+    font-size:13.5px;padding:6px 10px;border-radius:8px;line-height:1.3}
+  .toc a .n{font-family:var(--mono);font-size:11px;color:var(--ink-3);min-width:16px;font-variant-numeric:tabular-nums}
+  .toc a:hover{background:var(--surface);color:var(--ink)}
+  .toc a.active{background:var(--acc-soft);color:var(--acc-ink);font-weight:600}
+  .toc a.active .n{color:var(--acc)}
+  .toc .grp{font-family:var(--display);font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.14em;color:var(--ink-3);margin:16px 0 5px 10px}
+
+  /* ---- Main ---- */
+  main{padding:0 clamp(20px,4vw,56px) 120px; min-width:0}
+  .wrap{max-width:74ch;margin:0 auto}
+
+  header.hero{padding:52px 0 30px;border-bottom:1px solid var(--line);margin-bottom:8px}
+  .eyebrow{font-family:var(--display);font-size:11.5px;font-weight:600;letter-spacing:.17em;text-transform:uppercase;color:var(--acc);margin:0 0 14px}
+  h1{font-family:var(--display);font-weight:700;font-size:clamp(30px,5vw,44px);line-height:1.05;letter-spacing:-.02em;margin:0;text-wrap:balance}
+  .lede{font-size:18px;color:var(--ink-2);margin:18px 0 0;max-width:60ch}
+  .statusbar{display:flex;flex-wrap:wrap;gap:8px;margin-top:24px}
+  .pill{font-family:var(--mono);font-size:12px;padding:4px 11px;border-radius:999px;border:1px solid var(--line-2);background:var(--surface);color:var(--ink-2);display:inline-flex;gap:7px;align-items:center}
+  .pill b{color:var(--ink);font-weight:600}
+  .pill .dot{width:7px;height:7px;border-radius:50%;background:var(--good)}
+
+  section.ch{padding:46px 0 8px;scroll-margin-top:20px;border-top:1px solid var(--line)}
+  section.ch:first-of-type{border-top:none}
+  h2{font-family:var(--display);font-weight:700;font-size:27px;letter-spacing:-.015em;margin:0 0 4px;line-height:1.15;text-wrap:balance;display:flex;gap:12px;align-items:baseline}
+  h2 .cn{font-family:var(--mono);font-size:14px;color:var(--acc);font-weight:500}
+  h3{font-family:var(--display);font-weight:600;font-size:19px;letter-spacing:-.01em;margin:34px 0 6px;text-wrap:balance}
+  h4{font-family:var(--display);font-weight:600;font-size:15px;margin:22px 0 4px;color:var(--ink)}
+  p{margin:12px 0}
+  a{color:var(--acc-ink);text-decoration:underline;text-underline-offset:2px;text-decoration-thickness:1px}
+  a:hover{text-decoration-thickness:2px}
+  strong{font-weight:600;color:var(--ink)}
+  .sub{color:var(--ink-2)}
+  .heb{font-family:var(--heb);direction:rtl;unicode-bidi:isolate}
+
+  ul,ol{margin:12px 0;padding-inline-start:22px}
+  li{margin:6px 0}
+  li::marker{color:var(--acc)}
+
+  code{font-family:var(--mono);font-size:.86em;background:var(--surface-2);border:1px solid var(--line);border-radius:5px;padding:1px 5px;color:var(--acc-ink)}
+  kbd{font-family:var(--display);font-size:.82em;font-weight:600;background:var(--surface);border:1px solid var(--line-2);border-bottom-width:2px;border-radius:6px;padding:1px 7px;color:var(--ink);white-space:nowrap}
+  pre{font-family:var(--mono);font-size:13px;line-height:1.6;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;overflow-x:auto;margin:16px 0;box-shadow:var(--shadow)}
+  pre code{background:none;border:none;padding:0;color:var(--ink-2)}
+
+  /* tables */
+  .tw{overflow-x:auto;margin:18px 0;border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
+  table{border-collapse:collapse;width:100%;font-size:14.5px;min-width:520px}
+  th,td{text-align:left;padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+  thead th{font-family:var(--display);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);background:var(--surface-2)}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:var(--surface-2)}
+  td code{white-space:nowrap}
+
+  /* callouts */
+  .note{border-radius:12px;padding:14px 16px 14px 46px;margin:18px 0;position:relative;font-size:14.5px;line-height:1.6;border:1px solid var(--line)}
+  .note::before{position:absolute;left:15px;top:13px;font-size:17px;line-height:1}
+  .note.tip{background:var(--acc-soft);border-color:transparent}
+  .note.tip::before{content:"◆";color:var(--acc)}
+  .note.warn{background:var(--warn-soft);border-color:transparent}
+  .note.warn::before{content:"▲";color:var(--warn)}
+  .note.key{background:var(--good-soft);border-color:transparent}
+  .note.key::before{content:"●";color:var(--good)}
+  .note b{color:var(--ink)}
+
+  /* badge chips (mirror the real review badges) */
+  .chip{display:inline-flex;align-items:center;gap:4px;font-size:12.5px;font-weight:500;padding:2px 9px;border-radius:7px;white-space:nowrap;font-family:var(--sans);line-height:1.5;border:1px solid transparent}
+  .chip.b-mem{background:#0c4a6e;color:#e0f2fe}
+  .chip.b-rev{background:#7a5c0a;color:#fff7e0}
+  .chip.b-lock{background:#b91c1c;color:#fee}
+  .chip.b-fix{background:#0e7490;color:#e0fbff}
+  .chip.b-drift{background:#7c2d12;color:#ffe8dc}
+  .chip.b-term{background:#155e75;color:#e2fbff}
+  .chip.b-new{background:#0a7a3f;color:#e7fff0}
+  .chip.b-warn{background:#9a5309;color:#fff5e6}
+
+  /* button token */
+  .btn{display:inline-flex;align-items:center;gap:6px;font-family:var(--display);font-weight:600;font-size:13px;padding:3px 11px;border-radius:8px;background:linear-gradient(135deg,var(--acc),var(--acc-2));color:#fff;white-space:nowrap;box-shadow:var(--shadow)}
+  .btn.ghost{background:var(--surface);color:var(--ink);border:1px solid var(--line-2);box-shadow:none}
+
+  /* workflow ribbon */
+  .flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;margin:20px 0;border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:var(--shadow);background:var(--surface)}
+  .flow .stp{flex:1 1 150px;min-width:150px;padding:15px 16px;border-right:1px solid var(--line);position:relative}
+  .flow .stp:last-child{border-right:none}
+  .flow .stp .k{font-family:var(--mono);font-size:11px;color:var(--acc);font-variant-numeric:tabular-nums}
+  .flow .stp .t{font-family:var(--display);font-weight:600;font-size:15px;margin-top:3px}
+  .flow .stp .d{font-size:12.5px;color:var(--ink-2);margin-top:4px;line-height:1.45}
+  @media (max-width:640px){.flow .stp{border-right:none;border-bottom:1px solid var(--line)}.flow .stp:last-child{border-bottom:none}}
+
+  /* cadence cards */
+  .cadence{display:grid;gap:14px;margin:20px 0}
+  .cad{border:1px solid var(--line);border-radius:14px;padding:18px 20px;background:var(--surface);box-shadow:var(--shadow)}
+  .cad .ch-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .cad .when{font-family:var(--mono);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--acc);background:var(--acc-soft);padding:3px 9px;border-radius:6px}
+  .cad h3{margin:0;font-size:17px}
+  .cad p{margin:8px 0 0}
+  .cad ol{margin:10px 0 0}
+
+  hr{border:none;border-top:1px solid var(--line);margin:34px 0}
+  .foot{margin-top:60px;padding-top:24px;border-top:1px solid var(--line);color:var(--ink-3);font-size:13px}
+
+  /* theme + mobile nav */
+  .topbar{display:none}
+  .tgl{position:fixed;right:16px;bottom:16px;z-index:40;width:44px;height:44px;border-radius:50%;border:1px solid var(--line-2);background:var(--surface);color:var(--ink);cursor:pointer;box-shadow:var(--shadow);font-size:18px;display:grid;place-items:center}
+  .tgl:focus-visible,a:focus-visible,button:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+
+  @media (max-width:900px){
+    .layout{grid-template-columns:1fr}
+    .side{position:fixed;inset:0 auto 0 0;width:min(84vw,320px);z-index:50;transform:translateX(-102%);transition:transform .2s ease;box-shadow:var(--shadow)}
+    @media (prefers-reduced-motion:reduce){.side{transition:none}}
+    .side.open{transform:none}
+    .scrim{position:fixed;inset:0;background:rgba(10,10,20,.44);z-index:45;opacity:0;pointer-events:none;transition:opacity .2s}
+    .scrim.open{opacity:1;pointer-events:auto}
+    .topbar{display:flex;position:sticky;top:0;z-index:30;align-items:center;gap:12px;padding:11px 16px;background:var(--surface);border-bottom:1px solid var(--line)}
+    .topbar .mb{width:38px;height:38px;border-radius:9px;border:1px solid var(--line-2);background:var(--ground);color:var(--ink);font-size:19px;cursor:pointer}
+    .topbar .nm{font-family:var(--display);font-weight:700;font-size:15px}
+    main{padding-left:18px;padding-right:18px}
+    header.hero{padding-top:34px}
+  }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <button class="mb" id="mb" aria-label="Open navigation">☰</button>
+  <span class="nm">Starling Copilot Manual</span>
+</div>
+<div class="scrim" id="scrim"></div>
+
+<div class="layout">
+  <aside class="side" id="side">
+    <div class="brand">
+      <div class="mark">🐦</div>
+      <div>
+        <div class="nm">Starling Copilot</div>
+        <div class="sb">EN → he-IL translation assistant</div>
+      </div>
+    </div>
+    <nav class="toc" id="toc">
+      <div class="grp">Foundations</div>
+      <a href="#model"><span class="n">1</span><span>Mental model</span></a>
+      <a href="#workflows"><span class="n">2</span><span>Workflows</span></a>
+      <a href="#editors"><span class="n">3</span><span>String vs Document editor</span></a>
+      <div class="grp">The brains</div>
+      <a href="#settings"><span class="n">4</span><span>Settings</span></a>
+      <a href="#lookup"><span class="n">5</span><span>Lookup</span></a>
+      <a href="#style"><span class="n">6</span><span>Style Brain</span></a>
+      <a href="#memory"><span class="n">7</span><span>Consistency memory</span></a>
+      <a href="#locked"><span class="n">8</span><span>Locked terms</span></a>
+      <a href="#autofix"><span class="n">9</span><span>Auto-fix</span></a>
+      <a href="#termbase"><span class="n">10</span><span>Term base</span></a>
+      <a href="#corpus"><span class="n">11</span><span>Corpus</span></a>
+      <a href="#conflicts"><span class="n">12</span><span>Conflicts</span></a>
+      <div class="grp">Operating</div>
+      <a href="#flow"><span class="n">13</span><span>The Starling flow</span></a>
+      <a href="#drift"><span class="n">14</span><span>Sweep drift</span></a>
+      <a href="#wordcount"><span class="n">15</span><span>Word count &amp; pay</span></a>
+      <a href="#modes"><span class="n">16</span><span>Other CAT modes</span></a>
+      <a href="#backups"><span class="n">17</span><span>Backups</span></a>
+      <div class="grp">Reference</div>
+      <a href="#changes"><span class="n">18</span><span>What's new</span></a>
+      <a href="#faq"><span class="n">19</span><span>Quick answers</span></a>
+    </nav>
+  </aside>
+
+  <main>
+    <div class="wrap">
+      <header class="hero">
+        <p class="eyebrow">User Manual</p>
+        <h1>Turn your finished work into the translations you get next time.</h1>
+        <p class="lede">A Chrome side-panel that harvests a CAT task's segments, proposes Hebrew with GPT guided by <em>your</em> accumulated knowledge, lets you review, and writes the approved text back — across the Starling String <em>and</em> Document editors.</p>
+        <div class="statusbar">
+          <span class="pill"><span class="dot"></span><b>Current</b> · content-script v40</span>
+          <span class="pill">Editors <b>String + Document</b></span>
+          <span class="pill">Never auto-submits</span>
+        </div>
+        <div class="note tip">Nothing here ever auto-submits a task. <b>Submit</b> is always a separate, deliberate click — and the only one-click submit (<span class="btn">⚡ Write·Confirm·Submit</span>) asks once before it does anything.</div>
+      </header>
+
+      <!-- 1 · MODEL -->
+      <section class="ch" id="model">
+        <h2><span class="cn">01</span> The mental model</h2>
+        <p>The copilot's intelligence is <strong>six stores</strong>. Five are hand-curated "brains"; one is a read-only history mined from your finished work. Learn what each does and <em>when</em> it acts, and the tool stops being a black box.</p>
+        <div class="tw"><table>
+          <thead><tr><th>Store</th><th>What it holds</th><th>When it acts</th></tr></thead>
+          <tbody>
+            <tr><td>🧠 <strong>Style Brain</strong></td><td>House rules + a glossary (advisory EN→HE)</td><td>Injected into the GPT prompt — shapes what GPT writes</td></tr>
+            <tr><td>🧩 <strong>Consistency memory</strong></td><td>Every source you've written → the exact Hebrew you used</td><td><em>After</em> GPT — swaps in your prior wording so identical sources stay identical</td></tr>
+            <tr><td>🔒 <strong>Locked terms</strong></td><td>Mandatory EN→HE pairs (non-negotiable)</td><td>In the prompt <em>and</em> as a post-check flag — outranks everything</td></tr>
+            <tr><td>🩹 <strong>Auto-fix</strong></td><td>Deterministic HE→HE find-and-replace rules</td><td><em>After</em> GPT — mechanical corrections (plural imperative → your slash form)</td></tr>
+            <tr><td>＃ <strong>Plural memory</strong></td><td>Remembered CLDR form-sets (one/two/many/other)</td><td>Pre-fills the 🔢 Plurals tool so it doesn't re-ask GPT</td></tr>
+            <tr><td>🏷 <strong>Term base</strong></td><td>Starling's own inline term references (soft hints)</td><td>Injected per-segment into the prompt; flagged on deviation</td></tr>
+            <tr><td>📦 <strong>Corpus</strong></td><td>A concordance mined from all your Submitted tasks</td><td>Feeds 🔎 Lookup &amp; learning; you <em>promote</em> from it — never edits live</td></tr>
+          </tbody>
+        </table></div>
+
+        <h3>How a translation is actually decided</h3>
+        <p>Every time you press <span class="btn">✨ Run</span>, each segment flows through this exact order. Knowing the order tells you <em>who wins</em> when two brains disagree:</p>
+        <pre><code>1. GPT proposes Hebrew         ← guided by Style Brain + Locked terms + Term base (in the prompt)
+2. Consistency memory applied  ← if you've written this source before, your wording replaces GPT's
+3. Auto-fix applied            ← deterministic HE rewrites run on the result
+4. Locked-term post-check      ← flags any segment missing a mandatory term (never auto-edits)
+5. Consistency + term-base checks ← flag in-task drift / missing term Hebrew (never auto-edit)
+   → the Review list, with badges telling you what happened to each row
+6. You review / edit / approve  (optional: 🧹 Sweep drift for a deeper consistency pass)
+7. Write to Starling → each written segment is REMEMBERED (feeds step 2 next time)</code></pre>
+        <div class="note key"><b>Precedence in one line:</b> 🔒 Locked <b>&gt;</b> 🧩 Memory <b>&gt;</b> 🩹 Auto-fix <b>&gt;</b> GPT, with the glossary and term base as advice GPT usually follows but can inflect. The 📦 Corpus never edits anything live — it's history you consult and promote from.</div>
+      </section>
+
+      <!-- 2 · WORKFLOWS -->
+      <section class="ch" id="workflows">
+        <h2><span class="cn">02</span> Workflows</h2>
+        <p>The tool rewards a rhythm. Do the per-task loop well, keep the corpus fresh, and periodically fold your finished work back into the brains — each cycle makes the next batch of suggestions closer to what you'd write by hand.</p>
+
+        <h3>Per task</h3>
+        <p>Open the task in Starling (String <em>or</em> Document editor), then run the flow top to bottom. This same order is printed on the <strong>📋 Per-task workflow</strong> card at the top of the 🐦 Starling tab.</p>
+        <div class="flow">
+          <div class="stp"><div class="k">1 · terms</div><div class="t">🏷 Grab term base</div><div class="d">Read the task's approved terms <em>first</em>, so GPT uses them. In the 🏷 Term base card.</div></div>
+          <div class="stp"><div class="k">2 · load</div><div class="t">⬇ Harvest</div><div class="d">Pull the task's segments into Review. Step 1.</div></div>
+          <div class="stp"><div class="k">3 · gpt</div><div class="t">✨ Run</div><div class="d">Proofread or translate through the full pipeline. Step 2.</div></div>
+          <div class="stp"><div class="k">4 · unify</div><div class="t">🧹 Sweep drift</div><div class="d">Optional: catch a word rendered two ways, then review &amp; edit. Step 3.</div></div>
+          <div class="stp"><div class="k">5 · write</div><div class="t">↩ Write approved</div><div class="d">Type the approved targets back (or ⚡ Write·Confirm·Submit). Step 4.</div></div>
+        </div>
+        <div class="note tip">On a <b>Document editor</b> task, keep that editor tab open and active — 🏷 Grab, ⬇ Harvest, and the write-back verification all read the open editor's own data directly. Pasting a bare task id works for String-editor tasks; doc tasks need the live tab.</div>
+
+        <h3>The cadences</h3>
+        <div class="cadence">
+          <div class="cad">
+            <div class="ch-top"><span class="when">Daily</span><h3>Keep the corpus current, finish cleanly</h3></div>
+            <p>Two habits stop knowledge from going stale:</p>
+            <ol>
+              <li>Once at the start (with a <code>starling.bytedance.com</code> tab open), click <span class="btn ghost">⟳ Update — add new Submitted</span> so yesterday's submitted tasks enter the 📦 Corpus. The badge tells you how many are new.</li>
+              <li>As you finish each task, use the per-task loop above and <span class="btn ghost">↩ Write approved</span> — every written segment is remembered, so tomorrow's identical sources fill in automatically.</li>
+            </ol>
+          </div>
+          <div class="cad">
+            <div class="ch-top"><span class="when">Weekly</span><h3>Fold finished work into the brains</h3></div>
+            <p>Turn a week of accepted wording into signal the tool acts on:</p>
+            <ol>
+              <li><strong>📚 Learn from a task</strong> (Style Brain card) — open a submitted task, <span class="btn ghost">⬇ Harvest</span>, then <span class="btn ghost">➕ Add pairs to memory</span> and/or <span class="btn ghost">🧠 Distill rules &amp; terms</span>. Works on String <em>and</em> Document tasks.</li>
+              <li>Clear the <span class="chip b-warn">⚠ Conflicts</span> queue — decide any clash the week parked instead of overwriting.</li>
+              <li>If the glossary drifted, run <strong>🔤 Phrase mining</strong> on the corpus and promote the reliable terms.</li>
+            </ol>
+          </div>
+          <div class="cad">
+            <div class="ch-top"><span class="when">Monthly</span><h3>Tighten, back up, get paid</h3></div>
+            <ol>
+              <li><strong>🧹 Consolidate rules</strong> — one GPT pass merges duplicate house rules and tightens wording. A bloated ruleset gets skimmed by GPT and costs more to send every batch; a tight one is actually followed. A backup downloads first; nothing changes until you click <strong>Replace</strong>.</li>
+              <li><strong>🗄 Backup all brains</strong> — one JSON snapshot of every store <em>and</em> the corpus. Keep these.</li>
+              <li><strong>💰 Word count</strong> — set <em>Tasks = Submitted</em>, pick your first-submitted date column, and read the month table for pay.</li>
+              <li>Occasionally, tick <strong>Rebuild from scratch</strong> and <span class="btn ghost">📦 Build corpus</span> to re-read everything clean.</li>
+            </ol>
+          </div>
+          <div class="cad">
+            <div class="ch-top"><span class="when">Whole-corpus</span><h3>Learn from everything at once</h3></div>
+            <p>When you want the biggest jump — usually after a big backlog is submitted:</p>
+            <ol>
+              <li><span class="btn ghost">📦 Build / ⟳ Update</span> the corpus so it covers every Submitted task (String <em>and</em> Document — see the note below).</li>
+              <li><strong>📚 Learn from whole corpus</strong> — one GPT pass over every pair extrapolates rules, terms, expressions &amp; exceptions, reads a source's <em>evolution</em> newest-first so it learns the correction rather than both versions, then reconciles against your current brain. Findings land in the 🧠 review list; a full backup downloads before you can merge.</li>
+              <li><strong>Promote to memory</strong> the ✅ consistent pairs, and <strong>🔒 Lock</strong> the reliable terms.</li>
+            </ol>
+          </div>
+        </div>
+
+        <h3>How the learning compounds</h3>
+        <p>Every path feeds the acting brains, so the same correction never has to be made twice:</p>
+        <div class="tw"><table>
+          <thead><tr><th>Loop</th><th>Trigger</th><th>Where it lands</th></tr></thead>
+          <tbody>
+            <tr><td>Write-back memory</td><td>You <span class="btn ghost">↩ Write approved</span></td><td>🧩 Consistency memory — exact source→your target</td></tr>
+            <tr><td>Learn from a task</td><td>⬇ Harvest a submitted task → Add / Distill</td><td>🧩 Memory and/or 🧠 Style Brain</td></tr>
+            <tr><td>Corpus build</td><td>⟳ Update / 📦 Build</td><td>📦 Corpus concordance (feeds Lookup + learning)</td></tr>
+            <tr><td>Phrase mining</td><td>🔤 Mine → Promote</td><td>🧠 Glossary / 🔒 Locked / 🩹 Auto-fix</td></tr>
+            <tr><td>Whole-corpus learn</td><td>📚 Learn from whole corpus</td><td>🧠 review list → merge into rules/terms</td></tr>
+          </tbody>
+        </table></div>
+        <div class="note key"><b>The corpus now includes Document-editor tasks.</b> Older builds counted them as failures (they 1002 the String content API); v40 reads them from the doc detail endpoint, so <em>all</em> your submitted work — String and Document — is available to learn from.</div>
+      </section>
+
+      <!-- 3 · EDITORS -->
+      <section class="ch" id="editors">
+        <h2><span class="cn">03</span> String vs Document editor</h2>
+        <p>Starling has two editors, and every feature now works in both — but they behave differently under the hood, which is worth knowing when something reads unexpectedly.</p>
+        <div class="tw"><table>
+          <thead><tr><th></th><th>String editor <code>#/…/translate</code></th><th>Document editor <code>#/doc/editor/…</code></th></tr></thead>
+          <tbody>
+            <tr><td><strong>Segment list</strong></td><td>Virtualized custom scroller — the tool scroll-walks it</td><td>All segments are in the page's own data — read directly, no scroll</td></tr>
+            <tr><td><strong>🏷 Grab / ⬇ Harvest</strong></td><td>Reads the API + walks the list</td><td>Reads the open editor's data — keep the tab open &amp; active</td></tr>
+            <tr><td><strong>↩ Write verify</strong></td><td>Re-reads the task from the server</td><td>Confirmed from the editor itself (the string API can't see doc tasks)</td></tr>
+            <tr><td><strong>Corpus</strong></td><td>Content API</td><td>Doc detail endpoint (new in v40)</td></tr>
+          </tbody>
+        </table></div>
+        <div class="note tip">If a doc-task write ever shows <b>"wrote N but couldn't verify"</b>, that warning is now correct only when the text genuinely didn't land — v40 verifies doc writes from the editor. If in doubt, reload the tab (<kbd>Ctrl</kbd>+<kbd>R</kbd>) and eyeball the cells, or use <span class="btn">⚡ Write·Confirm·Submit</span>, which confirms each segment.</div>
+      </section>
+
+      <!-- 4 · SETTINGS -->
+      <section class="ch" id="settings">
+        <h2><span class="cn">04</span> Settings</h2>
+        <div class="tw"><table>
+          <thead><tr><th>Control</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td><strong>OpenAI key</strong> + Save</td><td>Stored locally in this browser, used only for your own tasks. Required before any GPT Run or Sweep.</td></tr>
+            <tr><td><strong>Model</strong></td><td><code>gpt-5.4</code> (default), <code>gpt-5.5</code> (tone-sensitive), or <code>gpt-5.4-mini</code> (cheap draft). Mini is faster/cheaper, lower quality — for rough passes.</td></tr>
+            <tr><td><strong>House style → Plural form (לשון רבים)</strong></td><td><b>Off</b> = singular gender-neutral slashes (<span class="heb">לחץ/י</span>), the TikTok default. <b>On</b> = plural. Changes the register GPT targets and how Auto-fix normalizes.</td></tr>
+            <tr><td><strong>↩ Sheet → Starling engine</strong></td><td>API check + editor write (recommended) or the older DOM engine. Only for the Sheet→Starling mode.</td></tr>
+            <tr><td><strong>Crowdin token</strong> + Save</td><td>Auth for the 🌐 Crowdin mode; stored locally.</td></tr>
+            <tr><td><strong>Advanced · selector overrides</strong></td><td>Patch the DOM selectors if Starling changes its UI; <em>Run diagnostics</em> reports what the content script can see. Leave blank for defaults.</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <!-- 5 · LOOKUP -->
+      <section class="ch" id="lookup">
+        <h2><span class="cn">05</span> Lookup — "how do I normally translate this?"</h2>
+        <p>Type ≥2 characters (English or Hebrew) to see how a word or phrase is handled across <strong>all six stores at once</strong>. It reads only — it changes nothing.</p>
+        <ul>
+          <li><strong>📦 Corpus</strong> — the richest signal. A stats bar of every Hebrew rendering and its % share, then example pairs, each with a <strong>↗ task</strong> button that opens the real Starling task it came from.</li>
+          <li><strong>🧩 Memory</strong> · <strong>🧠 Glossary / 🔒 Locked</strong> · <strong>🩹 Auto-fix</strong> — exact and near matches from each brain.</li>
+        </ul>
+        <h4>The corpus stats bar</h4>
+        <pre><code>family pairing → in 24 segment(s) · 11 task(s)
+  <span class="heb">חיבור משפחתי</span>   ████████████  55% · 13
+  <span class="heb">קישור משפחה</span>    ██████        30% · 7
+  <span class="heb">צימוד למשפחה</span>   ██             8% · 2</code></pre>
+        <p>% is the share of all occurrences. Forms differing only by a leading clitic (<span class="heb">ו ב ה ל כ מ ש</span>) fold into one variant — data-driven, not blind stripping — so the definite <span class="heb">ה</span> of <span class="heb">המשפחה</span> folds to <span class="heb">משפחה</span>, but a root <span class="heb">מ</span> never seen stripped is left alone.</p>
+        <h4>Set your preferred translation</h4>
+        <p>For English queries, a <strong>preferred Hebrew</strong> field (pre-filled with the dominant surface) offers <span class="btn ghost">➕ Glossary</span> (advisory — GPT prefers and inflects it) and <span class="btn ghost">🔒 Lock</span> (mandatory — flagged if missing). Both apply going forward only; a clash is reported, never silently overwritten.</p>
+      </section>
+
+      <!-- 6 · STYLE BRAIN -->
+      <section class="ch" id="style">
+        <h2><span class="cn">06</span> Style Brain — rules + glossary</h2>
+        <p>Advice injected into the GPT prompt. It's how you teach tone, register, and preferred terminology so GPT writes the way you would. It <em>steers</em> GPT — it doesn't mechanically edit output (that's Auto-fix).</p>
+        <div class="tw"><table>
+          <thead><tr><th>Button</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Distill &amp; review</strong></td><td>GPT extracts generalizable rules + term pairs from ingested source text, shown for you to merge.</td></tr>
+            <tr><td><strong>⬇ Grab from active tab</strong></td><td>Reads a Lark/Feishu style doc open in the tab, to distill from.</td></tr>
+            <tr><td><strong>➕ Add rule / Add term</strong></td><td>One free-text house rule, or one advisory EN→HE pair, straight in — no GPT.</td></tr>
+            <tr><td><strong>Export / Clear ingested brain</strong></td><td>Back up as JSON; or remove your additions (the built-in he-IL guide stays).</td></tr>
+          </tbody>
+        </table></div>
+        <h3>📚 Learn from a Starling task</h3>
+        <p>Turns a finished, proofread-confirmed task into training signal — your confirmed pairs are the best data because they're <em>your</em> accepted wording. <span class="btn ghost">⬇ Harvest</span> reads the pairs; <span class="btn ghost">➕ Add pairs to memory</span> drops them into 🧩 memory; <span class="btn ghost">🧠 Distill</span> generalizes rules/terms. Anything that clashes goes to <span class="chip b-warn">⚠ Conflicts</span>.</p>
+        <div class="note tip">Learn-from-task now reads the <b>Document editor</b> too — for a doc task it reads the open editor's data directly, so keep that tab open.</div>
+      </section>
+
+      <!-- 7 · MEMORY -->
+      <section class="ch" id="memory">
+        <h2><span class="cn">07</span> Consistency memory — "same source, same Hebrew"</h2>
+        <p>Every segment you <strong>write</strong> is remembered as <em>source → the exact Hebrew you used</em>. Next time that identical source appears, your prior wording fills in. This is the store that acts <em>after</em> GPT (pipeline step 2).</p>
+        <p>If GPT proposes something <strong>different</strong> from memory, that row is left unchecked and badged <span class="chip b-rev">🧠 memory — review</span>, so you confirm deliberately. A remembered mistake never re-applies silently — writing a corrected version overwrites the memory.</p>
+        <div class="tw"><table>
+          <thead><tr><th>Control</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Apply remembered wording</strong> (toggle)</td><td>Master switch. <b>Default off</b> (data kept, not applied). On = your wording replaces GPT's on exact-source matches, and identical sources in one task are aligned.</td></tr>
+            <tr><td><strong>🧠 Suggest near-matches (fuzzy)</strong> + threshold</td><td>When there's no exact match, offer the closest prior translations (Dice ≥ threshold, default 80%). <b>Review-only</b> — a <strong>use</strong> button appears; nothing auto-applies.</td></tr>
+            <tr><td><strong>➕ Remember</strong> · Export · Clear</td><td>Store a pair manually; back up; or wipe (password-gated).</td></tr>
+          </tbody>
+        </table></div>
+        <p>When the same full source repeats in one task, all rows are aligned to one Hebrew by majority vote (memory outranks the vote; ties → earliest), badged <span class="chip b-mem">🧠 same-as-above</span>.</p>
+      </section>
+
+      <!-- 8 · LOCKED -->
+      <section class="ch" id="locked">
+        <h2><span class="cn">08</span> Locked terms — the mandatory glossary</h2>
+        <p>EN→HE pairs that <strong>outrank every other store</strong>. Enforced two ways: in the prompt each term is <strong>non-negotiable</strong> (GPT may only add a Hebrew prefix and inflect); and after a Run, any segment whose source has the term but whose target is missing the required Hebrew gets a red <span class="chip b-lock">🔒 locked term</span> badge. It never auto-edits — you fix the row by hand and the flag clears live (the match tolerates a fused prefix and the definite-<span class="heb">ה</span> drop).</p>
+        <div class="note warn"><b>Locked beats memory.</b> If a stale remembered target would violate a locked term, the locked term wins and the clash is parked in <span class="chip b-warn">⚠ Conflicts</span>.</div>
+        <p><strong>Glossary vs Locked?</strong> Glossary = advisory (GPT prefers and inflects freely — good for slash forms). Locked = mandatory (flags any run missing it — good for brand names and fixed terminology that must never drift).</p>
+      </section>
+
+      <!-- 9 · AUTOFIX -->
+      <section class="ch" id="autofix">
+        <h2><span class="cn">09</span> Auto-fix — deterministic HE rewrites</h2>
+        <p>A curated dictionary of Hebrew find-and-replace rules applied to every target <em>after</em> GPT (pipeline step 3). It's a dictionary, not morphology, because Hebrew imperatives are irregular — you lock in both sides so each fix is correct by construction (<span class="heb">שלמו → שלם/י</span>, <span class="heb">נסו → נסה/י</span>).</p>
+        <ul>
+          <li>Whole-word (Hebrew-boundary) match; an optional leading <span class="heb">ו</span> is preserved (<span class="heb">והצטרפו → והצטרף/י</span>).</li>
+          <li>Every change is badged <span class="chip b-fix">✎ auto-fixed</span> and reverts if you edit the text.</li>
+        </ul>
+        <p>Controls: master <strong>toggle</strong>, <strong>Add rule</strong> (<code>from → to</code>), <strong>Export</strong>, <strong>Clear</strong> (password-gated).</p>
+      </section>
+
+      <!-- 10 · TERM BASE -->
+      <section class="ch" id="termbase">
+        <h2><span class="cn">10</span> Term base — Starling's own inline terms</h2>
+        <p>Starling underlines source words that carry an approved term entry; the hover popover holds an EN→HE, a part-of-speech, and a DNT (do-not-translate) / Brand flag. <span class="btn ghost">⬇ Grab term base</span> reads every term in the open task and splits them into two tiers:</p>
+        <ul>
+          <li><strong>DNT / brand</strong> terms (e.g. <code>TikTok</code>) route into 🔒 Locked as keep-as-is (strict).</li>
+          <li><strong>Translatable</strong> terms (e.g. <code>content → </code><span class="heb">תוכן</span>) become <em>soft hints</em>: injected per-segment into the GPT prompt as the preferred rendering that may bend when grammar or context requires (a Noun used as a verb, "due to" → <span class="heb">עקב</span>), and surfaced as a <span class="chip b-term">🏷 term</span> review flag on deviation — never forced.</li>
+        </ul>
+        <div class="note tip">Grab works in both editors — in the <b>String</b> editor it scrolls the whole virtualized list; in the <b>Document</b> editor it reads the terms straight from the task data. A toggle turns the whole thing off for harvest/write.</div>
+      </section>
+
+      <!-- 11 · CORPUS -->
+      <section class="ch" id="corpus">
+        <h2><span class="cn">11</span> Corpus — the concordance from your finished work</h2>
+        <p>Batch-reads <strong>every Submitted task's proofread-confirmed segments</strong> — from the String <em>and</em> Document editors — and aggregates them: for each source it records the distinct target variants, how often each occurred, and across how many tasks. It's read-only history; building it never changes a live translation. It powers 🔎 Lookup, 🔤 Phrase mining, and 📚 whole-corpus learning.</p>
+        <div class="tw"><table>
+          <thead><tr><th>Control</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td><strong>⟳ Update — add new Submitted</strong></td><td>Reads only newly Submitted tasks; never re-reads the index. The fast, routine way to stay current.</td></tr>
+            <tr><td><strong>📦 Build corpus</strong></td><td>Same incremental read, but honours the "Rebuild from scratch" checkbox.</td></tr>
+            <tr><td><strong>Rebuild from scratch</strong></td><td>Re-read every Submitted task clean. Slow; only when the index is stale.</td></tr>
+            <tr><td><strong>+ In-progress ≥95%</strong></td><td>Also harvest near-finished tasks (only their confirmed segments).</td></tr>
+            <tr><td><strong>📅 Created on/after</strong></td><td>Learn only from tasks created on or after a chosen day. Applies to ⟳ Update, 📦 Build, and the "new tasks" badge. <strong>Clear</strong> resets it.</td></tr>
+            <tr><td><strong>🗄 Backup all brains</strong></td><td>One JSON with every store <em>and</em> the corpus. A Promote auto-downloads one first.</td></tr>
+          </tbody>
+        </table></div>
+        <h3>🔤 Phrase mining &amp; 📚 whole-corpus learning</h3>
+        <p><strong>🔤 Mine phrases</strong> scans the corpus for EN phrases you translate consistently (≥3 tasks, dominant rendering) vs. ones that drift, and proposes short terms to promote. <strong>📚 Learn from whole corpus</strong> runs one GPT pass over every pair, reconciles it against your brain, and drops findings into the 🧠 review list. Both back up first; clashes become <span class="chip b-warn">⚠ Conflicts</span>, never silent overwrites.</p>
+      </section>
+
+      <!-- 12 · CONFLICTS -->
+      <section class="ch" id="conflicts">
+        <h2><span class="cn">12</span> Conflicts to resolve</h2>
+        <p>The single adjudication queue. Whenever two stores would disagree — a glossary/locked term mapping the same English to a different Hebrew, a remembered source gaining a second target, or a locked-vs-memory clash — nothing is silently overwritten. It's parked here as an orange card. The values are <strong>editable</strong>: fix the wording if neither side is quite right, then pick the side that wins; the other is removed. You always decide.</p>
+      </section>
+
+      <!-- 13 · FLOW -->
+      <section class="ch" id="flow">
+        <h2><span class="cn">13</span> The Starling flow</h2>
+        <p>The main mode. The brains above all feed in here. The <strong>📋 Per-task workflow</strong> card at the top restates the order (<a href="#workflows">§2</a>).</p>
+        <h3>Step 1 · Load segments</h3>
+        <p><span class="btn ghost">⬇ Harvest from this tab</span> reads the open task's segments (virtualized rows included). The <strong>Only segments</strong> filter restricts to numbers/ranges (<code>10-20</code>, <code>5,8,12</code>) or a term matching source/target/key (<code>Family Pairing</code>), mixable. You can also load an exported <strong>XLIFF</strong> for a reliable read; write-back still uses the live tab.</p>
+        <h3>Step 2 · Process with GPT</h3>
+        <p>Pick <strong>📑 Proofread</strong> or <strong>🌐 Translate</strong>, optionally include tagged rows / empty targets, then <span class="btn">✨ Run</span>. GPT now also gets an <strong>internal-consistency instruction</strong> — it tries to render a recurring word the same way across the batch.</p>
+        <h3>Step 3 · Review &amp; approve</h3>
+        <p>Click any Hebrew target to <strong>edit</strong> it — your edited text (badged <span class="chip b-fix">✎ edited</span>) is what gets written, confirmed, and remembered. View filters: <strong>Changed · All · ✋ Paste by hand · 🧠 Memory–review · ⚖ Consistency · ⚖ Drift · 🏷 Term base</strong>.</p>
+        <h4>Badge legend</h4>
+        <div class="tw"><table>
+          <thead><tr><th>Badge</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><span class="chip b-mem">🧠 memory</span></td><td>GPT already matches your remembered wording — consistent.</td></tr>
+            <tr><td><span class="chip b-rev">🧠 memory — review</span></td><td>Memory differs from GPT → set to your version but <b>unchecked</b>; confirm or edit.</td></tr>
+            <tr><td><span class="chip b-mem">🧠 same-as-above</span></td><td>Identical source repeated in this task → aligned by majority vote.</td></tr>
+            <tr><td><span class="chip b-new">＋ new</span></td><td>Target was empty → translated, will be written with the rest.</td></tr>
+            <tr><td><span class="chip b-warn">⚠ chip / tag</span></td><td>Real inline tags — <b>copy by hand</b> (use the per-part Copy buttons); never auto-written.</td></tr>
+            <tr><td><span class="chip b-warn">⚠ number / brand / bold / spacing</span></td><td>A source detail wasn't preserved — check it.</td></tr>
+            <tr><td><span class="chip b-lock">🔒 locked term</span></td><td>A mandatory locked term is missing from the target — fix by hand; clears live.</td></tr>
+            <tr><td><span class="chip b-fix">✎ auto-fixed</span></td><td>An Auto-fix rule rewrote the text — edit to revert.</td></tr>
+            <tr><td><span class="chip b-drift">⚖ consistency / drift</span></td><td>This term was rendered differently elsewhere in the task — flag only (see <a href="#drift">§14</a>).</td></tr>
+            <tr><td><span class="chip b-term">🏷 term</span></td><td>A Starling term's approved Hebrew is missing — soft hint; a different form may be right.</td></tr>
+          </tbody>
+        </table></div>
+        <h4>Paste-by-hand: tag-aware splitting</h4>
+        <p>Tagged segments (<span class="chip b-warn">⚠ chip / tag</span>) are never auto-written — typing over the cell would destroy the tag objects. The tool proofreads/translates them and splits the corrected text into the <strong>runs between the tags</strong>, each with a Copy button whose badge number matches the tag number. Select only the text between a part's <span class="heb">①…①</span> tags and paste — the tags stay put. (Splitting now respects the real tag boundaries even when a bullet sits <em>inside</em> a tag.)</p>
+        <h3>Step 4 · Write back &amp; confirm</h3>
+        <p><span class="btn ghost">↩ Write approved</span> types each approved, non-tagged target into its cell, then verifies it persisted (server re-read for String tasks; from the editor for Document tasks). Every written segment is remembered. <span class="btn">⚡ Write·Confirm·Submit</span> writes, confirms, then submits in one go — an <strong>irreversible submit</strong>; it asks once.</p>
+        <h3>Step ✓ / 5 · Confirm all · Submit · QA</h3>
+        <p><span class="btn ghost">✔ Confirm all</span> confirms every row (ignoring normal QA, only Critical blocks); <span class="btn ghost">➤ Submit task</span> delivers it (irreversible); <span class="btn ghost">📋 Read QA warnings</span> reads Starling's own QA so you can clear it first. <strong>🔢 Scan plurals</strong> handles CLDR form-sets, pre-filled from 📦 Plural memory.</p>
+      </section>
+
+      <!-- 14 · DRIFT -->
+      <section class="ch" id="drift">
+        <h2><span class="cn">14</span> Sweep drift — internal consistency</h2>
+        <p>Two safeguards catch a word rendered two ways <em>within one task</em>:</p>
+        <ul>
+          <li><strong>⚖ Consistency (automatic, deterministic)</strong> — after every Run, the tool builds a mini-glossary from standalone-label segments and flags any other segment using that term whose Hebrew doesn't match. Flag only; a <strong>🔒 lock</strong> button promotes the pairing forever. Catches <em>defined-label</em> drift.</li>
+          <li><strong>🧹 Sweep drift (GPT, on demand)</strong> — one GPT pass over the whole task finds <em>free lexical</em> drift the deterministic check can't: the same verb or collocation rendered differently across differently-worded segments (e.g. "information" → <span class="heb">מידע</span> here, <span class="heb">פרטים</span> there).</li>
+        </ul>
+        <h4>Choosing the winner</h4>
+        <p>Sweep drift doesn't pick for you. Each flagged row shows the <span class="chip b-drift">⚖ drift</span> badge and one <strong>use <span class="heb">‹rendering›</span></strong> button per competing Hebrew rendering. Clicking one <strong>standardizes every segment in the task that uses that term</strong> on your choice — each rewritten grammatically (gender, number, prefixes adjust; nothing else changes). A <strong>keep current</strong> button sits alongside them: it dismisses the flag and leaves every segment's wording exactly as harvested — for when the drift is fine, or neither rendering is what you want. Review-only until you click.</p>
+        <div class="note tip">Run 🧹 Sweep drift <b>after</b> you've settled the wording, since it reads the current targets. When you apply a rendering, glance at one rewritten row — GPT is regenerating the grammar around the swapped term.</div>
+      </section>
+
+      <!-- 15 · WORD COUNT -->
+      <section class="ch" id="wordcount">
+        <h2><span class="cn">15</span> Word count &amp; pay</h2>
+        <p>Reads your Starling <strong>My tasks</strong> list and sums the Weighted word count × your rate. Set <strong>Tasks</strong> (All / Submitted / In progress), pick a date column in <strong>By month of…</strong> (auto-detected, prefers a "first submitted" field), and <span class="btn ghost">🔄 Compute from My Tasks</span> renders totals, a status breakdown, and a monthly table. For "all tasks submitted per month," set Tasks = Submitted and read the month table.</p>
+      </section>
+
+      <!-- 16 · MODES -->
+      <section class="ch" id="modes">
+        <h2><span class="cn">16</span> Other CAT modes</h2>
+        <p>The top row switches the host CAT tool. <strong>⚖️ Feishu LQA</strong>, <strong>↩ Sheet → Starling</strong>, <strong>🌐 Crowdin</strong>, <strong>🅜 memoQ</strong>, and <strong>🐱 YiCAT</strong> each follow the same shape — <em>connect / detect → harvest → GPT proposals → review → write / copy</em> — and reuse all the same brains, so your terminology and style stay identical everywhere. Each has an <strong>ℹ️ How … works</strong> expander with its specifics. Feishu LQA additionally learns from your validated rows, closing the loop back into the brains.</p>
+      </section>
+
+      <!-- 17 · BACKUPS -->
+      <section class="ch" id="backups">
+        <h2><span class="cn">17</span> Backups &amp; restore</h2>
+        <ul>
+          <li><strong>🗄 Backup all brains</strong> (Corpus card) — one JSON with every store <em>and</em> the corpus. Keep these; a phrase-mining Promote auto-downloads one first, and Restore backs up the current state before overwriting.</li>
+          <li>Each brain also has its own <strong>Export</strong> for a single-store backup.</li>
+          <li><strong>Restore</strong> replaces every store with the snapshot — with a safety backup taken first.</li>
+        </ul>
+      </section>
+
+      <!-- 18 · CHANGES -->
+      <section class="ch" id="changes">
+        <h2><span class="cn">18</span> What's new</h2>
+        <p>The most recent capabilities, newest first. Full detail lives in the repo <code>README.md</code> version history.</p>
+        <div class="tw"><table>
+          <thead><tr><th>Version</th><th>Change</th></tr></thead>
+          <tbody>
+            <tr><td><code>panel</code></td><td><strong>📋 Per-task workflow card</strong> pinned to the top of the Starling tab — the recommended order at a glance.</td></tr>
+            <tr><td><code>panel</code></td><td><strong>🧹 Sweep drift</strong> — GPT internal-consistency sweep that flags free lexical drift as per-term groups; <em>you</em> pick which rendering wins and it standardizes the whole task. Plus a self-consistency instruction added to the translate prompt.</td></tr>
+            <tr><td><code>panel</code></td><td><strong>Corpus learns from Document-editor tasks</strong> (via the doc detail endpoint) and a <strong>📅 Created on/after</strong> date filter for Update / Build.</td></tr>
+            <tr><td><code>v40</code></td><td><strong>↩ Write verifies Document-editor writes</strong> from the editor itself — fixes the false "couldn't verify" warning (the string API 1002s on doc tasks).</td></tr>
+            <tr><td><code>panel</code></td><td><strong>Paste-by-hand parts split on real tag boundaries</strong>, not a bullet that sits inside a tag pair.</td></tr>
+            <tr><td><code>panel</code></td><td><strong>📚 Learn-from-task Harvest works in the Document editor.</strong></td></tr>
+            <tr><td><code>panel</code></td><td><strong>🏷 Grab term base works in the Document editor</strong>, and sweeps the whole virtualized list in the String editor.</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <!-- 19 · FAQ -->
+      <section class="ch" id="faq">
+        <h2><span class="cn">19</span> Quick answers</h2>
+        <h4>How do finished tasks get into the corpus?</h4>
+        <p>Submit them in Starling, then press <span class="btn ghost">⟳ Update — add new Submitted</span> (don't tick "Rebuild"). Optionally <strong>Promote</strong> via phrase mining or 📚 whole-corpus learning.</p>
+        <h4>Why is a review row greyed out?</h4>
+        <p>It's <em>unchanged</em> — GPT's suggestion already matches the cell. Switch to the <strong>Changed</strong> filter to hide these.</p>
+        <h4>Memory vs Glossary vs Locked?</h4>
+        <p>Memory = your exact past wording, applied after GPT. Glossary = advice GPT prefers and inflects. Locked = mandatory, outranks all and flags if missing.</p>
+        <h4>My doc-task write said "couldn't verify" — did it save?</h4>
+        <p>On v40 that warning is only shown when the text genuinely didn't land in the editor cell. Reload the tab and eyeball the cells to be sure; if some came back empty, re-run <span class="btn ghost">↩ Write</span> or use <span class="btn">⚡ Write·Confirm·Submit</span>.</p>
+        <h4>Will anything auto-submit?</h4>
+        <p>No. Writing and confirming are separate from submitting, and submitting is always a deliberate click.</p>
+
+        <div class="foot">
+          <p><strong>Starling Copilot</strong> — English → Hebrew (he-IL) translation assistant · content-script v40 · String + Document editors.<br>
+          This manual reflects the current build. Button-level detail and version history live in the repo <code>README.md</code> and <code>USER-MANUAL.md</code>.</p>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<button class="tgl" id="tgl" aria-label="Toggle light / dark">◑</button>
+
+<script>
+(function(){
+  // theme toggle (respects system until first click; persisted per browser)
+  var root=document.documentElement, KEY="scman-theme";
+  try{var s=localStorage.getItem(KEY); if(s)root.setAttribute("data-theme",s);}catch(e){}
+  document.getElementById("tgl").addEventListener("click",function(){
+    var cur=root.getAttribute("data-theme");
+    var next = cur==="dark" ? "light" : cur==="light" ? "dark"
+      : (window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches ? "light" : "dark");
+    root.setAttribute("data-theme",next);
+    try{localStorage.setItem(KEY,next);}catch(e){}
+  });
+
+  // mobile nav
+  var side=document.getElementById("side"), scrim=document.getElementById("scrim"), mb=document.getElementById("mb");
+  function close(){side.classList.remove("open");scrim.classList.remove("open");}
+  mb&&mb.addEventListener("click",function(){side.classList.toggle("open");scrim.classList.toggle("open");});
+  scrim.addEventListener("click",close);
+  document.getElementById("toc").addEventListener("click",function(e){ if(e.target.closest("a")) close(); });
+
+  // scroll-spy
+  var links=[].slice.call(document.querySelectorAll('#toc a'));
+  var map={}; links.forEach(function(a){ map[a.getAttribute('href').slice(1)]=a; });
+  var obs=new IntersectionObserver(function(ents){
+    ents.forEach(function(en){
+      if(en.isIntersecting){
+        links.forEach(function(a){a.classList.remove('active');});
+        var a=map[en.target.id]; if(a){a.classList.add('active');
+          if(window.innerWidth>900){ a.scrollIntoView({block:'nearest'}); }
+        }
+      }
+    });
+  },{rootMargin:'-15% 0px -70% 0px',threshold:0});
+  document.querySelectorAll('section.ch').forEach(function(s){obs.observe(s);});
+})();
+</script>
+</body>
+</html>
