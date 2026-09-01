@@ -768,7 +768,7 @@ async function icSweep() {
   const key = await store.get('key', ''); if (!key) { info('gpt-info', 'Add your OpenAI key in ⚙️ Settings first.', 'err'); return; }
   const model = $('model').value;
   const btn = $('ic-sweep'); const prev = btn && btn.textContent;
-  if (btn) { btn.disabled = true; btn.textContent = '⚖ sweeping…'; }
+  if (btn) { btn.disabled = true; btn.textContent = '🧹 sweeping…'; }
   info('gpt-info', `Checking ${props.length} segment(s) for internal consistency drift…`);
   try {
     for (const p of state.proposals) p.icDrift = null;              // clear any prior sweep
@@ -788,7 +788,7 @@ async function icSweep() {
       ? `⚖ ${n} internal-consistency drift flag(s) — review below; “use unified” adopts a wording (nothing auto-applied).`
       : '⚖ No internal-consistency drift found — recurring wording is consistent across the task.', n ? '' : 'good');
   } catch (e) { info('gpt-info', 'Consistency sweep failed: ' + (e.message || e), 'err'); }
-  finally { if (btn) { btn.disabled = false; btn.textContent = prev || '⚖ Sweep drift'; } }
+  finally { if (btn) { btn.disabled = false; btn.textContent = prev || '🧹 Sweep drift'; } }
 }
 
 // ---- TERM BASE: Starling's own inline term references ---------------------

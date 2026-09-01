@@ -126,10 +126,11 @@ textarea { font-family: ui-monospace, Menlo, Consolas, monospace; resize: vertic
 .prog { height: 5px; border-radius: 99px; background: #0a0a12; overflow: hidden; margin: 8px 0; }
 .prog i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--acc), var(--acc2)); transition: width .2s; }
 
-.rev-bar { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
-.spacer { flex: 1; }
-.rev-grp { display: inline-flex; gap: 4px; }
+.rev-bar { display: flex; align-items: center; gap: 6px 4px; margin-bottom: 8px; flex-wrap: wrap; }
+.spacer { flex: 1 1 100%; height: 0; }
+.rev-grp { display: inline-flex; gap: 4px; flex-wrap: wrap; }
 .rev-grp + .rev-grp { margin-left: 6px; padding-left: 8px; border-left: 1px solid var(--line, #333); }
+.btn.xs { white-space: nowrap; }
 .review { display: flex; flex-direction: column; gap: 8px; max-height: 46vh; overflow: auto; }
 .rc { border: 1px solid var(--border); border-radius: 9px; padding: 8px 9px; background: var(--card2); }
 .rc.tagged { box-shadow: inset 3px 0 0 var(--warn); }
