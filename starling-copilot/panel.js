@@ -387,6 +387,7 @@ async function refreshConn() {
 const STYLE_GUIDE =
   '\nTIKTOK HEBREW STYLE GUIDE (he-IL):\n' +
   '- VOICE: inclusive, approachable, conversational, clear and casual — keep it short, natural and consistent; plain everyday Hebrew.\n' +
+  '- INTERNAL CONSISTENCY (across the items in THIS batch): if the same word, verb, or fixed collocation recurs in several items, render it with ONE consistent Hebrew choice throughout — do not alternate synonyms arbitrarily. E.g. "take (time)" → pick אורך OR לוקח and use the SAME one wherever it appears ("take so long" and "takes six business days" should both use it); likewise a recurring noun/verb should keep one rendering unless the grammar or sense of a specific item clearly requires another. This applies to FREE lexical choices, not only glossary terms.\n' +
   '- REGISTER: medium-low. Prefer the lower/natural register — use אנחנו (not אנו), עכשיו (not כעת), על (not אודות), ל־ (not עבור).\n' +
   '- UI CONTEXT overrides the address form:\n' +
   '  • Buttons / labels / titles → GERUND (שם פעולה), never the infinitive and never the imperative: "Save" → שמירה (not לשמור, not שמור/שמרי). Titles are short with NO trailing period.\n' +
@@ -733,6 +734,61 @@ async function consistLock(en, he) {
   LOCK.terms.push({ id: brainUid(), en, he, note: 'from consistency', ts: Date.now() });
   await lockSave(); lockRefresh();
   return { ok: true, msg: `Locked: “${en}” → “${he}”.` };
+}
+
+// ---- ⚖ INTERNAL-CONSISTENCY SWEEP (GPT) -----------------------------------
+// The deterministic consistCheck() above catches only DEFINED-label drift (a short standalone
+// segment whose Hebrew is missing where its English recurs). It can't see free lexical drift —
+// GPT rendering the same verb/collocation two different ways across differently-worded segments
+// (e.g. "take (time)" → אורך here, לוקח there). This optional pass sends the whole task's
+// source→target pairs to GPT in ONE call and asks it to flag genuine synonym drift and propose a
+// unified wording per drifting segment. Review-only: it sets p.icDrift and NEVER auto-applies.
+async function icSweepGpt(items, key, model) {
+  const sys =
+    'You are a he-IL (Hebrew) localization INTERNAL-CONSISTENCY checker for ONE translation task. ' +
+    'You receive a set of segments, each {"i":<id>,"src":<English source>,"he":<its Hebrew translation>}. ' +
+    'Find cases where the SAME recurring English word, verb, or fixed collocation is translated with DIFFERENT Hebrew wordings across segments — avoidable SYNONYM DRIFT (same meaning, different word), e.g. "take (time)" rendered "אורך" in one segment and "לוקח" in another. ' +
+    'For each drifting segment pick ONE consistent Hebrew rendering (prefer the wording that reads most naturally; on a tie, the one used in more segments), then rewrite THAT segment\'s "he" to adopt it while CHANGING NOTHING ELSE — keep the meaning, every placeholder ({x}, %s, <g>…), every number/currency, and all punctuation identical. ' +
+    'Do NOT flag differences that the grammar or sense of a specific segment requires (singular vs plural, a noun vs a verb use of the same word, a genuinely different meaning), and do NOT flag glossary/term choices. Only flag real, avoidable lexical inconsistency. ' +
+    'Return ONLY JSON: {"flags":[{"i":<id>,"concept":"<the recurring English word/phrase>","reason":"<short, e.g. take time: אורך vs לוקח>","suggest":"<the full corrected Hebrew for segment i>"}]}. ' +
+    'Return an empty "flags" array if everything is already consistent. No commentary, no markdown, no code fences.';
+  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, temperature: 0.1, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: sys }, { role: 'user', content: 'Check these segments for internal consistency drift:\n' + JSON.stringify({ items }) }] })
+  });
+  const data = await r.json();
+  if (!r.ok) throw new Error((data.error && data.error.message) || ('GPT error ' + r.status));
+  const parsed = JSON.parse(data.choices?.[0]?.message?.content || '{}');
+  return parsed.flags || [];
+}
+async function icSweep() {
+  const props = (state.proposals || []).filter((p) => !p.manual && String(p.next || '').trim());
+  if (props.length < 2) { info('gpt-info', 'Need at least 2 translated (non-tagged) segments to check internal consistency.', 'err'); return; }
+  const key = await store.get('key', ''); if (!key) { info('gpt-info', 'Add your OpenAI key in ⚙️ Settings first.', 'err'); return; }
+  const model = $('model').value;
+  const btn = $('ic-sweep'); const prev = btn && btn.textContent;
+  if (btn) { btn.disabled = true; btn.textContent = '⚖ sweeping…'; }
+  info('gpt-info', `Checking ${props.length} segment(s) for internal consistency drift…`);
+  try {
+    for (const p of state.proposals) p.icDrift = null;              // clear any prior sweep
+    const items = props.map((p) => ({ i: state.proposals.indexOf(p), src: String(p.src || ''), he: stripTags(String(p.next == null ? '' : p.next)) }));
+    const flags = await icSweepGpt(items, key, model);
+    let n = 0;
+    for (const f of (flags || [])) {
+      const p = state.proposals[Number(f.i)]; if (!p || p.manual) continue;
+      const suggest = String(f.suggest == null ? '' : f.suggest).trim();
+      if (!suggest || sameRender(suggest, p.next)) continue;        // no real change → not a useful flag
+      p.icDrift = { reason: String(f.reason || f.concept || 'inconsistent wording'), concept: String(f.concept || ''), suggest };
+      n++;
+    }
+    renderReview();
+    if (n && $('view-icdrift')) $('view-icdrift').click();          // jump to the drift view
+    info('gpt-info', n
+      ? `⚖ ${n} internal-consistency drift flag(s) — review below; “use unified” adopts a wording (nothing auto-applied).`
+      : '⚖ No internal-consistency drift found — recurring wording is consistent across the task.', n ? '' : 'good');
+  } catch (e) { info('gpt-info', 'Consistency sweep failed: ' + (e.message || e), 'err'); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = prev || '⚖ Sweep drift'; } }
 }
 
 // ---- TERM BASE: Starling's own inline term references ---------------------
@@ -1156,6 +1212,7 @@ function renderReview() {
     revFilter === 'manual' ? p.manual :
     revFilter === 'memrev' ? !!p.tmOverride :   // 🧠 memory differs from GPT — left unchecked for you to confirm
     revFilter === 'consist' ? !!(p.consist && p.consist.length) :   // ⚖ in-task term drift — flag only
+    revFilter === 'icdrift' ? !!p.icDrift :                         // ⚖ GPT internal-consistency drift — flag only
     revFilter === 'termrev' ? !!(p.termHint && p.termHint.length) : // 🏷 term-base deviation — flag only
     revFilter === 'all' ? true :
     !sameRender(p.next, p.old));   // 'changed'
@@ -1223,6 +1280,7 @@ function renderReview() {
         ${p.fuzzy && p.fuzzy.matches.length ? `<span class="rc-warn" style="background:#3b0764" title="No exact memory match, but ${p.fuzzy.matches.length} near-match(es) from your past work are shown below — click “use” to adopt one. Nothing is applied automatically.">🧠 ${p.fuzzy.matches.length} near-match${p.fuzzy.matches.length === 1 ? '' : 'es'}</span>` : ''}
         ${p.consist && p.consist.length ? p.consist.map((c) => `<span class="rc-warn" style="background:#7c2d12" title="Consistency check: “${esc(c.en)}” was translated as “${esc(c.he)}” on its own (segment ${esc(String(c.from))}), but this segment's target doesn't appear to use that wording. Flag only — nothing was changed. Fix the Hebrew by hand if it should match, or click 🔒 lock to make “${esc(c.en)}” → “${esc(c.he)}” mandatory everywhere.">⚖ consistency: ${esc(c.en)}</span><button class="rc-lockterm" type="button" data-en="${esc(c.en)}" data-he="${esc(c.he)}" title="Lock “${esc(c.en)}” → “${esc(c.he)}” as a mandatory term (adds it to 🔒 Locked terms)">🔒 lock</button>`).join('') : ''}
         ${p.termHint && p.termHint.length ? p.termHint.map((c) => `<span class="rc-warn" style="background:#155e75" title="Starling term base: “${esc(c.en)}” is approved as “${esc(c.he)}”, but this target doesn't appear to use that wording. This is a SOFT hint — a different form can be correct here (e.g. the term used as a verb, or a different sense). Nothing was changed; fix by hand only if it should match.">🏷 term: ${esc(c.en)}</span>`).join('') : ''}
+        ${p.icDrift ? `<span class="rc-warn" style="background:#7c2d12" title="Internal-consistency sweep: ${esc(p.icDrift.reason)}. GPT proposes a unified wording (below) so this recurring choice matches the rest of the task. Flag only — nothing was changed; click “use unified” to adopt it.">⚖ drift${p.icDrift.concept ? ': ' + esc(p.icDrift.concept) : ''}</span>` : ''}
         <div class="rc-ctl">${control}</div>
       </div>
       ${p.src ? `<div class="rc-src" dir="ltr">${hl(esc(p.src))}</div>` : ''}
@@ -1232,11 +1290,12 @@ function renderReview() {
       ${p.fuzzy && p.fuzzy.matches.length ? `<div class="rc-fuzzy" title="Near-matches from your Consistency memory — review-only. “use” drops the wording into the target for you to adjust.">` +
         p.fuzzy.matches.map((m, j) => `<div class="fz-m"><div class="fz-meta"><span class="fz-score">${m.tier === 'template' ? 'template' : Math.round(m.score * 100) + '%'}</span> <span class="fz-src" dir="ltr">${hl(esc(m.src))}</span></div><div class="fz-body"><div class="fz-tgt" dir="rtl">${esc(m.suggest)}</div><button class="fz-use" type="button" data-i="${idx}" data-j="${j}" title="Use this wording (fills the target — edit as needed)">use</button></div></div>`).join('') +
         `</div>` : ''}
+      ${p.icDrift ? `<div class="rc-fuzzy" title="Internal-consistency suggestion — review-only. “use unified” drops it into the target for you to adjust."><div class="fz-m"><div class="fz-meta"><span class="fz-score">⚖ unify</span> <span class="fz-src" dir="ltr">${esc(p.icDrift.reason)}</span></div><div class="fz-body"><div class="fz-tgt" dir="rtl">${esc(p.icDrift.suggest)}</div><button class="ic-use" type="button" data-i="${idx}" title="Adopt this unified wording (fills the target — edit as needed)">use unified</button></div></div></div>` : ''}
       ${changed && String(p.old).trim() ? `<div class="rc-old" dir="rtl">${hl(esc(p.old))}</div>` : ''}
       ${newRow}
       ${copyBlock}
     </div>`;
-  }).join('') || `<div class="info">${revFilter === 'manual' ? 'No ✋ paste-by-hand (tagged/chip) segments in this task.' : revFilter === 'memrev' ? 'No 🧠 memory — review rows — your remembered wording matched GPT (or no memory hit) on every segment.' : revFilter === 'consist' ? 'No ⚖ consistency flags — every term you translated on its own is rendered the same way where it recurs. (Only multi-word / ≥5-letter terms that also appear as a standalone segment are checked.)' : revFilter === 'termrev' ? 'No 🏷 term-base flags — every Starling term whose English appears was rendered with its approved Hebrew (or the term base is empty / the toggle is off).' : 'No changes proposed.'}</div>`;
+  }).join('') || `<div class="info">${revFilter === 'manual' ? 'No ✋ paste-by-hand (tagged/chip) segments in this task.' : revFilter === 'memrev' ? 'No 🧠 memory — review rows — your remembered wording matched GPT (or no memory hit) on every segment.' : revFilter === 'consist' ? 'No ⚖ consistency flags — every term you translated on its own is rendered the same way where it recurs. (Only multi-word / ≥5-letter terms that also appear as a standalone segment are checked.)' : revFilter === 'icdrift' ? 'No ⚖ drift flags. Click “⚖ Sweep drift” to run the GPT internal-consistency check, or recurring wording is already consistent across the task.' : revFilter === 'termrev' ? 'No 🏷 term-base flags — every Starling term whose English appears was rendered with its approved Hebrew (or the term base is empty / the toggle is off).' : 'No changes proposed.'}</div>`;
 
   box.querySelectorAll('.rc-cb').forEach((cb) => cb.addEventListener('change', (e) => {
     const i = +e.target.closest('.rc').dataset.i; state.proposals[i].approved = e.target.checked; updateRevCount();
@@ -1280,6 +1339,12 @@ function renderReview() {
   box.querySelectorAll('.fz-use').forEach((b) => b.addEventListener('click', () => {
     const p = state.proposals[+b.dataset.i], m = p && p.fuzzy && p.fuzzy.matches[+b.dataset.j]; if (!m) return;
     p.next = m.suggest; p.edited = true; p.fuzzy = null;   // adopted → clear the near-match panel; your text now leads
+    if (!p.manual) p.approved = !sameRender(p.next, p.old);
+    renderReview();
+  }));
+  box.querySelectorAll('.ic-use').forEach((b) => b.addEventListener('click', () => {
+    const p = state.proposals[+b.dataset.i]; if (!p || !p.icDrift) return;
+    p.next = p.icDrift.suggest; p.edited = true; p.icDrift = null;   // adopted the unified wording; clear the drift flag
     if (!p.manual) p.approved = !sameRender(p.next, p.old);
     renderReview();
   }));
@@ -5887,7 +5952,7 @@ async function init() {
   // Review VIEW filter (mutually exclusive) — mark the active one and re-render.
   const setRevFilter = (mode) => {
     revFilter = mode;
-    ['view-changed', 'view-all', 'view-manual', 'view-memrev', 'view-consist', 'view-termrev'].forEach((id) => { const b = $(id); if (b) b.classList.toggle('active', (id === 'view-' + mode)); });
+    ['view-changed', 'view-all', 'view-manual', 'view-memrev', 'view-consist', 'view-icdrift', 'view-termrev'].forEach((id) => { const b = $(id); if (b) b.classList.toggle('active', (id === 'view-' + mode)); });
     renderReview();
   };
   $('view-changed').addEventListener('click', () => setRevFilter('changed'));
@@ -5895,6 +5960,8 @@ async function init() {
   $('view-manual').addEventListener('click', () => setRevFilter('manual'));   // ✋ paste-by-hand only
   $('view-memrev').addEventListener('click', () => setRevFilter('memrev'));   // 🧠 memory — review only
   $('view-consist').addEventListener('click', () => setRevFilter('consist')); // ⚖ consistency flags only
+  if ($('view-icdrift')) $('view-icdrift').addEventListener('click', () => setRevFilter('icdrift')); // ⚖ GPT drift flags only
+  if ($('ic-sweep')) $('ic-sweep').addEventListener('click', icSweep);        // run the GPT internal-consistency sweep
   if ($('view-termrev')) $('view-termrev').addEventListener('click', () => setRevFilter('termrev')); // 🏷 term-base flags only
   // Approve selection (does NOT change the view). Manual/tagged rows are copy-by-hand and never auto-written.
   $('sel-all').addEventListener('click', () => { state.proposals.forEach((p) => p.approved = !p.manual && !sameRender(p.next, p.old)); renderReview(); });

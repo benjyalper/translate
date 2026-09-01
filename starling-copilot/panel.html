@@ -314,7 +314,11 @@
           <button id="view-manual" class="btn xs ghost" title="Show only ✋ paste-by-hand segments — tagged/chip rows you copy in by hand">✋ Paste by hand</button>
           <button id="view-memrev" class="btn xs ghost" title="Show only 🧠 memory — review rows — where your remembered wording differs from GPT and is left unchecked for you to confirm">🧠 Memory — review</button>
           <button id="view-consist" class="btn xs ghost" title="Show only ⚖ consistency flags — segments where a term you translated one way on its own doesn't seem to match here (flag only, nothing changed)">⚖ Consistency</button>
+          <button id="view-icdrift" class="btn xs ghost" title="Show only ⚖ drift flags from the GPT internal-consistency sweep — segments where a recurring word/verb was rendered inconsistently (flag only; “use unified” to adopt)">⚖ Drift</button>
           <button id="view-termrev" class="btn xs ghost" title="Show only 🏷 term-base flags — segments where a Starling term's approved Hebrew is missing (soft; a different form may be correct in context)">🏷 Term base</button>
+        </span>
+        <span class="rev-grp" title="One GPT pass over the whole task that flags recurring words/verbs rendered inconsistently (e.g. take time → אורך vs לוקח) and proposes a unified wording — review-only, nothing auto-applied">
+          <button id="ic-sweep" class="btn xs ghost" title="Run a GPT internal-consistency sweep over the whole task (one call). Flags synonym drift and proposes a unified wording per segment — review-only.">⚖ Sweep drift</button>
         </span>
         <span class="rev-grp" title="Tick / untick the apply boxes (tagged rows stay copy-by-hand)">
           <button id="sel-all" class="btn xs ghost">✓ all</button>
