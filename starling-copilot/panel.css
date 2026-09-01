@@ -210,6 +210,8 @@ textarea { font-family: ui-monospace, Menlo, Consolas, monospace; resize: vertic
 .ic-opts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .ic-use { font-size: .9em; padding: 2px 10px; border: 1px solid #b45309; border-radius: 6px; background: transparent; color: #fbbf24; cursor: pointer; }
 .ic-use:hover { background: rgba(180, 83, 9, .2); }
+.ic-keep { font-size: .9em; padding: 2px 10px; border: 1px solid var(--border, #2a2a3a); border-radius: 6px; background: transparent; color: var(--dim, #9aa); cursor: pointer; }
+.ic-keep:hover { background: rgba(255, 255, 255, .06); color: #ccc; }
 .conf-list { display: flex; flex-direction: column; gap: 8px; margin: 8px 0; }
 .conf-item { border: 1px solid var(--warn); border-radius: 8px; padding: 8px 10px; background: rgba(217,119,6,.12); }
 .conf-head { font-weight: 600; margin-bottom: 6px; overflow-wrap: anywhere; }

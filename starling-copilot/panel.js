@@ -1306,6 +1306,7 @@ function renderReview() {
         `</div>` : ''}
       ${p.icDrift ? `<div class="rc-fuzzy" title="Pick the Hebrew rendering to standardize on — it updates every segment in this task that uses “${esc(p.icDrift.concept)}”. Nothing auto-applied."><div class="fz-m"><div class="fz-meta"><span class="fz-score">⚖ unify</span> <span class="fz-src" dir="ltr">${esc(p.icDrift.reason)}</span></div><div class="ic-opts">` +
         p.icDrift.options.map((o) => `<button class="ic-use" type="button" data-i="${idx}" data-he="${esc(o.he)}" dir="rtl" title="Use “${esc(o.he)}” everywhere “${esc(p.icDrift.concept)}” appears in this task (rewrites each segment grammatically).">use ${esc(o.he)}</button>`).join('') +
+        `<button class="ic-keep" type="button" data-i="${idx}" title="Keep every segment's current wording for “${esc(p.icDrift.concept)}” as harvested, and dismiss this drift flag — nothing is rewritten.">keep current</button>` +
         `</div></div></div>` : ''}
       ${changed && String(p.old).trim() ? `<div class="rc-old" dir="rtl">${hl(esc(p.old))}</div>` : ''}
       ${newRow}
@@ -1370,6 +1371,13 @@ function renderReview() {
       cnt++;
     }
     if (cnt) info('gpt-info', `⚖ Standardized ${cnt} segment(s) on “${he}”.`, 'good');
+    renderReview();
+  }));
+  box.querySelectorAll('.ic-keep').forEach((b) => b.addEventListener('click', () => {
+    const p = state.proposals[+b.dataset.i]; if (!p || !p.icDrift) return;
+    const group = p.icDrift.group; let cnt = 0;                     // keep every segment's CURRENT wording; just dismiss the group's drift flags
+    for (const q of state.proposals) { if (q.icDrift && q.icDrift.group === group) { q.icDrift = null; cnt++; } }
+    if (cnt) info('gpt-info', `⚖ Kept current wording for ${cnt} segment(s) — drift dismissed.`, '');
     renderReview();
   }));
   updateRevCount();
