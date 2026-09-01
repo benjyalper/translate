@@ -1163,12 +1163,25 @@ function renderReview() {
     const idx = state.proposals.indexOf(p);
     const changed = !sameRender(p.next, p.old);
     const cleanFull = stripTags(p.next);                        // whole target, inner text only (no tokens)
-    const bulletParts = splitParts(p.next);
-    const runParts = bulletParts ? null : splitTagRuns(p.next); // text runs between O-/C- tags
-    // Per-part copy block: bullet items first, else each text run between two tags.
+    // Prefer tag-run splitting whenever O-/C- tokens are present: those tokens are the REAL chip
+    // boundaries, so a run between them is exactly what you paste between the ①…① tags. Only fall
+    // back to the bullet splitter for a pure bullet list with no tags — otherwise a bullet that
+    // sits INSIDE a tag pair (e.g. a bolded "• Heading:") would split there and orphan the tag token.
+    const runParts = splitTagRuns(p.next);                      // text runs between O-/C- tags
+    const bulletParts = runParts ? null : splitParts(p.next);   // else a pure bullet list (no tags)
+    // Per-part copy block: text runs between tags first, else bullet items.
     // Copy a part → in Starling paste it BETWEEN its matching ①…① (tags untouched).
     let copyBlock = '';
-    if (bulletParts) {
+    if (runParts) {
+      const sruns = splitTagRuns(p.src);                        // source runs align 1:1 by tag structure
+      copyBlock = `<div class="rc-parts" title="Each run of text between two tags — copy it and paste it BETWEEN the matching ①…① tags in Starling; the tags stay untouched.">` +
+        runParts.map((r, i) => {
+          const id = r.id || String(i + 1);
+          const sclean = (sruns && sruns.length === runParts.length) ? sruns[i].text : '';
+          const sref = sclean ? `<div class="rc-psrc" dir="ltr">${hl(esc(sclean))}</div>` : '';
+          return `<div class="rc-part"><span class="rc-pidx" title="tag ${esc(id)}">${esc(id)}</span><div class="rc-pbody">${sref}<div class="rc-ptxt" dir="rtl">${hl(esc(r.text))}</div></div><button class="rc-copy" type="button" data-copy="${esc(r.text)}">Copy</button></div>`;
+        }).join('') + `</div>`;
+    } else if (bulletParts) {
       const sparts = splitParts(p.src);
       copyBlock = `<div class="rc-parts" title="Paste each part between its matching ①…① tags in Starling — the tags stay untouched.">` +
         bulletParts.map((pt, i) => {
@@ -1177,12 +1190,6 @@ function renderReview() {
           const sclean = (sparts && sparts.length === bulletParts.length) ? stripTags(sparts[i]) : '';
           const sref = sclean ? `<div class="rc-psrc" dir="ltr">${hl(esc(sclean))}</div>` : '';
           return `<div class="rc-part"><span class="rc-pidx" title="tag ${esc(id)}">${esc(id)}</span><div class="rc-pbody">${sref}<div class="rc-ptxt" dir="rtl">${hl(esc(clean))}</div></div><button class="rc-copy" type="button" data-copy="${esc(clean)}">Copy</button></div>`;
-        }).join('') + `</div>`;
-    } else if (runParts) {
-      copyBlock = `<div class="rc-parts" title="Each run of text between two tags — copy it and paste it BETWEEN the matching ①…① tags in Starling; the tags stay untouched.">` +
-        runParts.map((r, i) => {
-          const id = r.id || String(i + 1);
-          return `<div class="rc-part"><span class="rc-pidx" title="tag ${esc(id)}">${esc(id)}</span><div class="rc-pbody"><div class="rc-ptxt" dir="rtl">${hl(esc(r.text))}</div></div><button class="rc-copy" type="button" data-copy="${esc(r.text)}">Copy</button></div>`;
         }).join('') + `</div>`;
     }
     // Every card gets a whole-segment Copy + a ✍ Write button. Manual (tagged) rows
