@@ -201,6 +201,12 @@ textarea { font-family: ui-monospace, Menlo, Consolas, monospace; resize: vertic
 .fz-tgt { direction: rtl; flex: 1; }
 .fz-use { font-size: .82em; padding: 1px 8px; border: 1px solid #7c3aed; border-radius: 6px; background: transparent; color: #b794f6; cursor: pointer; }
 .fz-use:hover { background: rgba(124, 58, 237, .18); }
+.wf-card { border: 1px solid var(--acc); background: rgba(99, 102, 241, .07); }
+.wf-title { font-weight: 700; font-size: 13px; margin-bottom: 6px; color: #c7d2fe; }
+.wf-steps { margin: 0; padding-inline-start: 20px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--dim); }
+.wf-steps li { line-height: 1.35; }
+.wf-steps b { color: #e5e7eb; font-weight: 600; }
+.wf-note { color: var(--dim2); font-size: 11px; }
 .ic-opts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .ic-use { font-size: .9em; padding: 2px 10px; border: 1px solid #b45309; border-radius: 6px; background: transparent; color: #fbbf24; cursor: pointer; }
 .ic-use:hover { background: rgba(180, 83, 9, .2); }
