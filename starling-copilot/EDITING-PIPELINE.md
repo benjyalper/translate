@@ -145,47 +145,88 @@ rules protects *meaning* — the principle is **terminology guides translation, 
 override meaning**, and **consistency means "same meaning + same context → same target",
 not "same English letters → same Hebrew everywhere".**
 
-**Term base → GPT.** Each harvested term is sent to the model as
-`{en, he, pos, definition}` (the Starling definition is now included when it exists).
-The prompt tells the model a term applies **only** when the occurrence's *sense* and
-*part of speech* match the definition/POS — a surface word-match is not proof. Multi-word
-terms are listed first, so *"due to"* outranks *"Due"*. Worked examples baked into the
-prompt: *Due→לתשלום* must not fire on *"due to"* (= because of → עקב); *Application→הגשת
-בקשה* must not force *הגשת* into *"verification application"* (→ בקשת האימות); a **noun**
-*Highlight* must not be forced onto *"Highlight the section"* (a verb → הדגש/י).
+Most of this logic is factored into **`pipeline-core.js`** — a pure, DOM-free module loaded
+before `panel.js` (and unit-tested in `tests/core.test.js`). `panel.js` calls it as `PC.*`.
+
+**Processing order (`doGpt`).** Text-mutating semantic stages run first; the reviewer sees the
+*final* candidate; only deterministic validators run after it:
+
+```
+GPT translation
+→ high-confidence contextual memory + same-source dedupe   (tmApply)
+→ curated Auto-fix dictionary                              (fixApply)
+→ independent GPT reviewer, if enabled                     (reviewPass)
+→ locked-term · in-task drift · term-base · placeholder    (lockCheck / consistCheck / tbCheck / phCheck)
+→ review UI
+```
+
+No semantic search-and-replace runs after the reviewer, and every validator inspects the
+reviewer's final text.
+
+**Term base → GPT (applicability, not replacement).** Each harvested term is sent as
+`{en, he, pos, definition}` (the Starling definition is included when it exists). Before the
+prompt, `PC.classifyTerms` tags each match: a single word whose span is covered by a longer
+term (*"Due"* inside *"due to"*) is **dropped** from the prompt as `OVERLAPPED_BY_MORE_SPECIFIC_TERM`;
+a word followed by a sense-shifting function word (*"due **to**"*) is `POSSIBLY_INAPPLICABLE`.
+The prompt tells the model a term applies **only** when the occurrence's sense *and* POS match
+the definition/POS. Worked examples baked in: *Due→לתשלום* ✗ on *"due to"* (→ עקב);
+*Application→הגשת בקשה* ✗ forced into *"verification application"* (→ בקשת האימות); a **noun**
+*Highlight* ✗ on the verb use (→ הדגש/י). `PC.segRisk` records per-segment risk reasons
+(`SHORT_AMBIGUOUS_SOURCE`, `OVERLAPPING_TERMS`, `TERM_POS_RISK`, `CONTEXT_MISSING`, …).
 
 **Term enforcement is flag-only.** `lockCheck`, `tbCheck`, and `consistCheck` never rewrite
-text — they raise review badges. The only text-mutating post-steps are memory, dedupe, and
-the curated Hebrew→Hebrew `Auto-fix` dictionary. **No stage does EN→HE term substitution**,
-so a correct contextual translation can never be turned into a surface-matched term.
+text. `tbCheck` now uses the same applicability metadata: an overlapped term is **suppressed**,
+a likely-different-sense term is softened to **🏷 term? (uncertain)** rather than a definite
+**🏷 term** deviation. **No stage does EN→HE term substitution.** Locked terms stay strict.
 
-**Context-aware memory & dedupe.** For a *short* source (≤ 3 words — "Save", "Due",
-"Following") identical source text is **not** treated as identical meaning: a differing
-memory becomes a review *suggestion* (it no longer overwrites GPT's contextual choice), and
-same-source dedupe only auto-aligns occurrences that share a **context** (key module +
-translator note). Long, unambiguous sentences still match on source alone. New memory
-entries store `key`/`ctx` so future short-string matches can check compatibility; legacy
-entries (no context) keep working as lower-confidence suggestions.
+**Multi-variant contextual memory.** A memory entry holds several contextual variants per
+English source (`Save | button → שמירה` *and* `Save | instruction → שמור/שמרי` coexist).
+`PC.memPut` merges a written pair into the variant that shares its context and otherwise adds a
+new one — it never overwrites a different-context sibling. Legacy single-entry data reads
+unchanged. On a Run, `PC.memDecision` picks the best variant for the segment and scores context
+confidence — **HIGH / MEDIUM / LOW / UNKNOWN** — from the exact key, UI role (key suffix),
+namespace, and translator note. Two empty contexts are `UNKNOWN` (never auto-compatible); a
+shared namespace alone is only `LOW`; a role conflict (button vs instruction) is `LOW`.
+**Short sources (≤ 4 words) auto-apply only at HIGH**; below that the memory is a review-only
+*suggestion*. **Long unambiguous sentences apply at MEDIUM+** on source identity alone. A
+context-unknown/legacy variant is capped at `LOW`, so it stays suggestion-only for short strings.
 
-**Placeholder guard (`phCheck`).** After translation, a deterministic check compares the
-protected-token multiset (`{x}`, `{{x}}`, `%s`, `<tag>`, ①②③) between source and target;
-any drop/add/alteration raises a red **⚠ placeholder guard** badge. Corruption is never
-silently accepted.
+**Same-source dedupe (`PC.planDedupe`).** Long sources align the whole group. Short sources
+align **only** occurrences that share a HIGH-confidence context (same key+note, or role+note);
+two empty-context *"Save"* strings are never forced together — each keeps GPT's contextual
+wording, and the ⚖ consistency check still surfaces the difference.
 
-**Independent GPT QA (optional).** With **🔎 Independent GPT QA** on (Settings), a second
-model reviews each translation against the same evidence and returns structured JSON
-(`OK` / `FIX` + issue type). A `FIX` is applied only if it keeps every placeholder intact;
-otherwise it's flagged, not applied. If the reviewer call fails, the original translation is
-kept and marked **🔎 QA n/a** — a translation is never lost. Off by default (~doubles cost).
+**Compact task-wide context (`PC.buildTaskContext`).** Before batching, a deterministic,
+capped, relevance-filtered glossary is built from the locked terms, harvested terms, and your
+own high-confidence memory that actually **occur in this task** (plus repeated multi-word
+feature names). It never invents Hebrew. The same compact block is prepended to **every**
+translation batch and the reviewer, so batch 1 and batch 38 stay consistent without dumping the
+whole term base into each call.
 
-**Screenshots (optional, beta).** With **📷 Use screenshots as GPT context** on and a
-vision model configured, a segment's Starling UI screenshot is fetched inside the Starling
-tab (credentialed, base64-inlined — no token leaves the browser) and attached as extra
-context. Any failure falls back to text-only.
+**Placeholder guard (`phCheck` → `PC.phDiff`).** A deterministic multiset comparison of
+protected tokens (`{x}`, `{{x}}`, `%s`, `<tag>`, ①②③) between source and target; any
+drop/add/alteration raises a red **⚠ placeholder guard** badge. It runs **last**, so it checks
+the reviewer's final text. Corruption is never silently accepted.
 
-**Diagnostics.** `scDebug(true)` in the panel console logs, per segment, the terms +
-definitions supplied, context fields, screenshot availability, and reviewer outcome. Keys
-and tokens are never logged.
+**Independent GPT QA (optional).** With **🔎 Independent GPT QA** on (Settings), a second model
+reviews each translation *after* memory and Auto-fix, against the same evidence **plus the task
+context, `fullSource`, and the same screenshot** the translator saw, and returns structured JSON
+(`OK` / `FIX` + issue type). A `FIX` is applied only if it keeps every placeholder intact —
+otherwise it is flagged, not applied. On a failed call the original is kept and marked
+**🔎 QA n/a**; a translation is never lost. Off by default (~doubles cost).
+
+**Screenshots (optional, beta).** With **📷 Use screenshots as GPT context** on and a vision
+model configured, a segment's Starling UI screenshot is fetched inside the Starling tab
+(credentialed, base64-inlined — no token leaves the browser), **cached per run**, and given to
+both the translator and the reviewer. The base64 is never persisted to storage or memory, and
+neither the image data nor its (authenticated) URL is ever logged. Any failure falls back to
+text-only.
+
+**Diagnostics.** `scDebug(true)` in the panel console logs, per segment: the terms with
+definitions/POS and their applicability status, semantic-risk reasons, the memory variant chosen
+with its confidence + reasons + action (apply/suggest), whether a screenshot was actually
+attached, task-context sizes, and the reviewer outcome. API keys, tokens, cookies, base64 image
+data and authenticated URLs are never logged.
 
 ## Appendix B · Net result
 By the time a segment is written and confirmed, all of the following match the source or

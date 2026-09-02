@@ -458,35 +458,30 @@ async function tmSave() { TM.updatedAt = Date.now(); FZ.dirty = true; try { awai
 function tmCount() { return TM && TM.map ? Object.keys(TM.map).length : 0; }
 function tmKey(src) { return wbFold(String(src == null ? '' : src)); }   // normalise quotes/dashes/spaces/fullwidth; case kept
 function tmLookup(src) { const k = tmKey(src); return (k && TM.map[k]) ? TM.map[k] : null; }
-// Context signals for short-string disambiguation (#5/#6). A very short UI string ("Save",
-// "Due", "Following") can mean different things in different places, so identical source text
-// is NOT proof of identical meaning — we require a compatible CONTEXT before auto-applying
-// memory or forcing dedupe. Long, clearly-unambiguous sentences still match on source alone.
-function tmWordCount(src) { return wbFold(String(src == null ? '' : src)).trim().split(/\s+/).filter(Boolean).length; }
-function tmShort(src) { return tmWordCount(src) <= 3; }
-function ctxSig(p) {   // coarse context signature: key namespace (module) + translator note
-  const key = String((p && p.key) || '');
-  const ns = key ? key.replace(/[._\-\/][^._\-\/]*$/, '') : '';   // drop the last key segment → its module/namespace
-  return ns + '|' + wbFold(String((p && p.context) || ''));
+// A memory entry now holds MULTIPLE contextual variants per source (see pipeline-core.memVariants);
+// legacy single-entry data is still read unchanged. These thin wrappers route the pure logic
+// through the app's own fold (wbFold) so stored keys stay identical.
+function tmShort(src) { return PC.isShort(src, wbFold); }
+function ctxSig(p) { return PC.ctxSig(p, wbFold); }
+function tmVariants(entry) { return PC.memVariants(entry); }
+function tmEntryTgt(entry) {   // representative target for legacy readers (search / conflict UI): the strongest variant
+  const v = tmVariants(entry).slice().sort((a, b) => (b.n || 1) - (a.n || 1) || (b.ts || 0) - (a.ts || 0))[0];
+  return v ? v.tgt : '';
 }
-function ctxCompatible(a, b) { return ctxSig(a) === ctxSig(b); }   // same module + same note (both empty counts as same)
-function memCtxCompatible(hit, p) {   // is a stored memory entry safe to auto-apply to THIS segment?
-  if (!hit || hit.ctx == null) return null;   // legacy entry has no stored context → unknown
-  return ctxSig({ key: hit.key || '', context: hit.ctx || '' }) === ctxSig(p);
-}
-// Attach a memory hit as a REVIEW-ONLY suggestion (reuses the fuzzy near-match UI) instead of
-// overwriting GPT's contextual translation — used for short ambiguous sources (#5).
-function tmSuggest(p, hit) {
+// Attach a memory variant as a REVIEW-ONLY suggestion (reuses the fuzzy near-match UI) instead of
+// overwriting GPT's contextual translation — used when context confidence is below the auto-apply bar (#5).
+function tmSuggest(p, src, tgt) {
   if (!p.fuzzy) p.fuzzy = { matches: [] };
-  if (p.fuzzy.matches.some((m) => wbFold(m.suggest) === wbFold(hit.tgt))) return;
-  p.fuzzy.matches.unshift({ tier: 'template', score: 1, src: hit.src || p.src, suggest: hit.tgt });
+  if (p.fuzzy.matches.some((m) => wbFold(m.suggest) === wbFold(tgt))) return;
+  p.fuzzy.matches.unshift({ tier: 'template', score: 1, src: src || p.src, suggest: tgt });
 }
-function tmRecordOne(src, tgt, key, ctx) {
-  const k = tmKey(src); const t = String(tgt == null ? '' : tgt).trim();
-  if (!k || !t) return false;
-  const prev = TM.map[k];
-  TM.map[k] = { src: String(src), tgt: t, ts: Date.now(), n: (prev ? prev.n || 1 : 0) + 1, key: String(key || ''), ctx: String(ctx || '') };   // key/ctx: context for future short-string matching (#15)
-  return true;
+// Record a written pair as a contextual variant. ctxKnown defaults to "known" when a key or
+// context is supplied and "unknown" otherwise (imports / corpus / manual adds), so a genuinely
+// context-free write is stored as context-unknown rather than as a fake empty-context variant.
+function tmRecordOne(src, tgt, key, ctx, ctxKnown) {
+  const k = tmKey(src); if (!k) return false;
+  if (ctxKnown === undefined) ctxKnown = !!(key || ctx);
+  return PC.memPut(TM.map, k, src, tgt, { key: key || '', context: ctx || '', ctxKnown }, wbFold);
 }
 // Record every approved, non-manual proposal that was actually written (okSegs = a
 // Set of seg numbers that succeeded, or null to record all approved non-manual).
@@ -510,36 +505,41 @@ function tmApply(proposals) {
   const lockClashes = [], parkedLock = new Set(CONF.filter((c) => c.kind === 'lockmem').map((c) => c.srcKey + '⇢' + String(c.lockEn).toLowerCase()));
   // 1) cross-task/session memory — prior wording is offered over a fresh GPT suggestion.
   for (const p of proposals) {
-    const hit = exactOn ? tmLookup(p.src) : null;
-    if (!hit) { if (fuzzyOn && !p.manual) fzAttach(p); continue; }   // no exact hit → offer near-matches
-    // Tagged/chip ("manual") segments are copy-by-hand, never auto-written — but we STILL seed their
-    // suggestion from memory so the remembered wording lands in the per-part Copy text. Guard: only when
-    // the stored target carries the SAME tag tokens as the source, so the ①…① splitter stays aligned;
-    // otherwise (e.g. a plain-text memory for a bullet-list segment) keep GPT's tag-carrying output.
-    if (p.manual && tmTagSig(hit.tgt) !== tmTagSig(p.src)) continue;
-    // If the remembered target VIOLATES a locked term the source requires, the locked term wins:
-    // keep GPT's (locked-compliant) output, do NOT apply the stale memory, and park the clash.
+    const entry = exactOn ? tmLookup(p.src) : null;
+    if (!entry) { if (fuzzyOn && !p.manual) fzAttach(p); continue; }   // no exact hit → offer near-matches
+    // Pick the best CONTEXTUAL variant and how confidently it applies to THIS segment (#1/#2).
+    const dec = PC.memDecision(entry, { src: p.src, key: p.key || '', context: p.context || '' }, wbFold);
+    if (dec.action === 'none') { if (fuzzyOn && !p.manual) fzAttach(p); continue; }
+    const memTgt = dec.best.variant.tgt;
+    p.memConf = dec.best.confidence.name;                 // diagnostics: HIGH/MEDIUM/LOW/UNKNOWN
+    p.memReasons = dec.best.confidence.reasons;
+    if (dec.best.confidence.reasons.indexOf('ROLE_CONFLICT') >= 0 || dec.best.confidence.reasons.indexOf('NOTE_CONFLICT') >= 0) p.memConflict = true;
+    dbg('mem', p.seg, { variant: memTgt, confidence: p.memConf, reasons: p.memReasons, action: dec.action, variants: tmVariants(entry).length });
+    // Tagged/chip ("manual") segments are copy-by-hand — still seed their suggestion from memory so the
+    // remembered wording lands in the per-part Copy text, but only when the stored target carries the
+    // SAME tag tokens as the source (keeps the ①…① splitter aligned).
+    if (p.manual && tmTagSig(memTgt) !== tmTagSig(p.src)) continue;
+    // Locked terms OUTRANK memory: a remembered target that violates a required locked term is dropped.
     if (haveLocks) {
-      const lv = lockViolations(p.src, hit.tgt);
+      const lv = lockViolations(p.src, memTgt);
       if (lv.length) {
-        for (const t of lv) { const sig = tmKey(p.src) + '⇢' + String(t.en).toLowerCase(); if (!parkedLock.has(sig)) { parkedLock.add(sig); lockClashes.push({ kind: 'lockmem', label: p.src, srcKey: tmKey(p.src), src: p.src, memVal: hit.tgt, lockEn: t.en, lockHe: t.he }); } }
+        for (const t of lv) { const sig = tmKey(p.src) + '⇢' + String(t.en).toLowerCase(); if (!parkedLock.has(sig)) { parkedLock.add(sig); lockClashes.push({ kind: 'lockmem', label: p.src, srcKey: tmKey(p.src), src: p.src, memVal: memTgt, lockEn: t.en, lockHe: t.he }); } }
         p.tmLockBlocked = true;
-        continue;   // locked wins — memory not applied
+        continue;
       }
     }
-    if (wbFold(hit.tgt) !== wbFold(p.next)) {
-      // SHORT ambiguous source (#5): a differing memory whose context we can't confirm compatible is
-      // only a SUGGESTION — keep GPT's contextual translation and offer the memory via the review UI,
-      // rather than overwriting a correct contextual choice with a wording approved elsewhere.
-      const compat = memCtxCompatible(hit, p);   // true / false / null(=unknown, legacy entry)
-      if (tmShort(p.src) && compat !== true) { tmSuggest(p, hit); continue; }
-      p.tmPrev = p.next;           // what GPT proposed this time
-      p.next = hit.tgt;            // your previous, endorsed wording
-      p.tm = true; p.tmOverride = true;
-      p.approved = false;          // memory DIFFERS from GPT → leave UNCHECKED so you confirm (manual is
-                                   // never auto-written regardless); a remembered mistake never re-applies silently.
+    if (wbFold(memTgt) !== wbFold(p.next)) {
+      // AUTO-APPLY only at the required confidence (HIGH for short sources, MEDIUM+ for long).
+      // Otherwise the memory is a review-only SUGGESTION — GPT's contextual translation stands (#5).
+      if (dec.action === 'apply') {
+        p.tmPrev = p.next; p.next = memTgt;
+        p.tm = true; p.tmOverride = true;
+        p.approved = false;          // differs from GPT → left UNCHECKED so you confirm; never re-applies silently.
+      } else {
+        tmSuggest(p, entry.src || p.src, memTgt); p.memSuggestOnly = true;
+      }
     } else {
-      p.tm = true;                 // GPT already matches memory → badge as consistent
+      p.tm = true;                 // GPT already matches your remembered wording → badge as consistent
     }
   }
   if (lockClashes.length) confAdd(lockClashes);   // surface stale locked-vs-memory clashes for a one-time decision
@@ -570,19 +570,14 @@ function tmApply(proposals) {
       }
     }
   };
-  const groups = new Map();
-  for (const p of proposals) { if (p.manual) continue; const k = tmKey(p.src); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(p); }
-  for (const arr of groups.values()) {
-    if (arr.length < 2) continue;
-    // Long/unambiguous sources: same source is enough → align the whole group (Test E).
-    // Short (≤3-word) sources: only auto-align occurrences that share a CONTEXT (module + note),
-    // so "Save" as a button and "Save" as an instruction aren't forced together (Test D). Divergent
-    // contexts keep their own contextual wording; the ⚖ consistency check still surfaces the difference.
-    if (!tmShort(arr[0].src)) { alignGroup(arr); continue; }
-    const sub = new Map();
-    for (const p of arr) { const s = ctxSig(p); if (!sub.has(s)) sub.set(s, []); sub.get(s).push(p); }
-    for (const g of sub.values()) alignGroup(g);
-  }
+  // planDedupe decides which occurrences to align (pipeline-core, #3): a long source aligns the
+  // whole group; a short (≤4-word) source aligns ONLY occurrences that share a HIGH-confidence
+  // context (same key+note, or same UI-role+note). No-signal short strings stay separate — two
+  // empty-context "Save" strings are never forced together. Members left unaligned keep GPT's own
+  // contextual wording; the ⚖ consistency check still surfaces any divergence for review.
+  const elig = proposals.filter((p) => !p.manual);
+  const groups = PC.planDedupe(elig.map((p, i) => ({ i, src: p.src, key: p.key || '', context: p.context || '' })), wbFold);
+  for (const g of groups) alignGroup(g.map((i) => elig[i]));
 }
 
 // ---- FUZZY MEMORY: near-match suggestions when there's no exact hit --------
@@ -608,11 +603,15 @@ function fzDice(aTokens, bSet, bLen) {
 function fzBuildIndex() {
   const entries = [], templates = new Map(), inverted = new Map();
   for (const k of Object.keys(TM.map || {})) {
-    const e = TM.map[k]; if (!e || !e.src || !e.tgt) continue;
-    const set = new Set(fzTokens(e.src)); const tmpl = fzTemplate(e.src); const idx = entries.length;
-    entries.push({ key: k, src: e.src, tgt: e.tgt, tmpl, set, len: set.size });
-    if (!templates.has(tmpl)) templates.set(tmpl, []); templates.get(tmpl).push(idx);
-    for (const t of set) { if (!inverted.has(t)) inverted.set(t, []); inverted.get(t).push(idx); }
+    const e = TM.map[k]; if (!e || !e.src) continue;
+    const src = e.src, set = new Set(fzTokens(src)), tmpl = fzTemplate(src);
+    // Index EVERY contextual variant as its own near-match candidate (multi-variant aware).
+    for (const v of tmVariants(e)) {
+      if (!v.tgt) continue; const idx = entries.length;
+      entries.push({ key: k, src, tgt: v.tgt, tmpl, set, len: set.size });
+      if (!templates.has(tmpl)) templates.set(tmpl, []); templates.get(tmpl).push(idx);
+      for (const t of set) { if (!inverted.has(t)) inverted.set(t, []); inverted.get(t).push(idx); }
+    }
   }
   FZ = { entries, templates, inverted, dirty: false };
 }
@@ -888,19 +887,28 @@ function tbHintsFor(src) {
   });
   return out.slice(0, TB_MAX_HINTS);
 }
-// Post-run SOFT flag: a term's approved HE is absent from the target. Context may legitimately
-// explain it (verb form, different sense) — so this is review-only, never a rewrite.
+// Post-run SOFT flag: a term's approved HE is absent from the target. Uses the SAME applicability
+// metadata as translation (#8): a term overlapped by a longer expression, or one whose sense/POS
+// likely differs (e.g. "Due→לתשלום" in "due to"), is NOT reported as a definite deviation — it is
+// either suppressed or labelled "uncertain". Locked-term validation stays strict and separate.
+// Never mutates text; only sets the review badge.
 function tbCheck(proposals) {
-  for (const p of proposals) p.termHint = null;
+  for (const p of proposals) { p.termHint = null; p.termUncertain = null; }
   if (!TB || !TB.enabled || !(TB.terms || []).length) return;
   for (const p of proposals) {
     if (p.manual) continue;
-    const miss = [];
+    const miss = [], uncertain = [];
     for (const t of TB.terms) {
       if (!t.en || !t.he) continue;
-      if (lockSrcHas(p.src, t.en) && !lockTgtHas(p.next, t.he)) miss.push({ en: t.en, he: t.he });
+      if (!lockSrcHas(p.src, t.en)) continue;
+      const hasHe = lockTgtHas(p.next, t.he);
+      const verdict = PC.tbApplicability(p.src, t, hasHe);   // 'ok' | 'warn' | 'uncertain' | 'suppress'
+      if (verdict === 'warn') miss.push({ en: t.en, he: t.he });
+      else if (verdict === 'uncertain') uncertain.push({ en: t.en, he: t.he });
+      // 'suppress' (overlapped by a more specific term) and 'ok' → no flag
     }
     p.termHint = miss.length ? miss : null;
+    p.termUncertain = uncertain.length ? uncertain : null;
   }
 }
 // Read the open task's term references from the page's MAIN world (executeScript world:'MAIN'
@@ -1080,27 +1088,10 @@ function fixApply(proposals) {
 }
 
 // ---- PLACEHOLDER / MARKUP GUARD (deterministic QA, #12) --------------------
-// Extracts the multiset of PROTECTED tokens (placeholders, printf specifiers, inline
-// tags, circled markers) from a string. GPT must reproduce each one the same number of
-// times — this is a mechanical check code can guarantee, so it never relies on the model.
-function phTokens(s) {
-  const str = String(s == null ? '' : s), out = [];
-  const grab = (re) => { let m; while ((m = re.exec(str)) !== null) out.push(m[0]); };
-  grab(/\{\{[^{}]+\}\}/g);          // {{var}}
-  grab(/\{[^{}]+\}/g);              // {s_username} / {0}
-  grab(/%\d*\$?[sd]/g);             // %s %d %1$s
-  grab(/<[^<>]+>/g);                // <b> </b> <g id="1"> <x/>
-  grab(/[①-⑳]/g);         // ①..⑳
-  return out;
-}
-// Compare src vs target token multisets. Returns [] when they match, else a list of
-// human-readable mismatches ("{s_username}: 1 → 0"). Used to flag rows, never to auto-edit.
-function phDiff(src, tgt) {
-  const count = (arr) => { const m = new Map(); for (const t of arr) m.set(t, (m.get(t) || 0) + 1); return m; };
-  const a = count(phTokens(src)), b = count(phTokens(tgt)), keys = new Set([...a.keys(), ...b.keys()]), out = [];
-  for (const k of keys) { const x = a.get(k) || 0, y = b.get(k) || 0; if (x !== y) out.push(`${k}: ${x} → ${y}`); }
-  return out;
-}
+// Single source of truth lives in pipeline-core (PC.phTokens / PC.phDiff) so the code that
+// ships is the code the behavioural tests exercise. These thin wrappers keep call sites stable.
+function phTokens(s) { return PC.phTokens(s); }
+function phDiff(src, tgt) { return PC.phDiff(src, tgt); }
 // Flag every proposal whose target dropped, added, or corrupted a protected token (#12).
 // Review-only: it NEVER silently accepts corruption and NEVER rewrites the text.
 function phCheck(proposals) {
@@ -1146,35 +1137,41 @@ function modelVision(model) { return /gpt-5|gpt-4o|gpt-4\.1|o4|vision/i.test(Str
 const SHOT_MAX_BYTES = 1500000;   // skip very large screenshots to keep cost/latency sane
 // Fetch each slice item's first screenshot as a data: URL, IN the Starling tab (credentialed),
 // returning [{i, dataUrl}]. Any failure is swallowed per-item — the caller falls back to text.
-async function fetchShotsFor(slice, tabId) {
-  const jobs = [];
-  slice.forEach((s, j) => { const uri = s.shots && s.shots[0] && s.shots[0].uri; if (uri) jobs.push({ i: j + 1, uri }); });
-  if (!jobs.length || !tabId) return [];
-  try {
-    const [r] = await chrome.scripting.executeScript({
-      target: { tabId }, world: 'MAIN',
-      args: [jobs, SHOT_MAX_BYTES],
-      func: async (jobs, MAX) => {
-        const one = async (uri) => {
-          try {
-            const res = await fetch(uri, { credentials: 'include', cache: 'force-cache' });
-            if (!res.ok) return null;
-            const blob = await res.blob();
-            if (!blob || blob.size > MAX || !/^image\//.test(blob.type || '')) return null;
-            return await new Promise((ok) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = () => ok(null); fr.readAsDataURL(blob); });
-          } catch (e) { return null; }
-        };
-        const out = [];
-        for (const jb of jobs) { const d = await one(jb.uri); if (d) out.push({ i: jb.i, dataUrl: d }); }
-        return out;
-      }
-    });
-    return (r && r.result) || [];
-  } catch (e) { dbg('shot fetch failed', e.message); return []; }
+async function fetchShotsFor(slice, tabId, cache) {
+  cache = cache || new Map();   // per-run uri→dataUrl (null = tried and failed) so an image is fetched at most once
+  const out = [], need = [];
+  slice.forEach((s, j) => {
+    const uri = s.shots && s.shots[0] && s.shots[0].uri; if (!uri) return;
+    if (cache.has(uri)) { const d = cache.get(uri); if (d) out.push({ i: j + 1, dataUrl: d, uri }); }
+    else need.push({ i: j + 1, uri });
+  });
+  if (need.length && tabId) {
+    try {
+      const [r] = await chrome.scripting.executeScript({
+        target: { tabId }, world: 'MAIN', args: [need, SHOT_MAX_BYTES],
+        func: async (jobs, MAX) => {
+          const one = async (uri) => {
+            try {
+              const res = await fetch(uri, { credentials: 'include', cache: 'force-cache' });
+              if (!res.ok) return null;
+              const blob = await res.blob();
+              if (!blob || blob.size > MAX || !/^image\//.test(blob.type || '')) return null;
+              return await new Promise((ok) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = () => ok(null); fr.readAsDataURL(blob); });
+            } catch (e) { return null; }
+          };
+          const res = [];
+          for (const jb of jobs) { const d = await one(jb.uri); res.push({ i: jb.i, uri: jb.uri, dataUrl: d }); }
+          return res;
+        }
+      });
+      for (const x of (r && r.result) || []) { cache.set(x.uri, x.dataUrl || null); if (x.dataUrl) out.push({ i: x.i, dataUrl: x.dataUrl, uri: x.uri }); }
+    } catch (e) { dbg('shot fetch failed'); }   // never log the URL (may be authenticated)
+  }
+  return out;
 }
 function reviewerSys(plural) {
   return 'You are an INDEPENDENT English→Hebrew (he-IL) localization REVIEWER for TikTok product UI. ' +
-    'For each item you get the English "src", the proposed Hebrew "he", and (when available) "key", "context", "terms" (client glossary, each {en,he,pos,definition?}) and "locked" (mandatory glossary terms). ' +
+    'For each item you get the English "src", the proposed Hebrew "he", and (when available) "key", "context", "fullSource", "terms" (client glossary, each {en,he,pos,definition?}) and "locked" (mandatory glossary terms). Some items also include a UI screenshot. ' +
     'Compare the source with the proposed Hebrew and decide whether it has a GENUINE problem. ' +
     'DO NOT rewrite a translation that is accurate, natural and compliant just because another wording is possible — change it ONLY when you can identify a real error: incorrect meaning, mistranslation, omission, addition, wrong terminology, wrong grammatical role, wrong Hebrew gender/number, unnatural or misleading Hebrew, wrong UI register, a misread ambiguous short string, placeholder/markup corruption, punctuation/formatting problem, or a clear inconsistency with a clearly-applicable term. ' +
     'TERMINOLOGY: a glossary term applies ONLY when the occurrence has the same sense AND part of speech as its definition/pos — a surface word-match is not enough (e.g. "Due→לתשלום" does NOT apply to "due to" = "because of"). LOCKED terms are mandatory and must appear (a Hebrew prefix may be attached). ' +
@@ -1184,28 +1181,37 @@ function reviewerSys(plural) {
 }
 // Run the reviewer over all non-manual proposals in batches. Applies a FIX only when it
 // preserves placeholders; otherwise records the flagged issue and keeps the original text.
-async function reviewPass(proposals, key, model) {
+async function reviewPass(proposals, key, model, taskCtx) {
   const rev = proposals.filter((p) => !p.manual && String(p.next || '').trim());
   if (!rev.length) return;
   const plural = $('plural') && $('plural').checked;
+  const sysBase = reviewerSys(plural) + (taskCtx ? '\nTASK CONTEXT (consistency aid — a term still applies only when its sense fits):\n' + taskCtx : '');
   const B = 10;
   for (let i = 0; i < rev.length; i += B) {
     const slice = rev.slice(i, i + B);
     info('gpt-info', `🔎 Reviewing ${i + 1}–${Math.min(i + slice.length, rev.length)} of ${rev.length}…`);
+    const images = [];   // reuse the SAME screenshots the translator saw (from p.shotImg — no refetch)
     const items = slice.map((p, j) => {
       const it = { i: j + 1, src: String(p.src || ''), he: String(p.next || '') };
       if (p.key) it.key = String(p.key);
       if (p.context) it.context = String(p.context);
+      if (p.fullSrc) it.fullSource = String(p.fullSrc);   // #5 — reviewer also gets fullSource
       if (p.termsUsed && p.termsUsed.length) it.terms = p.termsUsed;
       const locked = (LOCK && LOCK.terms || []).filter((t) => t.en && lockSrcHas(p.src, t.en)).map((t) => ({ en: t.en, he: t.he }));
       if (locked.length) it.locked = locked;
+      if (p.shotImg) images.push({ i: j + 1, dataUrl: p.shotImg });
       return it;
     });
+    let userContent = 'Review these items. Return one entry per item with the same "i".\n' + JSON.stringify({ items });
+    if (images.length) {
+      userContent = [{ type: 'text', text: userContent + '\nSCREENSHOTS: some items include a UI screenshot labelled "item i=N". Use it ONLY to judge that item\'s UI role, meaning, grammatical function and register — do not describe it.' }];
+      for (const im of images) { userContent.push({ type: 'text', text: `item i=${im.i}:` }); userContent.push({ type: 'image_url', image_url: { url: im.dataUrl, detail: 'low' } }); }
+    }
     try {
       const r = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model, temperature: 0.1, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: reviewerSys(plural) }, { role: 'user', content: 'Review these items. Return one entry per item with the same "i".\n' + JSON.stringify({ items }) }] })
+        body: JSON.stringify({ model, temperature: 0.1, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: sysBase }, { role: 'user', content: userContent }] })
       });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error && data.error.message || ('reviewer ' + r.status));
@@ -1414,6 +1420,15 @@ async function doGpt() {
   const proposals = [];
   let done = 0, failed = 0, filled = 0;
   const B = 10;
+  // Per-run screenshot cache (uri→dataUrl) so an image is fetched at most once and reused by the reviewer (#5).
+  const shotCache = new Map();
+  // Compact, capped, relevance-filtered task-wide context shared by every batch AND the reviewer (#6).
+  const allSegs = groups.proofread.concat(groups.translate);
+  const TCTX = PC.buildTaskContext(allSegs, { fold: wbFold, lockTerms: (LOCK && LOCK.terms) || [], tbTerms: (TB && TB.enabled ? (TB.terms || []) : []), memMap: (TM && TM.map) || {} });
+  const taskCtxText = TCTX.text || '';
+  // Count of term-base entries per English surface form → a "multiple senses" risk signal (#7).
+  const tbSenses = {}; for (const t of (TB && TB.terms || [])) { const k = String(t.en || '').toLowerCase(); if (k) tbSenses[k] = (tbSenses[k] || 0) + 1; }
+  dbg('task-context', { terms: TCTX.terms.length, locked: TCTX.locked.length, memory: TCTX.memory.length, features: TCTX.features });
   try {
     for (const gm of ['proofread', 'translate']) {
       const list = groups[gm];
@@ -1425,20 +1440,24 @@ async function doGpt() {
           if (s.key) it.key = String(s.key);                 // role hint (…_title/_btn/_toast/…)
           if (s.context) it.context = String(s.context);     // translator note from Starling
           if (s.fullSrc) it.fullSource = String(s.fullSrc);  // complete string when src is a split fragment
-          const th = tbHintsFor(String(s.src || ''));         // Starling term-base hints for this source (soft; gated by TB.enabled)
+          const rawTh = tbHintsFor(String(s.src || ''));      // Starling term-base hints (multi-word-first, capped, with definitions)
+          const classified = PC.classifyTerms(String(s.src || ''), rawTh, tbSenses);   // applicability + overlap (#7)
+          const th = PC.filterTermsForPrompt(classified);     // drop spans overlapped by a longer term so they don't distract
           if (th.length) it.terms = th;
-          s._terms = th;                                       // remember what evidence went to GPT (diagnostics + reviewer)
+          s._terms = th; s._classified = classified;           // evidence for diagnostics / reviewer / tbCheck
+          s._risk = PC.segRisk(String(s.src || ''), classified, { fold: wbFold, hasKey: !!s.key, hasContext: !!s.context, hasShot: (s.shots || []).length > 0 });
           return it;
         });
-        // Screenshots (#4): fetch this slice's UI images only when the setting is on and the
-        // model is vision-capable — best-effort, and it never blocks the text translation.
+        // Screenshots (#4/#5): fetch this slice's UI images only when the setting is on and the
+        // model is vision-capable — cached per run, best-effort, never blocks the text translation.
         let images = null;
         if (SHOT.enabled && modelVision(model)) {
-          try { const at = await activeTab(); images = await fetchShotsFor(slice, at && at.id); } catch (e) { images = null; }
+          try { const at = await activeTab(); images = await fetchShotsFor(slice, at && at.id, shotCache); } catch (e) { images = null; }
           if (images && images.length) dbg('shots attached', images.map((x) => x.i));
         }
+        const imgByI = new Map((images || []).map((x) => [x.i, x.dataUrl]));
         try {
-          const out = await gptBatch(items, gm, key, model, plural, null, true, images && images.length ? images : null);   // true = apply TikTok style guide
+          const out = await gptBatch(items, gm, key, model, plural, taskCtxText || null, true, images && images.length ? images : null);   // taskCtx as extraSys; true = TikTok style guide
           out.forEach((o) => {
             const idx = (o.i | 0) - 1;
             if (idx >= 0 && idx < slice.length && o.text != null) {
@@ -1452,8 +1471,8 @@ async function doGpt() {
               const tagWrapped = hasTags(next) || hasTags(s.src) || hasTags(s.tgt);
               const manual = !!s.chip || tagWrapped;
               const flag = (o.flag && String(o.flag).trim()) ? String(o.flag).trim() : '';
-              proposals.push({ seg: s.seg, src: s.src, old: s.tgt, next: next, tagged: !!s.tagged || tagWrapped, chip: !!s.chip, tagWrapped: tagWrapped, manual: manual, filled: gm === 'translate' && wasEmpty, flag: flag, key: s.key || '', context: s.context || '', fullSrc: s.fullSrc || '', shots: s.shots || [], termsUsed: s._terms || [], approved: !manual && next !== String(s.tgt) });
-              dbg('seg', s.seg, { src: s.src, terms: (s._terms || []).map((t) => `${t.en}→${t.he}${t.pos ? ' (' + t.pos + ')' : ''}${t.definition ? ' «' + t.definition + '»' : ''}`), key: s.key || '', hasContext: !!s.context, shot: (s.shots || []).length > 0, out: next });
+              proposals.push({ seg: s.seg, src: s.src, old: s.tgt, next: next, tagged: !!s.tagged || tagWrapped, chip: !!s.chip, tagWrapped: tagWrapped, manual: manual, filled: gm === 'translate' && wasEmpty, flag: flag, key: s.key || '', context: s.context || '', fullSrc: s.fullSrc || '', shots: s.shots || [], termsUsed: s._terms || [], classified: s._classified || [], risk: s._risk || [], shotImg: imgByI.get(idx + 1) || null, approved: !manual && next !== String(s.tgt) });
+              dbg('seg', s.seg, { src: s.src, terms: (s._classified || []).map((c) => `${c.term.en}→${c.term.he}${c.term.pos ? ' (' + c.term.pos + ')' : ''} [${c.status}]${c.term.definition ? ' «' + c.term.definition + '»' : ''}`), risk: s._risk || [], key: s.key || '', hasContext: !!s.context, shotAttached: !!imgByI.get(idx + 1), out: next });
               done++;
               if (gm === 'translate' && wasEmpty) filled++;
             }
@@ -1462,13 +1481,17 @@ async function doGpt() {
         await new Promise((r) => setTimeout(r, 250));
       }
     }
-    if (QA && QA.enabled) await reviewPass(proposals, key, model);   // independent GPT reviewer (#7) — before the deterministic checks
-    tmApply(proposals);   // enforce your remembered wording on exact-source recurrences
-    fixApply(proposals);  // deterministic post-GPT rewrites (plural imperative → your singular slash form, etc.)
-    lockCheck(proposals); // flag rows where a MANDATORY locked term is missing from the target (sees the fixed text)
-    consistCheck(proposals); // flag in-task term drift (Case 2) — never rewrites; you review + one-click lock
-    tbCheck(proposals);   // 🏷 flag rows where a Starling term-base term's approved HE is missing (soft — context may explain it)
-    phCheck(proposals);   // ⚠ deterministic placeholder/markup guard — never auto-accepts corruption (#12)
+    // PROCESSING ORDER (#4): text-mutating semantic stages run FIRST, then the independent
+    // reviewer inspects the FINAL semantic candidate, then only deterministic validators run —
+    // so nothing does a semantic search-and-replace after QA, and every validator sees the
+    // reviewer's final text.
+    tmApply(proposals);   // 1) high-confidence contextual memory + same-source alignment
+    fixApply(proposals);  // 2) curated deterministic Auto-fix (plural imperative → your singular slash form)
+    if (QA && QA.enabled) await reviewPass(proposals, key, model, taskCtxText || null);   // 3) independent GPT reviewer — reviews the post-memory/post-Auto-fix text
+    lockCheck(proposals); // 4) validators — locked-term …
+    consistCheck(proposals); //     … in-task drift …
+    tbCheck(proposals);   //     … term-base applicability (soft) …
+    phCheck(proposals);   //     … and the placeholder guard, all on the reviewer's FINAL text (#12/#26)
     state.proposals = proposals;
     const changed = proposals.filter((p) => !sameRender(p.next, p.old)).length;
     const tmN = proposals.filter((p) => p.tm).length;         // remembered wording (cross-task memory)
@@ -1563,6 +1586,7 @@ function renderReview() {
         ${p.fuzzy && p.fuzzy.matches.length ? `<span class="rc-warn" style="background:#3b0764" title="No exact memory match, but ${p.fuzzy.matches.length} near-match(es) from your past work are shown below — click “use” to adopt one. Nothing is applied automatically.">🧠 ${p.fuzzy.matches.length} near-match${p.fuzzy.matches.length === 1 ? '' : 'es'}</span>` : ''}
         ${p.consist && p.consist.length ? p.consist.map((c) => `<span class="rc-warn" style="background:#7c2d12" title="Consistency check: “${esc(c.en)}” was translated as “${esc(c.he)}” on its own (segment ${esc(String(c.from))}), but this segment's target doesn't appear to use that wording. Flag only — nothing was changed. Fix the Hebrew by hand if it should match, or click 🔒 lock to make “${esc(c.en)}” → “${esc(c.he)}” mandatory everywhere.">⚖ consistency: ${esc(c.en)}</span><button class="rc-lockterm" type="button" data-en="${esc(c.en)}" data-he="${esc(c.he)}" title="Lock “${esc(c.en)}” → “${esc(c.he)}” as a mandatory term (adds it to 🔒 Locked terms)">🔒 lock</button>`).join('') : ''}
         ${p.termHint && p.termHint.length ? p.termHint.map((c) => `<span class="rc-warn" style="background:#155e75" title="Starling term base: “${esc(c.en)}” is approved as “${esc(c.he)}”, but this target doesn't appear to use that wording. This is a SOFT hint — a different form can be correct here (e.g. the term used as a verb, or a different sense). Nothing was changed; fix by hand only if it should match.">🏷 term: ${esc(c.en)}</span>`).join('') : ''}
+        ${p.termUncertain && p.termUncertain.length ? p.termUncertain.map((c) => `<span class="rc-warn" style="background:#374151" title="Term applicability uncertain: “${esc(c.en)}” (approved as “${esc(c.he)}”) appears here, but its sense/POS may differ in this occurrence (e.g. part of a longer expression like “due to”, or used as a different part of speech), so this is NOT flagged as a definite deviation. Review only if it should match.">🏷 term? ${esc(c.en)}</span>`).join('') : ''}
         ${p.icDrift ? `<span class="rc-warn" style="background:#7c2d12" title="Internal-consistency drift: ${esc(p.icDrift.reason)}. Pick which Hebrew rendering to standardize on (buttons below) — it updates EVERY segment in this task that uses this term. Flag only; nothing changes until you choose.">⚖ drift${p.icDrift.concept ? ': ' + esc(p.icDrift.concept) : ''}</span>` : ''}
         ${p.phMiss ? `<span class="rc-warn" style="background:#b91c1c" title="Placeholder/markup guard: a protected token changed between source and target (${esc(p.phMiss.join(' · '))}). Fix it — a removed, added, or altered placeholder must never ship.">⚠ placeholder guard</span>` : ''}
         ${p.qa && p.qa.status === 'FIX' ? `<span class="rc-warn" style="background:#4338ca" title="Independent GPT reviewer changed this — ${esc(p.qa.type)}: ${esc(p.qa.note)}. Original: ${esc(p.qaPrev || '')}">🔎 QA fix</span>` : ''}
@@ -1667,7 +1691,7 @@ async function doWriteOne(idx, btn) {
   try {
     const r = await send({ type: 'WRITE', edits: [{ seg: p.seg, text: p.next }] });
     const res = (r && r.results && r.results[0]) || null;
-    if (res && res.ok) { btn.textContent = '✓ written'; p.written = true; if (tmRecordOne(p.src, p.next)) await tmSave(); }
+    if (res && res.ok) { btn.textContent = '✓ written'; p.written = true; if (tmRecordOne(p.src, p.next, p.key, p.context)) await tmSave(); }   // #1 — individual Write now records key/context like bulk writes
     else { btn.textContent = '✕ failed'; log(`write #${p.seg} failed: ${(res && res.reason) || (r && r.error) || 'unknown'}`); }
   } catch (e) {
     btn.textContent = '✕ failed'; log(`write #${p.seg} failed: ${e.message}`);
@@ -4502,9 +4526,9 @@ function cbWritePairs(list) {   // list: [{key, src, tgt}]
     let tgt = r.tgt;
     if (FIX && FIX.enabled) { const res = fixApplyText(tgt); if (res.text !== tgt) { tgt = res.text; fixed++; } }
     const k = r.key, prev = TM.map[k];
-    if (prev && wbFold(prev.tgt) !== wbFold(tgt)) {
+    if (prev && wbFold(tmEntryTgt(prev)) !== wbFold(tgt)) {
       const sig = k + '⇢' + wbFold(tgt);
-      if (!parked.has(sig)) { parked.add(sig); clashes.push({ kind: 'mem', label: r.src, srcKey: k, src: r.src, oldVal: prev.tgt, newVal: tgt }); }
+      if (!parked.has(sig)) { parked.add(sig); clashes.push({ kind: 'mem', label: r.src, srcKey: k, src: r.src, oldVal: tmEntryTgt(prev), newVal: tgt }); }
       continue;
     }
     if (prev) matched++; else { tmRecordOne(r.src, tgt); added++; }
@@ -5202,8 +5226,10 @@ function lkSearch(q) {
   }
   // 2) Consistency memory — exact first, then contains
   const exact = tmLookup(q), memHits = [];
-  for (const kk of Object.keys(TM.map || {})) { const e = TM.map[kk]; if (e === exact) continue; if (lkMatch(e.src, q) || (heQ && wbFold(e.tgt).includes(wbFold(q)))) { memHits.push(e); if (memHits.length >= 8) break; } }
-  if (exact || memHits.length) html += `<div class="cb-sec"><div class="cb-h">🧩 Consistency memory</div>` + (exact ? `<div class="lk-hit">exact → <b dir="rtl">${esc(exact.tgt)}</b> <span class="hint">(${lkHl(exact.src, q)})</span></div>` : '') + memHits.map((e) => eg(e.src, e.tgt)).join('') + `</div>`;
+  for (const kk of Object.keys(TM.map || {})) { const e = TM.map[kk]; if (e === exact) continue; if (lkMatch(e.src, q) || (heQ && tmVariants(e).some((v) => wbFold(v.tgt).includes(wbFold(q))))) { memHits.push(e); if (memHits.length >= 8) break; } }
+  // Show every contextual variant of an exact hit (multi-variant aware) so short strings surface both senses.
+  const exVars = exact ? tmVariants(exact) : [];
+  if (exact || memHits.length) html += `<div class="cb-sec"><div class="cb-h">🧩 Consistency memory</div>` + exVars.map((v) => `<div class="lk-hit">exact → <b dir="rtl">${esc(v.tgt)}</b> <span class="hint">(${lkHl(exact.src, q)}${v.uiRole ? ' · ' + esc(v.uiRole) : (v.ctx == null ? ' · context-unknown' : '')})</span></div>`).join('') + memHits.map((e) => eg(e.src, tmEntryTgt(e))).join('') + `</div>`;
   // 3) Style-Brain glossary + Locked terms
   const gl = (BRAIN.glossary || []).filter((g) => lkMatch(g.en, q) || lkMatch(g.he, q)).slice(0, 12);
   const lk = (LOCK.terms || []).filter((t) => lkMatch(t.en, q) || lkMatch(t.he, q)).slice(0, 12);
@@ -5568,9 +5594,9 @@ async function hvToMemory() {
   const parked = new Set(CONF.filter((c) => c.kind === 'mem').map((c) => c.srcKey + '⇢' + wbFold(c.newVal)));
   for (const p of HV.pairs) {
     const k = tmKey(p.src), prev = TM.map[k];
-    if (prev && wbFold(prev.tgt) !== wbFold(p.tgt)) {   // same source already remembered with a DIFFERENT target → adjudicate, never silently overwrite
+    if (prev && wbFold(tmEntryTgt(prev)) !== wbFold(p.tgt)) {   // same source already remembered with a DIFFERENT target → adjudicate, never silently overwrite
       const sig = k + '⇢' + wbFold(p.tgt);
-      if (!parked.has(sig)) { parked.add(sig); clashes.push({ kind: 'mem', label: p.src, srcKey: k, src: p.src, oldVal: prev.tgt, newVal: p.tgt }); }
+      if (!parked.has(sig)) { parked.add(sig); clashes.push({ kind: 'mem', label: p.src, srcKey: k, src: p.src, oldVal: tmEntryTgt(prev), newVal: p.tgt }); }
       continue;
     }
     const existed = !!prev;
@@ -5687,8 +5713,8 @@ async function lrnToMemory() {
   for (const r of LRN.rows) {
     const k = tmKey(r.src); if (!k) continue;
     const prev = TM.map[k];
-    if (prev && wbFold(prev.tgt) !== wbFold(r.final)) {
-      clashes.push({ kind: 'mem', label: r.src, srcKey: k, src: r.src, oldVal: prev.tgt, newVal: r.final });   // don't overwrite silently
+    if (prev && wbFold(tmEntryTgt(prev)) !== wbFold(r.final)) {
+      clashes.push({ kind: 'mem', label: r.src, srcKey: k, src: r.src, oldVal: tmEntryTgt(prev), newVal: r.final });   // don't overwrite silently
     } else if (tmRecordOne(r.src, r.final)) wrote++;
   }
   await tmSave(); tmRefresh();
@@ -5809,7 +5835,7 @@ async function confResolve(i, keep) {
     PM.map[c.plKey] = { srcForms: c.srcForms, forms, ts: Date.now(), n: 1 }; await pmSave();
   } else {
     const val = rd(`[data-cv="${i}|${keep}"]`, keep === 'new' ? c.newVal : c.oldVal);
-    if (c.kind === 'mem') { TM.map[c.srcKey] = { src: c.src, tgt: val, ts: Date.now(), n: 1 }; await tmSave(); tmRefresh(); }
+    if (c.kind === 'mem') { PC.memPut(TM.map, c.srcKey, c.src, val, { ctxKnown: false }, wbFold); await tmSave(); tmRefresh(); }   // adjudicated → context-unknown variant (multi-variant aware)
     else { BRAIN.glossary = (BRAIN.glossary || []).filter((g) => (g.en || '').toLowerCase() !== c.en.toLowerCase()); BRAIN.glossary.push({ id: brainUid(), en: c.en, he: val, note: c.note || '', source: c.source || 'adjudicated', ts: Date.now() }); await brainSave(); brainRefresh(); }
   }
   CONF.splice(i, 1); confSave(); confRender();
@@ -5869,11 +5895,13 @@ function tmRefresh() {
 function tmRenderList(filter) {
   const box = $('tm-list'); if (!box) return;
   const q = (filter || '').toLowerCase().trim();
-  const rows = Object.keys(TM.map).map((k) => ({ k, ...TM.map[k] }))
-    .filter((e) => !q || (e.src || '').toLowerCase().includes(q) || (e.tgt || '').toLowerCase().includes(q))
+  // One row per source; a source with several contextual variants shows each target (with its
+  // UI role / "context-unknown"), so multi-variant memory is visible and searchable.
+  const rows = Object.keys(TM.map).map((k) => { const e = TM.map[k]; const vs = tmVariants(e); return { k, src: e.src || '', vs, ts: Math.max.apply(null, vs.map((v) => v.ts || 0).concat(0)) }; })
+    .filter((e) => !q || (e.src || '').toLowerCase().includes(q) || e.vs.some((v) => (v.tgt || '').toLowerCase().includes(q)))
     .sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 300);
   box.innerHTML = rows.length
-    ? rows.map((e) => `<div class="bl-row"><button class="bl-del" data-tmk="${esc(e.k)}" title="Forget this string">✕</button><span class="bi-text"><span dir="ltr">${esc(e.src)}</span> → <span dir="rtl">${esc(e.tgt)}</span></span></div>`).join('')
+    ? rows.map((e) => `<div class="bl-row"><button class="bl-del" data-tmk="${esc(e.k)}" title="Forget this string${e.vs.length > 1 ? ' (all ' + e.vs.length + ' variants)' : ''}">✕</button><span class="bi-text"><span dir="ltr">${esc(e.src)}</span> → ${e.vs.map((v) => `<span dir="rtl">${esc(v.tgt)}</span>${v.uiRole ? `<span class="hint"> ${esc(v.uiRole)}</span>` : (v.ctx == null ? '<span class="hint"> ?</span>' : '')}`).join('<span class="hint"> · </span>')}</span></div>`).join('')
     : '<div class="hint">No matches — write a segment and it lands here.</div>';
   box.querySelectorAll('.bl-del').forEach((btn) => btn.addEventListener('click', async () => {
     const k = btn.getAttribute('data-tmk'); if (k in TM.map) { delete TM.map[k]; await tmSave(); tmRefresh(); tmInfo('Forgot 1 string.', ''); }
@@ -5892,9 +5920,15 @@ async function tmImport(file) {
     const src = o && o.map && typeof o.map === 'object' ? o.map : null;
     if (!src) throw new Error('not a consistency-memory JSON.');
     let n = 0;
-    for (const k of Object.keys(src)) { const e = src[k]; if (e && e.src && e.tgt) { if (tmRecordOne(e.src, e.tgt)) n++; } }
+    // Import both schemas: new multi-variant entries (merge each variant, preserving its stored
+    // context) and legacy single {src,tgt} entries (context taken from key/ctx if present).
+    for (const k of Object.keys(src)) {
+      const e = src[k]; if (!e || !e.src) continue;
+      const vs = PC.memVariants(e);
+      for (const v of vs) { if (tmRecordOne(e.src, v.tgt, v.key || '', v.ctx || '', v.ctx != null || !!(v.key))) n++; }
+    }
     await tmSave(); tmRefresh();
-    tmInfo(`Imported ${n} string(s) — memory now holds ${tmCount()}.`, 'good');
+    tmInfo(`Imported ${n} variant(s) — memory now holds ${tmCount()} source(s).`, 'good');
   } catch (e) { tmInfo('Import failed: ' + e.message, 'err'); }
 }
 
@@ -6141,8 +6175,8 @@ async function init() {
     const src = ($('tm-add-src').value || '').trim(), tgt = ($('tm-add-tgt').value || '').trim();
     if (!src || !tgt) { tmInfo('Enter both a source and your target.', 'err'); return; }
     const prev = tmLookup(src);
-    if (prev && wbFold(prev.tgt) !== wbFold(tgt)) {   // same source already remembered with a DIFFERENT target → adjudicate
-      confAdd([{ kind: 'mem', label: src, srcKey: tmKey(src), src, oldVal: prev.tgt, newVal: tgt }]);
+    if (prev && wbFold(tmEntryTgt(prev)) !== wbFold(tgt)) {   // same source already remembered with a DIFFERENT target → adjudicate
+      confAdd([{ kind: 'mem', label: src, srcKey: tmKey(src), src, oldVal: tmEntryTgt(prev), newVal: tgt }]);
       $('tm-add-src').value = ''; $('tm-add-tgt').value = '';
       tmInfo(`"${src}" is already remembered with a different target — resolve the orange ⚠ conflict below.`, 'err'); return;
     }

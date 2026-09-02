@@ -155,14 +155,28 @@ remembered, that row is left **unchecked** and badged **🧠 memory — review**
 it deliberately. A remembered *mistake* never re-applies silently — and if you edit the row
 and write your corrected version, the memory is **overwritten** with the new wording.
 
-**Context matters for short strings.** A one-to-three-word source ("Save", "Due",
-"Following") can mean different things in different places, so identical source text is **not**
-treated as identical meaning. For those, a differing memory is offered as a review
-*suggestion* (a **use** button) instead of overwriting GPT's contextual choice, and the
-in-task "same source → same Hebrew" alignment only fires between segments that share a
-context (their key module + translator note). Long, clearly-unambiguous sentences still match
-on the source alone. New entries you write now remember their context so future short-string
-matches are safer; your existing memory keeps working.
+**One source can now hold several contextual translations.** `Save` as a button
+(→ שמירה) and `Save` as an instruction (→ שמור/שמרי) are stored **side by side** — writing the
+second no longer overwrites the first. Each remembered variant carries the context it was
+written in (its key + translator note), shown in the memory list (e.g. *button* / *?* for
+context-unknown).
+
+**Context decides how strongly a memory is used.** When a source recurs, the copilot picks the
+variant whose context best matches the new segment and scores the match **HIGH / MEDIUM / LOW /
+UNKNOWN** (from the exact key, the UI role in the key suffix, the module, and the note):
+
+- **Short strings (≤ 4 words)** auto-apply a remembered wording only on a **HIGH** match (same
+  key/role + note). Otherwise it's offered as a review **suggestion** (a **use** button) and
+  GPT's contextual translation stands — so "Save (button)" and "Save (instruction)" are never
+  swapped for each other.
+- **Long, clearly-unambiguous sentences** still apply on the source alone.
+- A **legacy** entry (written before this update, no stored context) works as a lower-confidence
+  suggestion for short strings and still applies for long ones. Nothing you had is lost, and
+  export / import / backup / restore preserve the variants.
+
+The in-task "same source → same Hebrew" alignment follows the same rule: short strings are only
+aligned when they share a HIGH-confidence context; otherwise each keeps its own wording and the
+⚖ consistency check flags the difference for you.
 
 | Control | What it does | Effect |
 |---|---|---|
