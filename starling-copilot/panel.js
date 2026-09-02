@@ -1310,7 +1310,10 @@ function renderReview() {
     // Every target is editable. Tagged/chip ("manual") rows carry the raw tokens so you can edit the
     // text too, and get a blur-refresh so their per-part Copy blocks re-split from your edit.
     const newRow = `<div class="rc-new${p.manual ? ' has-tags' : ''}" dir="rtl" contenteditable="true" spellcheck="false">${esc(p.next)}</div>`;
-    return `<div class="rc${p.tagged ? ' tagged' : ''}${p.manual ? ' manual' : ''}${changed ? '' : ' unchanged'}" data-i="${idx}">
+    // A drift / consistency flag is actionable even when GPT left the text unchanged (both renderings
+    // may already be in the task) — mark those so they aren't dimmed like a truly nothing-to-do row.
+    const hasDrift = !!p.icDrift || !!(p.consist && p.consist.length);
+    return `<div class="rc${p.tagged ? ' tagged' : ''}${p.manual ? ' manual' : ''}${changed ? '' : ' unchanged'}${hasDrift ? ' has-drift' : ''}" data-i="${idx}">
       <div class="rc-top">
         <span class="rc-seg">#${esc(p.seg)}</span>
         <span class="rc-edited"${p.edited ? '' : ' hidden'} title="You edited this suggestion — your text is what gets written / copied.">✎ edited</span>

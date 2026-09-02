@@ -138,6 +138,7 @@ textarea { font-family: ui-monospace, Menlo, Consolas, monospace; resize: vertic
 .rc { border: 1px solid var(--border); border-radius: 9px; padding: 8px 9px; background: var(--card2); }
 .rc.tagged { box-shadow: inset 3px 0 0 var(--warn); }
 .rc.unchanged { opacity: .5; }
+.rc.unchanged.has-drift { opacity: 1; }   /* a drift/consistency card is actionable even when the text didn't change */
 .rc-top { display: flex; align-items: center; gap: 7px; row-gap: 5px; margin-bottom: 5px; flex-wrap: wrap; }
 .rc-seg { font-family: ui-monospace, Menlo, monospace; font-size: 11px; font-weight: 700; color: var(--dim); }
 .rc-warn { font-size: 10px; font-weight: 700; color: #fbbf24; background: rgba(217,119,6,.18); padding: 1px 5px; border-radius: 5px; white-space: nowrap; }
