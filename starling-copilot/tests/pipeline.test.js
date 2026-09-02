@@ -26,14 +26,17 @@ ok('priority hierarchy preamble present', /PRIORITIES, in order/.test(SRC));
 sec('Processing ORDER (#4/#12/#13/#14) — asserted over the real chain');
 const iTm = idx(/tmApply\(proposals\);\s*\/\/ 1\)/);
 const iFix = idx(/fixApply\(proposals\);\s*\/\/ 2\)/);
-const iRev = idx(/if \(QA && QA\.enabled\) await reviewPass\(proposals, key, model, taskCtxText/);
+const iRev = idx(/QA && QA\.enabled\).*await reviewPass\(proposals, key, model, taskCtxText/);
 const iLock = idx(/lockCheck\(proposals\);\s*\/\/ 4\)/);
 const iPh = idx(/phCheck\(proposals\);/);
 ok('memory (tmApply) runs before the reviewer (#12)', iTm > 0 && iRev > iTm);
 ok('Auto-fix (fixApply) runs before the reviewer (#12)', iFix > iTm && iRev > iFix);
 ok('reviewer runs before the deterministic validators (#13)', iLock > iRev && iPh > iRev);
 ok('placeholder validation is the LAST stage → inspects final text (#26)', iPh > iLock);
-ok('no semantic text-mutating stage after the reviewer (#13)', !/reviewPass[\s\S]{0,4000}?(tmApply|fixApply)\(proposals\)/.test(SRC.slice(iRev)));
+// No SEMANTIC (memory) stage runs after the reviewer. The only post-reviewer text change is the
+// DETERMINISTIC Auto-fix re-pass (mechanical dictionary), which the spec permits after QA.
+ok('no memory/dedupe (semantic) stage after the reviewer (#13)', !/reviewPass[\s\S]{0,4000}?tmApply\(proposals\)/.test(SRC.slice(iRev)));
+ok('post-reviewer fixApply is deterministic-only (same curated dictionary)', /await reviewPass\([^;]*\); fixApply\(proposals\);/.test(SRC));
 
 sec('Memory: multi-variant schema + call sites (#1/#6)');
 ok('memory writes go through PC.memPut (multi-variant)', /return PC\.memPut\(TM\.map/.test(SRC));

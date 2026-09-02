@@ -1176,7 +1176,9 @@ function reviewerSys(plural) {
     'DO NOT rewrite a translation that is accurate, natural and compliant just because another wording is possible — change it ONLY when you can identify a real error: incorrect meaning, mistranslation, omission, addition, wrong terminology, wrong grammatical role, wrong Hebrew gender/number, unnatural or misleading Hebrew, wrong UI register, a misread ambiguous short string, placeholder/markup corruption, punctuation/formatting problem, or a clear inconsistency with a clearly-applicable term. ' +
     'TERMINOLOGY: a glossary term applies ONLY when the occurrence has the same sense AND part of speech as its definition/pos — a surface word-match is not enough (e.g. "Due→לתשלום" does NOT apply to "due to" = "because of"). LOCKED terms are mandatory and must appear (a Hebrew prefix may be attached). ' +
     'Keep EVERY placeholder/tag byte-for-byte ({s_x}, {{x}}, %s, <b>…</b>, ①②③). ' +
-    (plural ? 'Address form: לשון רבים, gender-neutral. ' : 'Address form: singular gender-neutral slash (לחץ/י). ') +
+    (plural
+      ? 'Address form: לשון רבים, gender-neutral (הצטרפו, שלמו, לחצו). '
+      : 'Address form: SINGULAR gender-neutral second person with a slash (לחץ/י, בחר/י). The final letter (אות סופית) goes BEFORE the slash. CRITICAL: attach the bare "/י" ONLY when the feminine is the masculine + a plain י on the SAME stem (שתף/י, בחר/י, לחץ/י). When the masculine and feminine forms differ in stem or vowels, you MUST write BOTH words out in full — הצג/הציגי (not הצג/י), חזור/חזרי (not חזור/י), העתק/העתיקי (not העתק/י), צור/צרי (not צור/י), התחל/התחילי (not התחל/י), הורד/הורידי, סרוק/סרקי. A correct full slash form is NOT an error — do NOT "fix" הצג/הציגי → הצג/י or flag it; only FLAG/FIX the reverse (a malformed short form like הצג/י → הצג/הציגי, tag GENDER_NUMBER_ERROR). ' ) +
     'Return ONLY JSON {"out":[{"i":<n>,"status":"OK"|"FIX","type":"SEMANTIC_ERROR|OMISSION|ADDITION|TERM_ERROR|GRAMMAR_ERROR|GENDER_NUMBER_ERROR|REGISTER_ERROR|CONTEXT_ERROR|CONSISTENCY_ERROR|PLACEHOLDER_ERROR|FORMATTING_ERROR|UNNATURAL_HEBREW|OTHER","note":"<short reason>","translation":"<corrected Hebrew, or the unchanged Hebrew when status=OK>"}]}. Keep "note" short (it is for debugging). Output one entry per input item with the same "i".';
 }
 // Run the reviewer over all non-manual proposals in batches. Applies a FIX only when it
@@ -1487,7 +1489,7 @@ async function doGpt() {
     // reviewer's final text.
     tmApply(proposals);   // 1) high-confidence contextual memory + same-source alignment
     fixApply(proposals);  // 2) curated deterministic Auto-fix (plural imperative → your singular slash form)
-    if (QA && QA.enabled) await reviewPass(proposals, key, model, taskCtxText || null);   // 3) independent GPT reviewer — reviews the post-memory/post-Auto-fix text
+    if (QA && QA.enabled) { await reviewPass(proposals, key, model, taskCtxText || null); fixApply(proposals); }   // 3) independent GPT reviewer — then re-apply the DETERMINISTIC Auto-fix so a reviewer slip (e.g. shortening הצג/הציגי→הצג/י) can't beat your curated corrections (mechanical only, never semantic)
     lockCheck(proposals); // 4) validators — locked-term …
     consistCheck(proposals); //     … in-task drift …
     tbCheck(proposals);   //     … term-base applicability (soft) …
