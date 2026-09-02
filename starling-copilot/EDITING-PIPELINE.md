@@ -138,6 +138,55 @@ Correct word order around a count placeholder differs by grammatical number:
 Enforced both as a GPT rule and, in the Plural card, per-form (`plPropose` labels
 item 1 = `one`, item 2 = plural).
 
+## Semantic-accuracy layer (terminology · context · QA)
+
+Layers A–C above protect *mechanics* (spacing, edges, placeholders). A separate set of
+rules protects *meaning* — the principle is **terminology guides translation, it does not
+override meaning**, and **consistency means "same meaning + same context → same target",
+not "same English letters → same Hebrew everywhere".**
+
+**Term base → GPT.** Each harvested term is sent to the model as
+`{en, he, pos, definition}` (the Starling definition is now included when it exists).
+The prompt tells the model a term applies **only** when the occurrence's *sense* and
+*part of speech* match the definition/POS — a surface word-match is not proof. Multi-word
+terms are listed first, so *"due to"* outranks *"Due"*. Worked examples baked into the
+prompt: *Due→לתשלום* must not fire on *"due to"* (= because of → עקב); *Application→הגשת
+בקשה* must not force *הגשת* into *"verification application"* (→ בקשת האימות); a **noun**
+*Highlight* must not be forced onto *"Highlight the section"* (a verb → הדגש/י).
+
+**Term enforcement is flag-only.** `lockCheck`, `tbCheck`, and `consistCheck` never rewrite
+text — they raise review badges. The only text-mutating post-steps are memory, dedupe, and
+the curated Hebrew→Hebrew `Auto-fix` dictionary. **No stage does EN→HE term substitution**,
+so a correct contextual translation can never be turned into a surface-matched term.
+
+**Context-aware memory & dedupe.** For a *short* source (≤ 3 words — "Save", "Due",
+"Following") identical source text is **not** treated as identical meaning: a differing
+memory becomes a review *suggestion* (it no longer overwrites GPT's contextual choice), and
+same-source dedupe only auto-aligns occurrences that share a **context** (key module +
+translator note). Long, unambiguous sentences still match on source alone. New memory
+entries store `key`/`ctx` so future short-string matches can check compatibility; legacy
+entries (no context) keep working as lower-confidence suggestions.
+
+**Placeholder guard (`phCheck`).** After translation, a deterministic check compares the
+protected-token multiset (`{x}`, `{{x}}`, `%s`, `<tag>`, ①②③) between source and target;
+any drop/add/alteration raises a red **⚠ placeholder guard** badge. Corruption is never
+silently accepted.
+
+**Independent GPT QA (optional).** With **🔎 Independent GPT QA** on (Settings), a second
+model reviews each translation against the same evidence and returns structured JSON
+(`OK` / `FIX` + issue type). A `FIX` is applied only if it keeps every placeholder intact;
+otherwise it's flagged, not applied. If the reviewer call fails, the original translation is
+kept and marked **🔎 QA n/a** — a translation is never lost. Off by default (~doubles cost).
+
+**Screenshots (optional, beta).** With **📷 Use screenshots as GPT context** on and a
+vision model configured, a segment's Starling UI screenshot is fetched inside the Starling
+tab (credentialed, base64-inlined — no token leaves the browser) and attached as extra
+context. Any failure falls back to text-only.
+
+**Diagnostics.** `scDebug(true)` in the panel console logs, per segment, the terms +
+definitions supplied, context fields, screenshot availability, and reviewer outcome. Keys
+and tokens are never logged.
+
 ## Appendix B · Net result
 By the time a segment is written and confirmed, all of the following match the source or
 the house style — i.e. exactly the set of things Starling's QA penalises:

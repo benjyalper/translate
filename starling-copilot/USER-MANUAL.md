@@ -53,6 +53,8 @@ anything live — it's history you consult and promote from.
 | **OpenAI key** field + **Save** | Stores your API key locally (used only for your own tasks) | Required before any GPT Run |
 | **Model** dropdown | `gpt-5.4` (default) or `gpt-5.4-mini (cheap draft)` | Mini is faster/cheaper, lower quality — use for rough drafts |
 | **House style → Plural form (לשון רבים)** checkbox | **Off (default)** = singular gender-neutral slash forms (לחץ/י), the TikTok default. **On** = plural | Changes the register GPT targets and how Auto-fix normalizes |
+| **🔎 Independent GPT QA** checkbox | **Off (default).** A second GPT pass reviews every translation and fixes only genuine errors (meaning, terminology, grammar, gender/number, placeholders) | Higher accuracy, but **~doubles** the API cost per Run. A review card shows **🔎 QA fix** when the reviewer changed something, **🔎 QA n/a** if the review call failed (your translation is kept) |
+| **📷 Use screenshots as GPT context** checkbox | **Off (default), beta.** When a segment has a Starling UI screenshot and the model is vision-capable, the screenshot is sent to GPT as extra context — useful for short ambiguous strings ("Save", "Following") | Falls back to text-only if the image is missing/unreachable. Verify on a real task before relying on it |
 | **↩ Sheet → Starling engine** | Which engine the write-back mode uses | Only relevant to the Sheet→Starling mode |
 | **Crowdin token** + **Save** | Auth for the Crowdin mode | Only for 🌐 Crowdin |
 | **Advanced · selector overrides (JSON)** + **Apply selectors** / **Run diagnostics** | Overrides the DOM selectors the content script uses; diagnostics reports what it can see on the page | Only touch if harvesting/writing breaks after a Starling UI change |
@@ -152,6 +154,15 @@ identical across the whole app. This is the store that acts **after** GPT (pipel
 remembered, that row is left **unchecked** and badged **🧠 memory — review**, so you confirm
 it deliberately. A remembered *mistake* never re-applies silently — and if you edit the row
 and write your corrected version, the memory is **overwritten** with the new wording.
+
+**Context matters for short strings.** A one-to-three-word source ("Save", "Due",
+"Following") can mean different things in different places, so identical source text is **not**
+treated as identical meaning. For those, a differing memory is offered as a review
+*suggestion* (a **use** button) instead of overwriting GPT's contextual choice, and the
+in-task "same source → same Hebrew" alignment only fires between segments that share a
+context (their key module + translator note). Long, clearly-unambiguous sentences still match
+on the source alone. New entries you write now remember their context so future short-string
+matches are safer; your existing memory keeps working.
 
 | Control | What it does | Effect |
 |---|---|---|

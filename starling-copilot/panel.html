@@ -39,6 +39,8 @@
       </select>
       <label class="lbl">House style</label>
       <label class="ck"><input type="checkbox" id="plural" /> Plural form (לשון רבים) — <b>off</b> = singular gender-neutral slashes (לחץ/י), the TikTok default</label>
+      <label class="ck"><input type="checkbox" id="qa-toggle" /> 🔎 Independent GPT QA — a second reviewer pass checks each translation for meaning/terminology/grammar errors and fixes only genuine ones (<b>~doubles</b> the API cost per Run)</label>
+      <label class="ck"><input type="checkbox" id="shot-toggle" /> 📷 Use screenshots as GPT context — when a segment has a Starling UI screenshot and the model is vision-capable, send it as extra context (helps short ambiguous strings). Falls back to text-only if unavailable. <b>beta</b> — verify on a real task</label>
       <label class="lbl">↩ Sheet → Starling engine</label>
       <select id="wb-engine">
         <option value="api" selected>API check + editor write — exact matching, types into the editor (recommended)</option>

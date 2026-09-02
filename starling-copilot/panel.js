@@ -458,11 +458,34 @@ async function tmSave() { TM.updatedAt = Date.now(); FZ.dirty = true; try { awai
 function tmCount() { return TM && TM.map ? Object.keys(TM.map).length : 0; }
 function tmKey(src) { return wbFold(String(src == null ? '' : src)); }   // normalise quotes/dashes/spaces/fullwidth; case kept
 function tmLookup(src) { const k = tmKey(src); return (k && TM.map[k]) ? TM.map[k] : null; }
-function tmRecordOne(src, tgt) {
+// Context signals for short-string disambiguation (#5/#6). A very short UI string ("Save",
+// "Due", "Following") can mean different things in different places, so identical source text
+// is NOT proof of identical meaning — we require a compatible CONTEXT before auto-applying
+// memory or forcing dedupe. Long, clearly-unambiguous sentences still match on source alone.
+function tmWordCount(src) { return wbFold(String(src == null ? '' : src)).trim().split(/\s+/).filter(Boolean).length; }
+function tmShort(src) { return tmWordCount(src) <= 3; }
+function ctxSig(p) {   // coarse context signature: key namespace (module) + translator note
+  const key = String((p && p.key) || '');
+  const ns = key ? key.replace(/[._\-\/][^._\-\/]*$/, '') : '';   // drop the last key segment → its module/namespace
+  return ns + '|' + wbFold(String((p && p.context) || ''));
+}
+function ctxCompatible(a, b) { return ctxSig(a) === ctxSig(b); }   // same module + same note (both empty counts as same)
+function memCtxCompatible(hit, p) {   // is a stored memory entry safe to auto-apply to THIS segment?
+  if (!hit || hit.ctx == null) return null;   // legacy entry has no stored context → unknown
+  return ctxSig({ key: hit.key || '', context: hit.ctx || '' }) === ctxSig(p);
+}
+// Attach a memory hit as a REVIEW-ONLY suggestion (reuses the fuzzy near-match UI) instead of
+// overwriting GPT's contextual translation — used for short ambiguous sources (#5).
+function tmSuggest(p, hit) {
+  if (!p.fuzzy) p.fuzzy = { matches: [] };
+  if (p.fuzzy.matches.some((m) => wbFold(m.suggest) === wbFold(hit.tgt))) return;
+  p.fuzzy.matches.unshift({ tier: 'template', score: 1, src: hit.src || p.src, suggest: hit.tgt });
+}
+function tmRecordOne(src, tgt, key, ctx) {
   const k = tmKey(src); const t = String(tgt == null ? '' : tgt).trim();
   if (!k || !t) return false;
   const prev = TM.map[k];
-  TM.map[k] = { src: String(src), tgt: t, ts: Date.now(), n: (prev ? prev.n || 1 : 0) + 1 };
+  TM.map[k] = { src: String(src), tgt: t, ts: Date.now(), n: (prev ? prev.n || 1 : 0) + 1, key: String(key || ''), ctx: String(ctx || '') };   // key/ctx: context for future short-string matching (#15)
   return true;
 }
 // Record every approved, non-manual proposal that was actually written (okSegs = a
@@ -472,7 +495,7 @@ async function tmRecordWritten(okSegs) {
   for (const p of state.proposals || []) {
     if (p.manual || !p.approved) continue;
     if (okSegs && !okSegs.has(p.seg)) continue;
-    if (tmRecordOne(p.src, p.next)) n++;
+    if (tmRecordOne(p.src, p.next, p.key, p.context)) n++;
   }
   if (n) await tmSave();
   return n;
@@ -505,6 +528,11 @@ function tmApply(proposals) {
       }
     }
     if (wbFold(hit.tgt) !== wbFold(p.next)) {
+      // SHORT ambiguous source (#5): a differing memory whose context we can't confirm compatible is
+      // only a SUGGESTION — keep GPT's contextual translation and offer the memory via the review UI,
+      // rather than overwriting a correct contextual choice with a wording approved elsewhere.
+      const compat = memCtxCompatible(hit, p);   // true / false / null(=unknown, legacy entry)
+      if (tmShort(p.src) && compat !== true) { tmSuggest(p, hit); continue; }
       p.tmPrev = p.next;           // what GPT proposed this time
       p.next = hit.tgt;            // your previous, endorsed wording
       p.tm = true; p.tmOverride = true;
@@ -520,10 +548,10 @@ function tmApply(proposals) {
   //    often for that source), but a remembered wording (p.tm) still outranks the vote.
   //    Ties break to the earliest segment so the pick is stable and predictable.
   if (!exactOn) return;
-  const groups = new Map();
-  for (const p of proposals) { if (p.manual) continue; const k = tmKey(p.src); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(p); }
-  for (const arr of groups.values()) {
-    if (arr.length < 2) continue;
+  // Align one group of same-source proposals onto a single canonical wording (majority vote,
+  // a memory hit wins, ties → earliest). Factored out so short sources can be aligned per-context.
+  const alignGroup = (arr) => {
+    if (arr.length < 2) return;
     let canon;
     const memP = arr.find((p) => p.tm);                     // a memory hit is authoritative — it wins outright
     if (memP) { canon = memP.next; }
@@ -541,6 +569,19 @@ function tmApply(proposals) {
         p.approved = !p.manual && !sameRender(p.next, p.old);
       }
     }
+  };
+  const groups = new Map();
+  for (const p of proposals) { if (p.manual) continue; const k = tmKey(p.src); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(p); }
+  for (const arr of groups.values()) {
+    if (arr.length < 2) continue;
+    // Long/unambiguous sources: same source is enough → align the whole group (Test E).
+    // Short (≤3-word) sources: only auto-align occurrences that share a CONTEXT (module + note),
+    // so "Save" as a button and "Save" as an instruction aren't forced together (Test D). Divergent
+    // contexts keep their own contextual wording; the ⚖ consistency check still surfaces the difference.
+    if (!tmShort(arr[0].src)) { alignGroup(arr); continue; }
+    const sub = new Map();
+    for (const p of arr) { const s = ctxSig(p); if (!sub.has(s)) sub.set(s, []); sub.get(s).push(p); }
+    for (const g of sub.values()) alignGroup(g);
   }
 }
 
@@ -822,11 +863,30 @@ async function tbSave() { TB.updatedAt = Date.now(); try { await store.set({ ter
 function tbCount() { return TB && TB.terms ? TB.terms.length : 0; }
 function tbUid() { return 'tb' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
 // Translatable terms whose EN appears in this source (boundary-aware) → the per-segment hint list.
+// Each hint now carries the term's DEFINITION and POS so GPT can judge whether the SENSE actually
+// matches this occurrence (a surface word-match is not proof the glossary entry applies — see the
+// sysPrompt "terms" bullet). Multi-word terms are listed FIRST (a longer, more specific match like
+// "due to" should outrank an overlapping single word "Due"), and the list is capped so an occasional
+// huge term base can't flood or distract the prompt — the most specific matches are kept.
+const TB_MAX_HINTS = 12;
 function tbHintsFor(src) {
   if (!TB || !TB.enabled || !(TB.terms || []).length) return [];
   const out = [];
-  for (const t of TB.terms) { if (t && t.en && t.he && lockSrcHas(src, t.en)) { const h = { en: t.en, he: t.he }; if (t.pos) h.pos = t.pos; out.push(h); } }
-  return out;
+  for (const t of TB.terms) {
+    if (t && t.en && t.he && lockSrcHas(src, t.en)) {
+      const h = { en: t.en, he: t.he };
+      if (t.pos) h.pos = t.pos;
+      if (t.def) h.definition = String(t.def).trim();   // #1 — send Starling's own definition when it exists
+      out.push(h);
+    }
+  }
+  // Multi-word (more specific) first, then longer EN first → "due to" precedes "Due" (#9).
+  out.sort((a, b) => {
+    const wa = a.en.trim().split(/\s+/).length, wb = b.en.trim().split(/\s+/).length;
+    if (wb !== wa) return wb - wa;
+    return b.en.length - a.en.length;
+  });
+  return out.slice(0, TB_MAX_HINTS);
 }
 // Post-run SOFT flag: a term's approved HE is absent from the target. Context may legitimately
 // explain it (verb form, different sense) — so this is review-only, never a rewrite.
@@ -1019,11 +1079,163 @@ function fixApply(proposals) {
   }
 }
 
+// ---- PLACEHOLDER / MARKUP GUARD (deterministic QA, #12) --------------------
+// Extracts the multiset of PROTECTED tokens (placeholders, printf specifiers, inline
+// tags, circled markers) from a string. GPT must reproduce each one the same number of
+// times — this is a mechanical check code can guarantee, so it never relies on the model.
+function phTokens(s) {
+  const str = String(s == null ? '' : s), out = [];
+  const grab = (re) => { let m; while ((m = re.exec(str)) !== null) out.push(m[0]); };
+  grab(/\{\{[^{}]+\}\}/g);          // {{var}}
+  grab(/\{[^{}]+\}/g);              // {s_username} / {0}
+  grab(/%\d*\$?[sd]/g);             // %s %d %1$s
+  grab(/<[^<>]+>/g);                // <b> </b> <g id="1"> <x/>
+  grab(/[①-⑳]/g);         // ①..⑳
+  return out;
+}
+// Compare src vs target token multisets. Returns [] when they match, else a list of
+// human-readable mismatches ("{s_username}: 1 → 0"). Used to flag rows, never to auto-edit.
+function phDiff(src, tgt) {
+  const count = (arr) => { const m = new Map(); for (const t of arr) m.set(t, (m.get(t) || 0) + 1); return m; };
+  const a = count(phTokens(src)), b = count(phTokens(tgt)), keys = new Set([...a.keys(), ...b.keys()]), out = [];
+  for (const k of keys) { const x = a.get(k) || 0, y = b.get(k) || 0; if (x !== y) out.push(`${k}: ${x} → ${y}`); }
+  return out;
+}
+// Flag every proposal whose target dropped, added, or corrupted a protected token (#12).
+// Review-only: it NEVER silently accepts corruption and NEVER rewrites the text.
+function phCheck(proposals) {
+  for (const p of proposals) {
+    if (p.manual) { p.phMiss = null; continue; }   // tagged rows are pasted by hand — their tokens are handled there
+    const d = phDiff(p.src, p.next);
+    p.phMiss = d.length ? d : null;
+  }
+}
+
+// ---- DIAGNOSTICS (#16) — opt-in, never logs secrets --------------------------
+// Toggle from the console: `scDebug(true)`. Logs, per translated segment, exactly what
+// evidence GPT was given (terms + definitions + locked/preferred, memory candidate,
+// screenshot availability, context fields, reviewer outcome). Keys/tokens are never logged.
+let DBG = false;
+try { window.scDebug = (on) => { DBG = on !== false; return DBG; }; } catch (e) {}
+function dbg() { if (DBG) { try { console.log.apply(console, ['[sc]', ...arguments]); } catch (e) {} } }
+
+// ---- INDEPENDENT GPT QA REVIEWER (#7) ---------------------------------------
+// A second, independent pass: the first model TRANSLATES, this one REVIEWS. It sees the
+// same evidence (source, proposed Hebrew, key, context, relevant terms + definitions,
+// relevant locked terms) and only CHANGES a translation when it can name a genuine error —
+// it must NOT rewrite a correct translation for a mere synonym preference. Off by default
+// (it doubles the API cost); a fix is applied only if it keeps every placeholder intact,
+// so the reviewer can never introduce placeholder corruption. Failures keep the original
+// translation and mark the row so you know QA did not complete — a translation is never lost.
+let QA = { enabled: false, updatedAt: 0 };
+async function qaLoad() { try { QA = await store.get('qaReviewer', { enabled: false, updatedAt: 0 }); } catch (e) {} if (!QA) QA = { enabled: false, updatedAt: 0 }; if (QA.enabled === undefined) QA.enabled = false; return QA; }
+async function qaSave() { QA.updatedAt = Date.now(); try { await store.set({ qaReviewer: QA }); } catch (e) {} }
+
+// ---- SCREENSHOT CONTEXT (#4) ------------------------------------------------
+// When a segment has a Starling UI screenshot AND a vision-capable model is configured,
+// attach the image to the translation request as EXTRA context (UI role / register /
+// disambiguation) — the model is told to use it for understanding, not to describe it.
+// Off by default. Every step is best-effort: a missing/unreachable/too-large image, a
+// non-vision model, or a fetch failure silently falls back to the normal text-only path,
+// so translation never breaks. The image is fetched through the Starling tab itself
+// (credentialed, same-origin) and base64-inlined so no auth token leaves the browser.
+let SHOT = { enabled: false, updatedAt: 0 };
+async function shotLoad() { try { SHOT = await store.get('shotContext', { enabled: false, updatedAt: 0 }); } catch (e) {} if (!SHOT) SHOT = { enabled: false, updatedAt: 0 }; if (SHOT.enabled === undefined) SHOT.enabled = false; return SHOT; }
+async function shotSave() { SHOT.updatedAt = Date.now(); try { await store.set({ shotContext: SHOT }); } catch (e) {} }
+function modelVision(model) { return /gpt-5|gpt-4o|gpt-4\.1|o4|vision/i.test(String(model || '')); }   // GPT-5 family + 4o are multimodal
+const SHOT_MAX_BYTES = 1500000;   // skip very large screenshots to keep cost/latency sane
+// Fetch each slice item's first screenshot as a data: URL, IN the Starling tab (credentialed),
+// returning [{i, dataUrl}]. Any failure is swallowed per-item — the caller falls back to text.
+async function fetchShotsFor(slice, tabId) {
+  const jobs = [];
+  slice.forEach((s, j) => { const uri = s.shots && s.shots[0] && s.shots[0].uri; if (uri) jobs.push({ i: j + 1, uri }); });
+  if (!jobs.length || !tabId) return [];
+  try {
+    const [r] = await chrome.scripting.executeScript({
+      target: { tabId }, world: 'MAIN',
+      args: [jobs, SHOT_MAX_BYTES],
+      func: async (jobs, MAX) => {
+        const one = async (uri) => {
+          try {
+            const res = await fetch(uri, { credentials: 'include', cache: 'force-cache' });
+            if (!res.ok) return null;
+            const blob = await res.blob();
+            if (!blob || blob.size > MAX || !/^image\//.test(blob.type || '')) return null;
+            return await new Promise((ok) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = () => ok(null); fr.readAsDataURL(blob); });
+          } catch (e) { return null; }
+        };
+        const out = [];
+        for (const jb of jobs) { const d = await one(jb.uri); if (d) out.push({ i: jb.i, dataUrl: d }); }
+        return out;
+      }
+    });
+    return (r && r.result) || [];
+  } catch (e) { dbg('shot fetch failed', e.message); return []; }
+}
+function reviewerSys(plural) {
+  return 'You are an INDEPENDENT English→Hebrew (he-IL) localization REVIEWER for TikTok product UI. ' +
+    'For each item you get the English "src", the proposed Hebrew "he", and (when available) "key", "context", "terms" (client glossary, each {en,he,pos,definition?}) and "locked" (mandatory glossary terms). ' +
+    'Compare the source with the proposed Hebrew and decide whether it has a GENUINE problem. ' +
+    'DO NOT rewrite a translation that is accurate, natural and compliant just because another wording is possible — change it ONLY when you can identify a real error: incorrect meaning, mistranslation, omission, addition, wrong terminology, wrong grammatical role, wrong Hebrew gender/number, unnatural or misleading Hebrew, wrong UI register, a misread ambiguous short string, placeholder/markup corruption, punctuation/formatting problem, or a clear inconsistency with a clearly-applicable term. ' +
+    'TERMINOLOGY: a glossary term applies ONLY when the occurrence has the same sense AND part of speech as its definition/pos — a surface word-match is not enough (e.g. "Due→לתשלום" does NOT apply to "due to" = "because of"). LOCKED terms are mandatory and must appear (a Hebrew prefix may be attached). ' +
+    'Keep EVERY placeholder/tag byte-for-byte ({s_x}, {{x}}, %s, <b>…</b>, ①②③). ' +
+    (plural ? 'Address form: לשון רבים, gender-neutral. ' : 'Address form: singular gender-neutral slash (לחץ/י). ') +
+    'Return ONLY JSON {"out":[{"i":<n>,"status":"OK"|"FIX","type":"SEMANTIC_ERROR|OMISSION|ADDITION|TERM_ERROR|GRAMMAR_ERROR|GENDER_NUMBER_ERROR|REGISTER_ERROR|CONTEXT_ERROR|CONSISTENCY_ERROR|PLACEHOLDER_ERROR|FORMATTING_ERROR|UNNATURAL_HEBREW|OTHER","note":"<short reason>","translation":"<corrected Hebrew, or the unchanged Hebrew when status=OK>"}]}. Keep "note" short (it is for debugging). Output one entry per input item with the same "i".';
+}
+// Run the reviewer over all non-manual proposals in batches. Applies a FIX only when it
+// preserves placeholders; otherwise records the flagged issue and keeps the original text.
+async function reviewPass(proposals, key, model) {
+  const rev = proposals.filter((p) => !p.manual && String(p.next || '').trim());
+  if (!rev.length) return;
+  const plural = $('plural') && $('plural').checked;
+  const B = 10;
+  for (let i = 0; i < rev.length; i += B) {
+    const slice = rev.slice(i, i + B);
+    info('gpt-info', `🔎 Reviewing ${i + 1}–${Math.min(i + slice.length, rev.length)} of ${rev.length}…`);
+    const items = slice.map((p, j) => {
+      const it = { i: j + 1, src: String(p.src || ''), he: String(p.next || '') };
+      if (p.key) it.key = String(p.key);
+      if (p.context) it.context = String(p.context);
+      if (p.termsUsed && p.termsUsed.length) it.terms = p.termsUsed;
+      const locked = (LOCK && LOCK.terms || []).filter((t) => t.en && lockSrcHas(p.src, t.en)).map((t) => ({ en: t.en, he: t.he }));
+      if (locked.length) it.locked = locked;
+      return it;
+    });
+    try {
+      const r = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model, temperature: 0.1, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: reviewerSys(plural) }, { role: 'user', content: 'Review these items. Return one entry per item with the same "i".\n' + JSON.stringify({ items }) }] })
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error && data.error.message || ('reviewer ' + r.status));
+      const out = JSON.parse(data.choices?.[0]?.message?.content || '{}').out || [];
+      out.forEach((o) => {
+        const p = slice[(o.i | 0) - 1]; if (!p) return;
+        const status = String(o.status || '').toUpperCase();
+        if (status === 'FIX' && o.translation != null) {
+          const fixed = polish(p.src, String(o.translation));
+          if (sameRender(fixed, p.next)) { p.qa = { status: 'OK' }; return; }   // reviewer "fixed" to the same text → no change
+          if (phDiff(p.src, fixed).length) { p.qa = { status: 'FLAG', type: String(o.type || 'OTHER'), note: String(o.note || '') + ' (reviewer edit rejected — would corrupt a placeholder)' }; return; }
+          p.qaPrev = p.next; p.next = fixed;
+          p.qa = { status: 'FIX', type: String(o.type || 'OTHER'), note: String(o.note || '') };
+          if (!p.manual && !p.tmOverride) p.approved = !sameRender(p.next, p.old);
+          dbg('qa-fix', p.seg, p.qa.type, p.qa.note);
+        } else {
+          p.qa = { status: 'OK' };
+        }
+      });
+    } catch (e) { for (const p of slice) p.qaFailed = true; log(`reviewer batch @${i} failed: ${e.message}`); }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+}
+
 // ---- GPT: system prompt (identical policy to the admin Copy Deck tool) ------
 // tiktok=true appends the TikTok Hebrew Style Guide (Starling / Feishu). Omit it for memoQ/Crowdin/YiCAT.
 function sysPrompt(mode, plural, tiktok) {
   const base =
     'You are a professional English→Hebrew (he-IL) localization specialist for TikTok product UI and help-center content.\n' +
+    'PRIORITIES, in order (a higher rule wins when they conflict): (1) MEANING — translate the actual meaning of "src" IN CONTEXT; no omissions, no additions; never mistranslate an ambiguous English word from a glossary surface-match alone. (2) CONTEXT — use "key", "context", "fullSource", and the UI role they imply. (3) LOCKED TERMS — the mandatory glossary below is non-negotiable. (4) PREFERRED TERMS — the per-item "terms" apply ONLY when their sense/POS match the occurrence. (5) NATURAL HEBREW — idiomatic professional localization, not literal word-for-word. (6) PROJECT STYLE — the house rules below (gender, register, punctuation, placeholders, numbers, brands). The preservation and style rules that follow are how to EXECUTE these priorities, not a licence to bury meaning under formatting.\n' +
     'STRICT PRESERVATION (applies to every item):\n' +
     '- Keep EVERY placeholder and tag byte-for-byte and in the same order and count: {x}, {{x}}, %s, %1$s, HTML like <b>…</b> / <p> / <ul> / <li> / <br>, XLIFF inline tags like <g id="1">…</g> / <x/>, and circled markers ①②③. Never translate, rename, reorder, add, or drop any of them.\n' +
     '- Keep "TikTok" and other brand / product / feature names in Latin script — do not translate or transliterate them, and keep them EXACTLY as in the source including internal spaces and capitalization: "TikTok Lite" stays "TikTok Lite" (never "TikTok-Lite" or "TikTokLite"). When adding a Hebrew prefix to a Latin name use a maqaf between the prefix and the name (ב-TikTok Lite / וב-TikTok Lite), never inside the name.\n' +
@@ -1038,7 +1250,7 @@ function sysPrompt(mode, plural, tiktok) {
     '  • "key" = the string\'s resource key; its suffix/segments hint at the UI ROLE — resolve the register/role dilemma (gerund vs imperative) from it instead of guessing: suffixes like "_title"/"_heading"/"_desc"/"_subtitle" ⇒ a title/label/body → GERUND (שם פעולה); "_btn"/"_button"/"_cta" ⇒ a button → GERUND; "_toast"/"_tip"/"_tooltip"/"_hint"/"_placeholder" ⇒ inline instruction → IMPERATIVE slash; a list/enum namespace (e.g. "reasonForDispute", "...Reasons...") ⇒ a selectable option → short noun/nominal phrase. When "key" or "context" makes the role clear, do NOT set "flag".\n' +
     '  • "context" = a human note from the string owner explaining the meaning, intent, what a term does or does NOT mean, or which tokens are variables. Treat it as AUTHORITATIVE and follow it, but never translate the note itself. Because it is written for THIS specific string, it OUTRANKS any general house-style rule or glossary term (built-in OR ingested from a style doc) whenever they conflict for this item — the per-item note wins.\n' +
     '  • "fullSource" = the COMPLETE source string when "src" is only a split fragment of it. Use it to understand the fragment in context, but translate ONLY the "src" fragment — do NOT translate, add, or repeat the rest of "fullSource".\n' +
-    '  • "terms" = client-approved term references whose English appears in THIS segment, each as {"en","he","pos"}. Render each listed term with the given Hebrew BY DEFAULT (it is the approved glossary form). BUT deviate when the grammar or sense of this segment clearly requires a different form — e.g. a term listed as a Noun that is used here as a VERB (use the natural verb form: "Highlight"→נקודת שיא as a noun, but הדגש/י when it means "to highlight"), or a word used in a different sense ("Due"→לתשלום, but עקב in "due to …"). These are STRONG DEFAULTS, not locked terms: the per-item "context" note and correct Hebrew grammar still win. Never echo this field.\n' +
+    '  • "terms" = client-approved term references whose English appears in THIS segment, each as {"en","he","pos","definition"?}. A term is EVIDENCE about how a particular SENSE is translated — it is NOT a search-and-replace rule for every occurrence of the same English letters. APPLY a term ONLY when the occurrence in "src" has the SAME meaning/sense AND the SAME grammatical function as the term\'s "definition" and "pos". If the sense or the part of speech does not match, IGNORE that term for this occurrence and translate by the actual sentence context. A surface word-match alone never proves a term applies. When several terms overlap, the MULTI-WORD / more specific match wins over a single word it contains (terms are listed most-specific first). These are STRONG DEFAULTS, not locked terms: the per-item "context" note and correct Hebrew grammar still win. Never echo this field. EXAMPLES: (a) term {"en":"Due","he":"לתשלום","pos":"adjective","definition":"owed or expected to be paid"} does NOT apply to "unavailable due to their privacy settings" — here "due to" means "because of" → עקב / בשל / מפני ש…, never לתשלום. (b) term {"en":"Application","he":"הגשת בקשה"} must NOT force "הגשת" into "verification application" when the meaning is the request itself → בקשת האימות. (c) a NOUN term for "Highlight" must NOT be forced onto "Highlight the relevant section", where it is a VERB → הדגש/י.\n' +
     (plural
       ? '- FORM OF ADDRESS: Hebrew MUST be in לשון רבים — plural, gender-neutral forms (e.g. הצטרפו, שלמו, לחצו, קראו ואשרו) — never masculine singular and never slash forms like שלם/י.\n'
       : '- FORM OF ADDRESS: use the SINGULAR, gender-neutral second person with a slash for both genders (לחץ/י, את/ה, בחר/י). Put the final letter (אות סופית) BEFORE the slash. If the masculine and feminine suffixes differ, write BOTH words in full to avoid a malformed feminine (התחל/התחילי, not התחל/י). Use the imperative when the source is imperative. NEVER use the plural form of address (לשון רבים) and NEVER use masculine-singular alone — even when the source number/gender is ambiguous, DEFAULT to this singular gender-slash form. Convert any plural imperative to it: הצטרפו→הצטרף/י, נסו→נסה/י, חכו→חכה/י, היכנסו→היכנס/י, שלמו→שלם/י, לחצו→לחץ/י, קראו→קרא/י; and when the stem differs write both words IN FULL: בדקו→בדוק/בדקי, אמרו→אמור/אמרי, שמרו→שמור/שמרי.\n') +
@@ -1050,17 +1262,25 @@ function sysPrompt(mode, plural, tiktok) {
     '. Preserve the original meaning. If an item is already correct, return it unchanged.';
 }
 
-async function gptBatch(items, mode, key, model, plural, extraSys, tiktok) {
-  const user = (mode === 'translate' ? 'Translate the "src" of each item. ' : 'Proofread the "tgt" of each item. ') +
+async function gptBatch(items, mode, key, model, plural, extraSys, tiktok, images) {
+  let user = (mode === 'translate' ? 'Translate the "src" of each item. ' : 'Proofread the "tgt" of each item. ') +
     'Return JSON exactly as {"out":[{"i":<number>,"text":"<hebrew>","flag":"<optional: a SHORT note ONLY when the register/UI-role is genuinely ambiguous (see REGISTER DEPENDS ON THE UI ROLE); omit or leave empty otherwise>"}]}, one entry per input item, same "i" numbers.\n' +
     JSON.stringify({ items });
+  // Multimodal (#4): when screenshots were fetched, build a content array — the JSON text
+  // plus one labelled image per item. The model is told to use images only as UI context.
+  let userContent = user;
+  if (images && images.length) {
+    user += '\nSCREENSHOTS: some items include a UI screenshot below, each labelled "item i=N". Use a screenshot ONLY to understand that item\'s UI role, meaning, grammatical function and register — do NOT add information that is only visually implied unless it is needed to translate the "src" accurately, and never describe the image.';
+    userContent = [{ type: 'text', text: user }];
+    for (const im of images) { userContent.push({ type: 'text', text: `item i=${im.i}:` }); userContent.push({ type: 'image_url', image_url: { url: im.dataUrl, detail: 'low' } }); }
+  }
   const r = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model, temperature: mode === 'translate' ? 0.2 : 0.1,
       response_format: { type: 'json_object' },
-      messages: [{ role: 'system', content: sysPrompt(mode, plural, tiktok) + (extraSys ? '\n' + extraSys : '') }, { role: 'user', content: user }]
+      messages: [{ role: 'system', content: sysPrompt(mode, plural, tiktok) + (extraSys ? '\n' + extraSys : '') }, { role: 'user', content: userContent }]
     })
   });
   const data = await r.json();
@@ -1207,10 +1427,18 @@ async function doGpt() {
           if (s.fullSrc) it.fullSource = String(s.fullSrc);  // complete string when src is a split fragment
           const th = tbHintsFor(String(s.src || ''));         // Starling term-base hints for this source (soft; gated by TB.enabled)
           if (th.length) it.terms = th;
+          s._terms = th;                                       // remember what evidence went to GPT (diagnostics + reviewer)
           return it;
         });
+        // Screenshots (#4): fetch this slice's UI images only when the setting is on and the
+        // model is vision-capable — best-effort, and it never blocks the text translation.
+        let images = null;
+        if (SHOT.enabled && modelVision(model)) {
+          try { const at = await activeTab(); images = await fetchShotsFor(slice, at && at.id); } catch (e) { images = null; }
+          if (images && images.length) dbg('shots attached', images.map((x) => x.i));
+        }
         try {
-          const out = await gptBatch(items, gm, key, model, plural, null, true);   // true = apply TikTok style guide
+          const out = await gptBatch(items, gm, key, model, plural, null, true, images && images.length ? images : null);   // true = apply TikTok style guide
           out.forEach((o) => {
             const idx = (o.i | 0) - 1;
             if (idx >= 0 && idx < slice.length && o.text != null) {
@@ -1224,7 +1452,8 @@ async function doGpt() {
               const tagWrapped = hasTags(next) || hasTags(s.src) || hasTags(s.tgt);
               const manual = !!s.chip || tagWrapped;
               const flag = (o.flag && String(o.flag).trim()) ? String(o.flag).trim() : '';
-              proposals.push({ seg: s.seg, src: s.src, old: s.tgt, next: next, tagged: !!s.tagged || tagWrapped, chip: !!s.chip, tagWrapped: tagWrapped, manual: manual, filled: gm === 'translate' && wasEmpty, flag: flag, key: s.key || '', context: s.context || '', fullSrc: s.fullSrc || '', shots: s.shots || [], approved: !manual && next !== String(s.tgt) });
+              proposals.push({ seg: s.seg, src: s.src, old: s.tgt, next: next, tagged: !!s.tagged || tagWrapped, chip: !!s.chip, tagWrapped: tagWrapped, manual: manual, filled: gm === 'translate' && wasEmpty, flag: flag, key: s.key || '', context: s.context || '', fullSrc: s.fullSrc || '', shots: s.shots || [], termsUsed: s._terms || [], approved: !manual && next !== String(s.tgt) });
+              dbg('seg', s.seg, { src: s.src, terms: (s._terms || []).map((t) => `${t.en}→${t.he}${t.pos ? ' (' + t.pos + ')' : ''}${t.definition ? ' «' + t.definition + '»' : ''}`), key: s.key || '', hasContext: !!s.context, shot: (s.shots || []).length > 0, out: next });
               done++;
               if (gm === 'translate' && wasEmpty) filled++;
             }
@@ -1233,11 +1462,13 @@ async function doGpt() {
         await new Promise((r) => setTimeout(r, 250));
       }
     }
+    if (QA && QA.enabled) await reviewPass(proposals, key, model);   // independent GPT reviewer (#7) — before the deterministic checks
     tmApply(proposals);   // enforce your remembered wording on exact-source recurrences
     fixApply(proposals);  // deterministic post-GPT rewrites (plural imperative → your singular slash form, etc.)
     lockCheck(proposals); // flag rows where a MANDATORY locked term is missing from the target (sees the fixed text)
     consistCheck(proposals); // flag in-task term drift (Case 2) — never rewrites; you review + one-click lock
     tbCheck(proposals);   // 🏷 flag rows where a Starling term-base term's approved HE is missing (soft — context may explain it)
+    phCheck(proposals);   // ⚠ deterministic placeholder/markup guard — never auto-accepts corruption (#12)
     state.proposals = proposals;
     const changed = proposals.filter((p) => !sameRender(p.next, p.old)).length;
     const tmN = proposals.filter((p) => p.tm).length;         // remembered wording (cross-task memory)
@@ -1333,6 +1564,10 @@ function renderReview() {
         ${p.consist && p.consist.length ? p.consist.map((c) => `<span class="rc-warn" style="background:#7c2d12" title="Consistency check: “${esc(c.en)}” was translated as “${esc(c.he)}” on its own (segment ${esc(String(c.from))}), but this segment's target doesn't appear to use that wording. Flag only — nothing was changed. Fix the Hebrew by hand if it should match, or click 🔒 lock to make “${esc(c.en)}” → “${esc(c.he)}” mandatory everywhere.">⚖ consistency: ${esc(c.en)}</span><button class="rc-lockterm" type="button" data-en="${esc(c.en)}" data-he="${esc(c.he)}" title="Lock “${esc(c.en)}” → “${esc(c.he)}” as a mandatory term (adds it to 🔒 Locked terms)">🔒 lock</button>`).join('') : ''}
         ${p.termHint && p.termHint.length ? p.termHint.map((c) => `<span class="rc-warn" style="background:#155e75" title="Starling term base: “${esc(c.en)}” is approved as “${esc(c.he)}”, but this target doesn't appear to use that wording. This is a SOFT hint — a different form can be correct here (e.g. the term used as a verb, or a different sense). Nothing was changed; fix by hand only if it should match.">🏷 term: ${esc(c.en)}</span>`).join('') : ''}
         ${p.icDrift ? `<span class="rc-warn" style="background:#7c2d12" title="Internal-consistency drift: ${esc(p.icDrift.reason)}. Pick which Hebrew rendering to standardize on (buttons below) — it updates EVERY segment in this task that uses this term. Flag only; nothing changes until you choose.">⚖ drift${p.icDrift.concept ? ': ' + esc(p.icDrift.concept) : ''}</span>` : ''}
+        ${p.phMiss ? `<span class="rc-warn" style="background:#b91c1c" title="Placeholder/markup guard: a protected token changed between source and target (${esc(p.phMiss.join(' · '))}). Fix it — a removed, added, or altered placeholder must never ship.">⚠ placeholder guard</span>` : ''}
+        ${p.qa && p.qa.status === 'FIX' ? `<span class="rc-warn" style="background:#4338ca" title="Independent GPT reviewer changed this — ${esc(p.qa.type)}: ${esc(p.qa.note)}. Original: ${esc(p.qaPrev || '')}">🔎 QA fix</span>` : ''}
+        ${p.qa && p.qa.status === 'FLAG' ? `<span class="rc-warn" style="background:#7a5c0a" title="Reviewer flagged an issue but its rewrite was rejected (would corrupt a placeholder) — ${esc(p.qa.type)}: ${esc(p.qa.note)}. Left as translated; fix by hand.">🔎 QA flag</span>` : ''}
+        ${p.qaFailed ? '<span class="rc-warn" style="background:#6b7280" title="The independent QA reviewer call did not complete for this row — the translation is unchanged and was NOT reviewed.">🔎 QA n/a</span>' : ''}
         <div class="rc-ctl">${control}</div>
       </div>
       ${p.src ? `<div class="rc-src" dir="ltr">${hl(esc(p.src))}</div>` : ''}
@@ -5973,6 +6208,10 @@ async function init() {
 
   // Term base (Starling's inline term references)
   await tbLoad(); tbRefresh();
+  await qaLoad();   // independent GPT QA reviewer setting (#7)
+  if ($('qa-toggle')) { $('qa-toggle').checked = !!QA.enabled; $('qa-toggle').addEventListener('change', async (e) => { QA.enabled = e.target.checked; await qaSave(); }); }
+  await shotLoad();   // screenshot-as-context setting (#4)
+  if ($('shot-toggle')) { $('shot-toggle').checked = !!SHOT.enabled; $('shot-toggle').addEventListener('change', async (e) => { SHOT.enabled = e.target.checked; await shotSave(); }); }
   if ($('tb-grab')) $('tb-grab').addEventListener('click', async () => { $('tb-grab').disabled = true; try { await tbGrab(); } finally { $('tb-grab').disabled = false; } });
   if ($('tb-toggle')) $('tb-toggle').addEventListener('change', async (e) => {
     TB.enabled = e.target.checked; await tbSave(); tbRefresh();
