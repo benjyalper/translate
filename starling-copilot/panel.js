@@ -5344,7 +5344,7 @@ async function plScan() {
       const hit = pmLookup(s.srcForms);
       if (hit && hit.forms) {
         const need = Object.keys(s.tgtForms).length ? Object.keys(s.tgtForms) : Object.keys(hit.forms);
-        s.forms = {}; need.forEach((f) => { s.forms[f] = hit.forms[f] != null ? hit.forms[f] : (hit.forms.other || hit.forms.one || ''); });
+        s.forms = {}; need.forEach((f) => { const v = hit.forms[f] != null ? hit.forms[f] : (hit.forms.other || hit.forms.one || ''); s.forms[f] = fixApplyText(v).text; });   // apply 🩹 Auto-fix — corpus plural memory is often in plural address (שלכם/חזרו); the curated dictionary normalizes it to the singular slash
         s.approved = true; s.memory = true; mem++;
       }
     }
@@ -5363,14 +5363,14 @@ async function plPropose(idx) {
   try {
     // Tell GPT which item is which CLDR form — the English is often IDENTICAL for one
     // and other (e.g. "{s_number} people" for both), so it can't infer the number position.
-    const plSys = 'These are two Hebrew plural forms of the SAME string. Item i=1 is the CLDR "one" form (count exactly 1): use the SINGULAR noun and put the {placeholder} AFTER the noun ("שעה {s_num}", "אדם {s_number}"). Item i=2 is the plural form: use the plural noun with the {placeholder} BEFORE it ("{s_num} שעות", "{s_number} אנשים").';
+    const plSys = 'These are two Hebrew plural forms of the SAME string (CLDR grammatical-number categories). Item i=1 is the CLDR "one" form (count exactly 1): use the SINGULAR noun and put the {placeholder} AFTER the noun ("שעה {s_num}", "אדם {s_number}"). Item i=2 is the plural form: use the plural noun with the {placeholder} BEFORE it ("{s_num} שעות", "{s_number} אנשים"). CRITICAL: "plural form" here refers ONLY to the grammatical number of the COUNTED noun. The way you ADDRESS the reader does NOT change between the two forms and must follow the normal address rule' + (plural ? ' (לשון רבים).' : ' — singular gender-neutral slash: שלך (not שלכם), המשך/המשיכי (not המשיכו), חזור/חזרי (not חזרו), עשה/עשי (not עשו).');
     const out = await gptBatch([{ i: 1, src: srcOne, tgt: s.tgtForms.one || '' }, { i: 2, src: srcOther, tgt: s.tgtForms.other || '' }], 'translate', key, model, plural, plSys, true);   // true = TikTok style guide
     const byI = {}; (out || []).forEach((o) => { if (o && o.i != null && o.text != null) byI[o.i] = o.text; });
     const heOne = polish(srcOne, byI[1] != null ? byI[1] : (s.tgtForms.one || ''));
     const heOther = polish(srcOther, byI[2] != null ? byI[2] : (s.tgtForms.other || ''));
     // Fill the forms the target actually uses; default to he-IL's set. one=distinct, rest=plural.
     const need = Object.keys(s.tgtForms).length ? Object.keys(s.tgtForms) : ['one', 'two', 'many', 'other'];
-    s.forms = {}; need.forEach((f) => { s.forms[f] = (f === 'one' || f === 'zero') ? heOne : heOther; });
+    s.forms = {}; need.forEach((f) => { s.forms[f] = fixApplyText((f === 'one' || f === 'zero') ? heOne : heOther).text; });   // 🩹 Auto-fix on each plural form, same as regular segments
     s.approved = true;
     plRender();
     info('pl-info', `Proposed #${s.rank}. Review the forms, then write.`, 'good');
