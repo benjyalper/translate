@@ -471,6 +471,7 @@ function tmEntryTgt(entry) {   // representative target for legacy readers (sear
 // Attach a memory variant as a REVIEW-ONLY suggestion (reuses the fuzzy near-match UI) instead of
 // overwriting GPT's contextual translation — used when context confidence is below the auto-apply bar (#5).
 function tmSuggest(p, src, tgt) {
+  if (PC.phDiff(p.src, tgt).length) return;   // never suggest a stored target that drops/alters this source's placeholders
   if (!p.fuzzy) p.fuzzy = { matches: [] };
   if (p.fuzzy.matches.some((m) => wbFold(m.suggest) === wbFold(tgt))) return;
   p.fuzzy.matches.unshift({ tier: 'template', score: 1, src: src || p.src, suggest: tgt });
@@ -637,6 +638,7 @@ function fzMatch(src, gptTgt) {
     const e = FZ.entries[idx]; if (wbFold(e.src) === qFold) continue;   // exact hit — handled elsewhere
     const suggest = fzTransplant(src, e.src, e.tgt); const kt = wbFold(suggest);
     if (seenTgt.has(kt)) continue; seenTgt.add(kt);
+    if (PC.phDiff(src, suggest).length) continue;   // never suggest a target that drops/alters a source placeholder (e.g. {s_lovedThis} already resolved in past work)
     out.push({ tier: 'template', score: 0.99, src: e.src, tgt: e.tgt, suggest });
     if (out.length >= 3) return out;
   }
@@ -653,6 +655,7 @@ function fzMatch(src, gptTgt) {
   scored.sort((a, b) => b.score - a.score);
   for (const { e, score } of scored) {
     const kt = wbFold(e.tgt); if (seenTgt.has(kt)) continue; seenTgt.add(kt);
+    if (PC.phDiff(src, e.tgt).length) continue;   // skip near-matches whose placeholders don't match this source (dropping {s_x} is a critical error)
     out.push({ tier: 'fuzzy', score, src: e.src, tgt: e.tgt, suggest: e.tgt });
     if (out.length >= 3) break;
   }
@@ -1069,7 +1072,15 @@ function fixApplyText(text) {
     const from = String(r.from == null ? '' : r.from).trim(), to = String(r.to == null ? '' : r.to);
     if (!from || !to) continue;
     let re; try { re = new RegExp('(^|[^' + HEB_L + '])(ו?)(' + fixEsc(from) + ')(?![' + HEB_L + '])', 'g'); } catch (_) { continue; }
-    s = s.replace(re, (m, pre, vav, w) => { changes.push({ from, to }); return pre + vav + to; });
+    // A plural-imperative→slash rule (from ends in ו, to has a gender slash) must NOT fire on a
+    // 3rd-person PAST plural — "הם … צפו" (they watched) is not the imperative "צפו!". Skip when a
+    // הם/הן subject precedes the match in the same string.
+    const impSlash = to.indexOf('/') >= 0 && /ו$/.test(from);
+    let subjRe; if (impSlash) { try { subjRe = new RegExp('(^|[^' + HEB_L + '])ה[םן](?![' + HEB_L + '])'); } catch (_) { subjRe = null; } }
+    s = s.replace(re, (m, pre, vav, w, off, whole) => {
+      if (impSlash && subjRe && subjRe.test(whole.slice(0, off))) return m;   // 3rd-plural subject before → past tense, leave it
+      changes.push({ from, to }); return pre + vav + to;
+    });
   }
   return { text: s, changes };
 }
