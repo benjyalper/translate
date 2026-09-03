@@ -1176,9 +1176,11 @@ function reviewerSys(plural) {
     'DO NOT rewrite a translation that is accurate, natural and compliant just because another wording is possible — change it ONLY when you can identify a real error: incorrect meaning, mistranslation, omission, addition, wrong terminology, wrong grammatical role, wrong Hebrew gender/number, unnatural or misleading Hebrew, wrong UI register, a misread ambiguous short string, placeholder/markup corruption, punctuation/formatting problem, or a clear inconsistency with a clearly-applicable term. ' +
     'TERMINOLOGY: a glossary term applies ONLY when the occurrence has the same sense AND part of speech as its definition/pos — a surface word-match is not enough (e.g. "Due→לתשלום" does NOT apply to "due to" = "because of"). LOCKED terms are mandatory and must appear (a Hebrew prefix may be attached). ' +
     'Keep EVERY placeholder/tag byte-for-byte ({s_x}, {{x}}, %s, <b>…</b>, ①②③). ' +
+    'BOLD FRAGMENTS: when "src" is only part of a longer sentence (its "fullSource" is longer than "src", or the key ends in "_bold"), it is one emphasized piece of a sentence — be EXTRA conservative. (a) The Hebrew must stay the SAME SCOPE as the fragment: do NOT add or drop words to make it read as a whole sentence — e.g. do not turn התפוצץ into התפוצץ ברשת, or להופיע into ממשיך/ה להופיע. (b) For gender/number, agree with the SUBJECT named in fullSource, not with the reader: "The story\'s still going." → the subject is הסיפור (masculine) → עדיין ממשיך is CORRECT; do NOT flip it to עדיין ממשיכה. Only change a third-person/inanimate form when fullSource makes the subject\'s Hebrew gender unambiguous AND the current form clearly disagrees with it — never on a guess. ' +
     (plural
       ? 'Address form: לשון רבים, gender-neutral (הצטרפו, שלמו, לחצו). '
-      : 'Address form: SINGULAR gender-neutral second person with a slash (לחץ/י, בחר/י). The final letter (אות סופית) goes BEFORE the slash. CRITICAL: attach the bare "/י" ONLY when the feminine is the masculine + a plain י on the SAME stem (שתף/י, בחר/י, לחץ/י). When the masculine and feminine forms differ in stem or vowels, you MUST write BOTH words out in full — הצג/הציגי (not הצג/י), חזור/חזרי (not חזור/י), העתק/העתיקי (not העתק/י), צור/צרי (not צור/י), התחל/התחילי (not התחל/י), הורד/הורידי, סרוק/סרקי. A correct full slash form is NOT an error — do NOT "fix" הצג/הציגי → הצג/י or flag it; only FLAG/FIX the reverse (a malformed short form like הצג/י → הצג/הציגי, tag GENDER_NUMBER_ERROR). ' ) +
+      : 'Address form: SINGULAR gender-neutral second person with a slash (לחץ/י, בחר/י). The final letter (אות סופית) goes BEFORE the slash. CRITICAL: attach the bare "/י" ONLY when the feminine is the masculine + a plain י on the SAME stem (שתף/י, בחר/י, לחץ/י). When the masculine and feminine forms differ in stem or vowels, you MUST write BOTH words out in full — הצג/הציגי (not הצג/י), חזור/חזרי (not חזור/י), העתק/העתיקי (not העתק/י), צור/צרי (not צור/י), התחל/התחילי (not התחל/י), הורד/הורידי, סרוק/סרקי. A correct full slash form is NOT an error — do NOT "fix" הצג/הציגי → הצג/י or flag it; only FLAG/FIX the reverse (a malformed short form like הצג/י → הצג/הציגי, tag GENDER_NUMBER_ERROR). ' +
+        'The "/י" ending is for the IMPERATIVE only. PRESENT TENSE / בינוני forms (describing what the user does, e.g. "you create", "you follow") take a DIFFERENT ending — the feminine is masculine + ת on the same stem, so the inclusive form is "/ת", NEVER "/י": יוצר/ת (not יוצר/י), עוקב/ת (not עוקב/י), כותב/ת, רואה/רואָה, משתמש/ת, זכאי/ת. CRITICAL: never convert a correct present-tense "/ת" form into "/י" — יוצר/י, עוקב/י, כותב/י are WRONG; if you see one, FIX it back to "/ת" (tag GENDER_NUMBER_ERROR), and never introduce it. ' ) +
     'Return ONLY JSON {"out":[{"i":<n>,"status":"OK"|"FIX","type":"SEMANTIC_ERROR|OMISSION|ADDITION|TERM_ERROR|GRAMMAR_ERROR|GENDER_NUMBER_ERROR|REGISTER_ERROR|CONTEXT_ERROR|CONSISTENCY_ERROR|PLACEHOLDER_ERROR|FORMATTING_ERROR|UNNATURAL_HEBREW|OTHER","note":"<short reason>","translation":"<corrected Hebrew, or the unchanged Hebrew when status=OK>"}]}. Keep "note" short (it is for debugging). Output one entry per input item with the same "i".';
 }
 // Run the reviewer over all non-manual proposals in batches. Applies a FIX only when it
@@ -4055,7 +4057,7 @@ function setMode(m) {
 // ignored server-side; offset+limit works). The displayed "Weighted word count" column is
 // weightingWordCountV2. Sums it and multiplies by the editing rate. Fetch runs in the active
 // Starling tab's context (same-origin cookie) via executeScript — no content.js dependency.
-const PC = { rows: null, dateFields: [], dateField: '' };
+const PAY = { rows: null, dateFields: [], dateField: '' };   // 💰 pay/pricing state — renamed from PC to avoid colliding with the pipeline-core global `window.PC`
 const PC_STATUS = { 1: 'In progress', 2: 'Submitted', 4: 'To be claimed' };   // Closed (3) is excluded from the word count entirely
 function pcInfo(m, k) { info('pc-info', m, k || ''); }
 // Guess which detected date column is the "first submitted" one (most→least specific).
@@ -4067,8 +4069,8 @@ function pcPickDateField(fields) {
 // Fill the "By month of <field>" dropdown from the detected date columns (hidden if none).
 function pcFillDateSel() {
   const sel = $('pc-datefield'), wrap = $('pc-datewrap'); if (!sel) return;
-  if (!PC.dateFields || !PC.dateFields.length) { if (wrap) wrap.hidden = true; sel.innerHTML = ''; return; }
-  sel.innerHTML = PC.dateFields.map((f) => `<option value="${esc(f)}"${f === PC.dateField ? ' selected' : ''}>${esc(f)}</option>`).join('');
+  if (!PAY.dateFields || !PAY.dateFields.length) { if (wrap) wrap.hidden = true; sel.innerHTML = ''; return; }
+  sel.innerHTML = PAY.dateFields.map((f) => `<option value="${esc(f)}"${f === PAY.dateField ? ' selected' : ''}>${esc(f)}</option>`).join('');
   if (wrap) wrap.hidden = false;
 }
 async function pcFetch() {
@@ -4106,36 +4108,36 @@ async function pcFetch() {
     });
     const out = r && r.result;
     if (!out || !out.ok) throw new Error((out && out.error) || 'fetch failed');
-    PC.rows = (out.rows || []).filter((r) => String(r.s) !== '3');   // drop Closed tasks — never counted
+    PAY.rows = (out.rows || []).filter((r) => String(r.s) !== '3');   // drop Closed tasks — never counted
     // Union of date-like field names across rows; default to the one that looks like "first submitted".
-    const fset = new Set(); for (const r of PC.rows) for (const k of Object.keys(r.dates || {})) fset.add(k);
-    PC.dateFields = [...fset].sort();
-    PC.dateField = pcPickDateField(PC.dateFields);
+    const fset = new Set(); for (const r of PAY.rows) for (const k of Object.keys(r.dates || {})) fset.add(k);
+    PAY.dateFields = [...fset].sort();
+    PAY.dateField = pcPickDateField(PAY.dateFields);
     pcFillDateSel();
-    pcInfo(`Loaded ${PC.rows.length} translation task(s) from My tasks (Closed excluded).`, 'good');
+    pcInfo(`Loaded ${PAY.rows.length} translation task(s) from My tasks (Closed excluded).`, 'good');
     pcRender();
   } catch (e) { pcInfo('Could not read My tasks — reload the extension, make sure a Starling tab is active, then try again. (' + e.message + ')', 'err'); }
   finally { if ($('pc-run')) $('pc-run').disabled = false; }
 }
 function pcRender() {
-  if (!PC.rows) return;
+  if (!PAY.rows) return;
   const rate = Number($('pc-rate').value) || 0;
   const sel = $('pc-status').value;
-  const rows = sel === 'all' ? PC.rows : PC.rows.filter((r) => String(r.s) === sel);
+  const rows = sel === 'all' ? PAY.rows : PAY.rows.filter((r) => String(r.s) === sel);
   const n = rows.length;
   const weighted = rows.reduce((a, r) => a + r.w, 0);
   const fmt = (x) => x.toLocaleString('en-US', { maximumFractionDigits: 1 });
   const money = (x) => x.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const by = {};
-  for (const r of PC.rows) { by[r.s] = by[r.s] || { n: 0, w: 0 }; by[r.s].n++; by[r.s].w += r.w; }
+  for (const r of PAY.rows) { by[r.s] = by[r.s] || { n: 0, w: 0 }; by[r.s].n++; by[r.s].w += r.w; }
   const brk = Object.keys(by).sort().map((k) =>
     `<tr${String(k) === sel ? ' style="font-weight:700"' : ''}><td>${esc(PC_STATUS[k] || 'Status ' + k)}</td><td style="text-align:right">${by[k].n}</td><td style="text-align:right">${fmt(by[k].w)}</td><td style="text-align:right">${money(by[k].w * rate)}</td></tr>`).join('');
   // Monthly breakdown by the chosen date column (respects the Tasks status filter).
   let monthly = '';
-  if (PC.dateField && PC.dateFields && PC.dateFields.length) {
+  if (PAY.dateField && PAY.dateFields && PAY.dateFields.length) {
     const mb = new Map();   // 'YYYY-MM' -> {n,w}; '' bucket = rows with no value for this field
     for (const r of rows) {
-      const ms = r.dates && r.dates[PC.dateField];
+      const ms = r.dates && r.dates[PAY.dateField];
       let key = '';
       if (ms) { const d = new Date(ms); key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
       if (!mb.has(key)) mb.set(key, { n: 0, w: 0 });
@@ -4145,13 +4147,13 @@ function pcRender() {
     const monthLabel = (k) => { const [y, m] = k.split('-'); return new Date(Number(y), Number(m) - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' }); };
     const mrows = keys.map((k) => `<tr><td>${monthLabel(k)}</td><td style="text-align:right">${mb.get(k).n}</td><td style="text-align:right">${fmt(mb.get(k).w)}</td><td style="text-align:right">${money(mb.get(k).w * rate)}</td></tr>`).join('');
     const nd = mb.get('');
-    const ndRow = nd ? `<tr style="opacity:.6"><td>(no ${esc(PC.dateField)})</td><td style="text-align:right">${nd.n}</td><td style="text-align:right">${fmt(nd.w)}</td><td style="text-align:right">${money(nd.w * rate)}</td></tr>` : '';
+    const ndRow = nd ? `<tr style="opacity:.6"><td>(no ${esc(PAY.dateField)})</td><td style="text-align:right">${nd.n}</td><td style="text-align:right">${fmt(nd.w)}</td><td style="text-align:right">${money(nd.w * rate)}</td></tr>` : '';
     monthly =
       `<table style="width:100%;margin-top:14px;border-collapse:collapse;font-size:.92em">
          <thead><tr style="text-align:left;border-bottom:1px solid #8884"><th>Month</th><th style="text-align:right">Tasks</th><th style="text-align:right">Weighted</th><th style="text-align:right">Pay</th></tr></thead>
          <tbody>${mrows || `<tr><td colspan="4" class="hint">No dated tasks in this filter.</td></tr>`}${ndRow}</tbody>
        </table>
-       <div class="hint" style="margin-top:6px">Grouped by month of <b>${esc(PC.dateField)}</b> (auto-detected date column — switch it in <b>By month of</b> above if that isn't “first submitted”). Respects the Tasks filter.</div>`;
+       <div class="hint" style="margin-top:6px">Grouped by month of <b>${esc(PAY.dateField)}</b> (auto-detected date column — switch it in <b>By month of</b> above if that isn't “first submitted”). Respects the Tasks filter.</div>`;
   }
   $('pc-out').hidden = false;
   $('pc-out').innerHTML =
@@ -6384,11 +6386,11 @@ async function init() {
   // YiCAT (segment API + copy / experimental DOM write)
   if ($('yc-model')) $('yc-model').textContent = $('model').value;
   $('mode-yicat').addEventListener('click', () => { setMode('yicat'); ycDetect(); });
-  $('mode-pay').addEventListener('click', () => { setMode('pay'); if (!PC.rows) pcFetch(); });
+  $('mode-pay').addEventListener('click', () => { setMode('pay'); if (!PAY.rows) pcFetch(); });
   $('pc-run').addEventListener('click', pcFetch);
-  $('pc-rate').addEventListener('input', () => { if (PC.rows) pcRender(); });
-  $('pc-status').addEventListener('change', () => { if (PC.rows) pcRender(); });
-  if ($('pc-datefield')) $('pc-datefield').addEventListener('change', (e) => { PC.dateField = e.target.value; if (PC.rows) pcRender(); });
+  $('pc-rate').addEventListener('input', () => { if (PAY.rows) pcRender(); });
+  $('pc-status').addEventListener('change', () => { if (PAY.rows) pcRender(); });
+  if ($('pc-datefield')) $('pc-datefield').addEventListener('change', (e) => { PAY.dateField = e.target.value; if (PAY.rows) pcRender(); });
   $('yc-detect').addEventListener('click', ycDetect);
   $('yc-harvest').addEventListener('click', ycHarvest);
   $('yc-propose').addEventListener('click', ycPropose);
