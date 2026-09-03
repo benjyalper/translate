@@ -914,6 +914,30 @@ function tbCheck(proposals) {
     p.termUncertain = uncertain.length ? uncertain : null;
   }
 }
+// BUTTON REGISTER (soft): a button / label reads as שם פעולה (חיפוש, שמירה, הגדרה), not a
+// second-person imperative (חפש/י, שמור/שמרי). Two deterministic signals must BOTH hold:
+//   • the key marks a button-ish UI role (…_btn / button / tab / menu / option / label) — CTA and
+//     action-headline keys are excluded, since there the imperative (קבל/י …) is the correct form;
+//   • the target's leading word is an IMPERATIVE gender-slash (post-slash ends in י: חפש/י,
+//     שמור/שמרי) — nominal forms carry no slash, and gendered ADJECTIVES end in ת/ה (זכאי/ת), so
+//     those are not flagged.
+// Never mutates the text — it can't break Hebrew grammar; it only sets a review badge.
+function isBtnRoleKey(k) {
+  k = String(k || '');
+  if (/(?:^|[_.\-])cta(?=[_.\-A-Za-z0-9]|$)/i.test(k) || /[a-z]Cta/.test(k)) return false;
+  return /(?:^|[_.\-])(?:btn|button|tab|menu|option|opt|label|lbl)(?=[_.\-A-Za-z0-9]|$)/i.test(k)
+      || /[a-z](?:Btn|Button|Tab|Menu|Option|Label)/.test(k);
+}
+function isSlashImperative(he) {   // חפש/י, שמור/שמרי, הצג/הציגי → true ; חיפוש, זכאי/ת, בטוח/ה → false
+  return /^\s*[א-ת]{2,}\/[א-ת]{0,7}י(?![א-ת])/.test(String(he || ''));
+}
+function btnCheck(proposals) {
+  for (const p of proposals) p.btnRegister = null;
+  for (const p of proposals) {
+    if (p.manual) continue;
+    if (isBtnRoleKey(p.key) && isSlashImperative(p.next)) p.btnRegister = true;
+  }
+}
 // Read the open task's term references from the page's MAIN world (executeScript world:'MAIN'
 // — the popover data is preloaded on each span's React vnode, so no hover simulation is needed).
 async function tbGrab() {
@@ -1506,6 +1530,7 @@ async function doGpt() {
     lockCheck(proposals); // 4) validators — locked-term …
     consistCheck(proposals); //     … in-task drift …
     tbCheck(proposals);   //     … term-base applicability (soft) …
+    btnCheck(proposals);  //     … button/label register (imperative on a button → שם פעולה, soft) …
     phCheck(proposals);   //     … and the placeholder guard, all on the reviewer's FINAL text (#12/#26)
     state.proposals = proposals;
     const changed = proposals.filter((p) => !sameRender(p.next, p.old)).length;
@@ -1513,8 +1538,9 @@ async function doGpt() {
     const dedupeN = proposals.filter((p) => p.dedupe).length; // aligned to one wording within this task
     const consistN = proposals.filter((p) => p.consist && p.consist.length).length; // ⚖ term-drift flags
     const termN = proposals.filter((p) => p.termHint && p.termHint.length).length;   // 🏷 term-base deviations
+    const btnN = proposals.filter((p) => p.btnRegister).length;   // 🔘 button rendered as an imperative
     const pf = done - filled;
-    info('gpt-info', `✅ ${done} done${filled ? ` (${pf} proofread · ${filled} translated)` : ''} · ${changed} changed${tmN ? ` · 🧠 ${tmN} from memory` : ''}${dedupeN ? ` · 🧠 ${dedupeN} aligned` : ''}${consistN ? ` · ⚖ ${consistN} consistency` : ''}${termN ? ` · 🏷 ${termN} term-base` : ''}${failed ? ` · ${failed} failed` : ''}`, failed ? 'err' : 'good');
+    info('gpt-info', `✅ ${done} done${filled ? ` (${pf} proofread · ${filled} translated)` : ''} · ${changed} changed${tmN ? ` · 🧠 ${tmN} from memory` : ''}${dedupeN ? ` · 🧠 ${dedupeN} aligned` : ''}${consistN ? ` · ⚖ ${consistN} consistency` : ''}${termN ? ` · 🏷 ${termN} term-base` : ''}${btnN ? ` · 🔘 ${btnN} button` : ''}${failed ? ` · ${failed} failed` : ''}`, failed ? 'err' : 'good');
     renderReview();
     $('review-card').hidden = false;
     $('write-card').hidden = false;
@@ -1593,6 +1619,7 @@ function renderReview() {
         ${p.chip ? '<span class="rc-warn" title="Real inline-tag object (chip) in the cell — copy-by-hand.">⚠ chip</span>' : (p.tagWrapped ? '<span class="rc-warn" title="Numbered wrapping tags (①②③ / O-/C- tokens) — copy-by-hand; writing would type the literal tokens and break the tags. Use the per-part Copy buttons.">⚠ tag</span>' : (p.tagged ? '<span class="rc-warn" title="Text placeholder ({0}, %s, &lt;g id&gt;…) — kept byte-for-byte; safe to write. Eyeball that the token survived.">⚠ placeholder</span>' : ''))}
         ${amountMismatch(p.src, p.next) ? '<span class="rc-warn" title="Number/currency differs from the source — the amount &amp; currency symbol must stay verbatim (may be a stale TM value).">⚠ number</span>' : ''}
         ${hasSpacingIssue(p.old) || edgeMismatch(p.src, p.old) ? '<span class="rc-warn" title="Spacing adjusted — space before punctuation, double spaces, or leading/trailing space to match the source.">⚠ spacing</span>' : ''}
+        ${p.btnRegister ? '<span class="rc-warn" style="background:#7c2d12" title="This segment&apos;s key marks it a button / label, but the target is an imperative (חפש/י). Buttons read as שם פעולה — e.g. Search → חיפוש, Save → שמירה, Set up → הגדרה. Soft flag only; nothing was changed — fix by hand if it should be nominal.">🔘 button → שם פעולה</span>' : ''}
         ${brandIssue(p.src, p.next) ? `<span class="rc-warn" title="A product name from the source (${esc(brandIssue(p.src, p.next))}) isn't kept verbatim — check the brand spelling/spacing.">⚠ brand</span>` : ''}
         ${boldIssue(p.src, p.next) ? `<span class="rc-warn" title="Markdown **bold** from the source (**${esc(boldIssue(p.src, p.next))}**) isn't wrapped in the target — the asterisks were dropped. Add ** around the matching term.">⚠ bold</span>` : ''}
         ${p.flag ? `<span class="rc-warn" title="${esc(p.flag)}" style="background:#7a5c0a">⚠ register</span>` : ''}
