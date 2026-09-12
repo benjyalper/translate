@@ -1090,11 +1090,12 @@ function fixCount() { return FIX && FIX.rules ? FIX.rules.length : 0; }
 function fixUid() { return 'fx' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
 function fixEsc(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 // Apply every enabled rule to one string. Returns { text, changes:[{from,to}] }.
-function fixApplyText(text) {
+function fixApplyText(text, skipSlash) {
   let s = String(text == null ? '' : text); const changes = [];
   for (const r of (FIX.rules || [])) {
     const from = String(r.from == null ? '' : r.from).trim(), to = String(r.to == null ? '' : r.to);
     if (!from || !to) continue;
+    if (skipSlash && to.indexOf('/') >= 0) continue;   // 🤖 prompt/machine-directed segment: never force a gender slash onto a bot-directed verb
     let re; try { re = new RegExp('(^|[^' + HEB_L + '])(ו?)(' + fixEsc(from) + ')(?![' + HEB_L + '])', 'g'); } catch (_) { continue; }
     // A plural-imperative→slash rule (from ends in ו, to has a gender slash) must NOT fire on a
     // 3rd-person PAST plural — "הם … צפו" (they watched) is not the imperative "צפו!". Skip when a
@@ -1113,12 +1114,47 @@ function fixApplyText(text) {
 function fixApply(proposals) {
   if (!FIX || !FIX.enabled || !(FIX.rules || []).length) return;
   for (const p of proposals) {
-    const res = fixApplyText(p.next);
+    const res = fixApplyText(p.next, !!p.promptCtx);   // 🤖 prompt-context: skip slash-producing rules
     if (res.text !== p.next) {
       p.fixPrev = p.next; p.next = res.text;
       const seen = new Set(); p.fixApplied = res.changes.filter((c) => { const k = c.from + '⇢' + c.to; if (seen.has(k)) return false; seen.add(k); return true; }).map((c) => c.from + ' → ' + c.to);
       if (!p.manual && !p.tmOverride && !sameRender(p.next, p.old)) p.approved = true;
     }
+  }
+}
+
+// ---- 🤖 AI-PROMPT / MACHINE-DIRECTED MODE -----------------------------------
+// Some tasks are generation PROMPTS whose imperatives address the MODEL, not a person, so they
+// take plain MASCULINE-singular imperatives (הפוך, השתמש, הקף, התייחס) — NOT the user-facing
+// gender slash (הפוך/הפכי), which LQA flags as an error. There is NO reliable DOM signal for
+// this; the key is the tell (Tako_… / aigc… / …_prompt). Detection is a COARSE GATE that (a)
+// tells GPT to judge each imperative's addressee and (b) stops the deterministic layer
+// (Auto-fix/reviewer) from forcing a slash. Because the bot-vs-user split can vary WITHIN one
+// segment and can't be auto-resolved, any prompt-context segment whose output still contains a
+// gender-slash form is HELD unapproved (conservative) for you to confirm or edit by hand.
+let PROMPT = { force: false, patterns: 'prompt,Tako,aigc,createHub,genai,imagine' };
+async function promptLoad() {
+  try { PROMPT = await store.get('promptMode', { force: false, patterns: 'prompt,Tako,aigc,createHub,genai,imagine' }); } catch (e) {}
+  if (!PROMPT) PROMPT = { force: false, patterns: 'prompt,Tako,aigc,createHub,genai,imagine' };
+  if (typeof PROMPT.patterns !== 'string' || !PROMPT.patterns.trim()) PROMPT.patterns = 'prompt,Tako,aigc,createHub,genai,imagine';
+  if (PROMPT.force === undefined) PROMPT.force = false;
+  return PROMPT;
+}
+async function promptSave() { try { await store.set({ promptMode: PROMPT }); } catch (e) {} }
+function promptPatternRe() {
+  const parts = String(PROMPT.patterns || '').split(',').map((s) => s.trim()).filter(Boolean).map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  if (!parts.length) return null;
+  try { return new RegExp(parts.join('|'), 'i'); } catch (e) { return null; }
+}
+function isPromptCtx(key) { if (PROMPT.force) return true; const re = promptPatternRe(); return !!(re && key && re.test(String(key))); }
+// A Hebrew gender-slash form anywhere in the string (X/Y on Hebrew letters) — e.g. הפוך/הפכי,
+// לחץ/י, יוצר/ת. In a bot-directed prompt this is the signal that a user-form slipped in.
+function hasHebrewSlashForm(s) { return /[א-ת]{2,}\/[א-ת]{1,7}(?![א-ת])/.test(String(s || '')); }
+// Conservative: only prompt-context segments; hold the ones that still carry a slash form.
+function promptGate(proposals) {
+  for (const p of proposals) {
+    p.promptHold = false;
+    if (p.promptCtx && !p.manual && hasHebrewSlashForm(p.next)) { p.promptHold = true; p.approved = false; }
   }
 }
 
@@ -1216,6 +1252,7 @@ function reviewerSys(plural) {
       ? 'Address form: לשון רבים, gender-neutral (הצטרפו, שלמו, לחצו). '
       : 'Address form: SINGULAR gender-neutral second person with a slash (לחץ/י, בחר/י). The final letter (אות סופית) goes BEFORE the slash. CRITICAL: attach the bare "/י" ONLY when the feminine is the masculine + a plain י on the SAME stem (שתף/י, בחר/י, לחץ/י). When the masculine and feminine forms differ in stem or vowels, you MUST write BOTH words out in full — הצג/הציגי (not הצג/י), חזור/חזרי (not חזור/י), העתק/העתיקי (not העתק/י), צור/צרי (not צור/י), התחל/התחילי (not התחל/י), הורד/הורידי, סרוק/סרקי. A correct full slash form is NOT an error — do NOT "fix" הצג/הציגי → הצג/י or flag it; only FLAG/FIX the reverse (a malformed short form like הצג/י → הצג/הציגי, tag GENDER_NUMBER_ERROR). ' +
         'The "/י" ending is for the IMPERATIVE only. PRESENT TENSE / בינוני forms (describing what the user does, e.g. "you create", "you follow") take a DIFFERENT ending — the feminine is masculine + ת on the same stem, so the inclusive form is "/ת", NEVER "/י": יוצר/ת (not יוצר/י), עוקב/ת (not עוקב/י), כותב/ת, רואה/רואָה, משתמש/ת, זכאי/ת. CRITICAL: never convert a correct present-tense "/ת" form into "/י" — יוצר/י, עוקב/י, כותב/י are WRONG; if you see one, FIX it back to "/ת" (tag GENDER_NUMBER_ERROR), and never introduce it. ' ) +
+    'MACHINE-DIRECTED PROMPTS: for an item marked "machinePrompt": true (an AI-generation prompt addressing the MODEL, not a person), a MASCULINE-SINGULAR imperative that instructs the model (הפוך, השתמש, הקף, התייחס, כלול, צור) is CORRECT — do NOT convert it to a gender slash and do NOT flag it (never tag GENDER_NUMBER_ERROR for it). Only a verb the END USER performs in the app (tap/open/save) uses the slash there. Judge each verb by its addressee. ' +
     'Return ONLY JSON {"out":[{"i":<n>,"status":"OK"|"FIX","type":"SEMANTIC_ERROR|OMISSION|ADDITION|TERM_ERROR|GRAMMAR_ERROR|GENDER_NUMBER_ERROR|REGISTER_ERROR|CONTEXT_ERROR|CONSISTENCY_ERROR|PLACEHOLDER_ERROR|FORMATTING_ERROR|UNNATURAL_HEBREW|OTHER","note":"<short reason>","translation":"<corrected Hebrew, or the unchanged Hebrew when status=OK>"}]}. Keep "note" short (it is for debugging). Output one entry per input item with the same "i".';
 }
 // Run the reviewer over all non-manual proposals in batches. Applies a FIX only when it
@@ -1235,6 +1272,7 @@ async function reviewPass(proposals, key, model, taskCtx) {
       if (p.key) it.key = String(p.key);
       if (p.context) it.context = String(p.context);
       if (p.fullSrc) it.fullSource = String(p.fullSrc);   // #5 — reviewer also gets fullSource
+      if (p.promptCtx) it.machinePrompt = true;           // 🤖 don't let the reviewer re-slash a bot verb
       if (p.termsUsed && p.termsUsed.length) it.terms = p.termsUsed;
       const locked = (LOCK && LOCK.terms || []).filter((t) => t.en && lockSrcHas(p.src, t.en)).map((t) => ({ en: t.en, he: t.he }));
       if (locked.length) it.locked = locked;
@@ -1299,6 +1337,7 @@ function sysPrompt(mode, plural, tiktok) {
     (plural
       ? '- FORM OF ADDRESS: Hebrew MUST be in לשון רבים — plural, gender-neutral forms (e.g. הצטרפו, שלמו, לחצו, קראו ואשרו) — never masculine singular and never slash forms like שלם/י.\n'
       : '- FORM OF ADDRESS: use the SINGULAR, gender-neutral second person with a slash for both genders (לחץ/י, את/ה, בחר/י). Put the final letter (אות סופית) BEFORE the slash. If the masculine and feminine suffixes differ, write BOTH words in full to avoid a malformed feminine (התחל/התחילי, not התחל/י). Use the imperative when the source is imperative. NEVER use the plural form of address (לשון רבים) and NEVER use masculine-singular alone — even when the source number/gender is ambiguous, DEFAULT to this singular gender-slash form. Convert any plural imperative to it: הצטרפו→הצטרף/י, נסו→נסה/י, חכו→חכה/י, היכנסו→היכנס/י, שלמו→שלם/י, לחצו→לחץ/י, קראו→קרא/י; and when the stem differs write both words IN FULL: בדקו→בדוק/בדקי, אמרו→אמור/אמרי, שמרו→שמור/שמרי.\n') +
+    '- MACHINE-DIRECTED PROMPTS: an item marked "machinePrompt": true is an AI-generation PROMPT whose imperatives address the MODEL, not a person. For such items OVERRIDE the form-of-address rule above and decide EACH imperative by what it acts on: a verb telling the MODEL to produce/transform the output, scene, style or reference (make/turn/apply/use/refer to/surround/include/avoid/keep/render/generate/add/ensure → הפוך, השתמש, הקף, התייחס, כלול, הימנע, שמור, צור) → MASCULINE-SINGULAR imperative, NO gender slash. A verb the END USER performs in the app (tap/click/open/save/share/select → הקש/י, פתח/י, שמור/שמרי) → keep the gender slash. ONE item may contain BOTH — render each verb by its own addressee; never force a slash onto a model-directed verb, and never force masculine onto a user action.\n' +
     (tiktok ? brainText() : '') +
     '- Return ONLY the JSON object requested. No commentary, no markdown, no code fences.';
   if (mode === 'translate') return base + '\nTASK: Translate each item\'s English "src" into natural, idiomatic Hebrew.';
@@ -1479,6 +1518,8 @@ async function doGpt() {
           if (s.key) it.key = String(s.key);                 // role hint (…_title/_btn/_toast/…)
           if (s.context) it.context = String(s.context);     // translator note from Starling
           if (s.fullSrc) it.fullSource = String(s.fullSrc);  // complete string when src is a split fragment
+          if (isPromptCtx(s.key)) { it.machinePrompt = true; s._promptCtx = true; }   // 🤖 AI-prompt key → bot-directed address
+          else s._promptCtx = false;
           const rawTh = tbHintsFor(String(s.src || ''));      // Starling term-base hints (multi-word-first, capped, with definitions)
           const classified = PC.classifyTerms(String(s.src || ''), rawTh, tbSenses);   // applicability + overlap (#7)
           const th = PC.filterTermsForPrompt(classified);     // drop spans overlapped by a longer term so they don't distract
@@ -1510,7 +1551,7 @@ async function doGpt() {
               const tagWrapped = hasTags(next) || hasTags(s.src) || hasTags(s.tgt);
               const manual = !!s.chip || tagWrapped;
               const flag = (o.flag && String(o.flag).trim()) ? String(o.flag).trim() : '';
-              proposals.push({ seg: s.seg, src: s.src, old: s.tgt, next: next, tagged: !!s.tagged || tagWrapped, chip: !!s.chip, tagWrapped: tagWrapped, manual: manual, filled: gm === 'translate' && wasEmpty, flag: flag, key: s.key || '', context: s.context || '', fullSrc: s.fullSrc || '', shots: s.shots || [], termsUsed: s._terms || [], classified: s._classified || [], risk: s._risk || [], shotImg: imgByI.get(idx + 1) || null, approved: !manual && next !== String(s.tgt) });
+              proposals.push({ seg: s.seg, src: s.src, old: s.tgt, next: next, tagged: !!s.tagged || tagWrapped, chip: !!s.chip, tagWrapped: tagWrapped, manual: manual, filled: gm === 'translate' && wasEmpty, flag: flag, promptCtx: !!s._promptCtx, key: s.key || '', context: s.context || '', fullSrc: s.fullSrc || '', shots: s.shots || [], termsUsed: s._terms || [], classified: s._classified || [], risk: s._risk || [], shotImg: imgByI.get(idx + 1) || null, approved: !manual && next !== String(s.tgt) });
               dbg('seg', s.seg, { src: s.src, terms: (s._classified || []).map((c) => `${c.term.en}→${c.term.he}${c.term.pos ? ' (' + c.term.pos + ')' : ''} [${c.status}]${c.term.definition ? ' «' + c.term.definition + '»' : ''}`), risk: s._risk || [], key: s.key || '', hasContext: !!s.context, shotAttached: !!imgByI.get(idx + 1), out: next });
               done++;
               if (gm === 'translate' && wasEmpty) filled++;
@@ -1531,6 +1572,7 @@ async function doGpt() {
     consistCheck(proposals); //     … in-task drift …
     tbCheck(proposals);   //     … term-base applicability (soft) …
     btnCheck(proposals);  //     … button/label register (imperative on a button → שם פעולה, soft) …
+    promptGate(proposals);//     … 🤖 AI-prompt hold: bot-directed segment still carrying a slash → held for review …
     phCheck(proposals);   //     … and the placeholder guard, all on the reviewer's FINAL text (#12/#26)
     state.proposals = proposals;
     const changed = proposals.filter((p) => !sameRender(p.next, p.old)).length;
@@ -1539,8 +1581,9 @@ async function doGpt() {
     const consistN = proposals.filter((p) => p.consist && p.consist.length).length; // ⚖ term-drift flags
     const termN = proposals.filter((p) => p.termHint && p.termHint.length).length;   // 🏷 term-base deviations
     const btnN = proposals.filter((p) => p.btnRegister).length;   // 🔘 button rendered as an imperative
+    const promptHoldN = proposals.filter((p) => p.promptHold).length;   // 🤖 held for bot/user addressee review
     const pf = done - filled;
-    info('gpt-info', `✅ ${done} done${filled ? ` (${pf} proofread · ${filled} translated)` : ''} · ${changed} changed${tmN ? ` · 🧠 ${tmN} from memory` : ''}${dedupeN ? ` · 🧠 ${dedupeN} aligned` : ''}${consistN ? ` · ⚖ ${consistN} consistency` : ''}${termN ? ` · 🏷 ${termN} term-base` : ''}${btnN ? ` · 🔘 ${btnN} button` : ''}${failed ? ` · ${failed} failed` : ''}`, failed ? 'err' : 'good');
+    info('gpt-info', `✅ ${done} done${filled ? ` (${pf} proofread · ${filled} translated)` : ''} · ${changed} changed${tmN ? ` · 🧠 ${tmN} from memory` : ''}${dedupeN ? ` · 🧠 ${dedupeN} aligned` : ''}${consistN ? ` · ⚖ ${consistN} consistency` : ''}${termN ? ` · 🏷 ${termN} term-base` : ''}${btnN ? ` · 🔘 ${btnN} button` : ''}${promptHoldN ? ` · 🤖 ${promptHoldN} prompt — decide` : ''}${failed ? ` · ${failed} failed` : ''}`, failed ? 'err' : 'good');
     renderReview();
     $('review-card').hidden = false;
     $('write-card').hidden = false;
@@ -1620,6 +1663,7 @@ function renderReview() {
         ${amountMismatch(p.src, p.next) ? '<span class="rc-warn" title="Number/currency differs from the source — the amount &amp; currency symbol must stay verbatim (may be a stale TM value).">⚠ number</span>' : ''}
         ${hasSpacingIssue(p.old) || edgeMismatch(p.src, p.old) ? '<span class="rc-warn" title="Spacing adjusted — space before punctuation, double spaces, or leading/trailing space to match the source.">⚠ spacing</span>' : ''}
         ${p.btnRegister ? '<span class="rc-warn" style="background:#7c2d12" title="This segment&apos;s key marks it a button / label, but the target is an imperative (חפש/י). Buttons read as שם פעולה — e.g. Search → חיפוש, Save → שמירה, Set up → הגדרה. Soft flag only; nothing was changed — fix by hand if it should be nominal.">🔘 button → שם פעולה</span>' : ''}
+        ${p.promptHold ? '<span class="rc-warn" style="background:#4c1d95" title="AI-prompt (machine-directed) segment whose key marks it as a generation prompt, but the target still contains a gender-slash form. Verbs that instruct the MODEL take masculine-singular (הפוך, השתמש, הקף); only a user action keeps the slash (הקש/י). Held UNCHECKED — decide the addressee per verb, edit if needed, then tick to write.">🤖 prompt — decide addressee</span>' : (p.promptCtx ? '<span class="rc-warn" style="background:#312e81" title="AI-prompt (machine-directed) context (from the key). Imperatives to the model are masculine-singular (הפוך, השתמש); slash-forcing was disabled for this segment. Eyeball the address forms.">🤖 prompt</span>' : '')}
         ${brandIssue(p.src, p.next) ? `<span class="rc-warn" title="A product name from the source (${esc(brandIssue(p.src, p.next))}) isn't kept verbatim — check the brand spelling/spacing.">⚠ brand</span>` : ''}
         ${boldIssue(p.src, p.next) ? `<span class="rc-warn" title="Markdown **bold** from the source (**${esc(boldIssue(p.src, p.next))}**) isn't wrapped in the target — the asterisks were dropped. Add ** around the matching term.">⚠ bold</span>` : ''}
         ${p.flag ? `<span class="rc-warn" title="${esc(p.flag)}" style="background:#7a5c0a">⚠ register</span>` : ''}
@@ -1754,7 +1798,7 @@ async function doWrite() {
   // SKIPPED. Unticked 🧠 memory-review rows are still held back until you tick them.
   const rawNext = (p) => String(p.next == null ? '' : p.next);
   const rawOld = (p) => String(p.old == null ? '' : p.old);
-  const writeNeeded = (p) => !p.manual && (p.approved || (!p.tmOverride && rawNext(p).trim() && rawNext(p) !== rawOld(p)));
+  const writeNeeded = (p) => !p.manual && (p.approved || (!p.tmOverride && !p.promptHold && rawNext(p).trim() && rawNext(p) !== rawOld(p)));
   const toWrite = (state.proposals || []).filter(writeNeeded);
   const edits = toWrite.map((p) => ({ seg: p.seg, text: p.next }));
   // Skip accounting — nothing disappears silently: report how many segments aren't written and why.
@@ -1762,9 +1806,10 @@ async function doWrite() {
   const skAll = (state.proposals || []).filter((p) => !wset.has(p.seg));
   const skManual = skAll.filter((p) => p.manual).length;
   const skReview = skAll.filter((p) => !p.manual && p.tmOverride).length;   // unticked memory-review
-  const skOther = skAll.length - skManual - skReview;                        // unchanged / no-op
+  const skPrompt = skAll.filter((p) => !p.manual && !p.tmOverride && p.promptHold).length;   // 🤖 held AI-prompt rows
+  const skOther = skAll.length - skManual - skReview - skPrompt;             // unchanged / no-op
   const skipNote = skAll.length
-    ? ` · skipped ${skAll.length} (${[skManual && `${skManual} tagged (copy-by-hand)`, skReview && `${skReview} 🧠 memory-review — tick to write`, skOther && `${skOther} unchanged`].filter(Boolean).join(' · ')})`
+    ? ` · skipped ${skAll.length} (${[skManual && `${skManual} tagged (copy-by-hand)`, skReview && `${skReview} 🧠 memory-review — tick to write`, skPrompt && `${skPrompt} 🤖 prompt — decide addressee`, skOther && `${skOther} unchanged`].filter(Boolean).join(' · ')})`
     : '';
   if (!edits.length) { info('write-info', `Nothing to write${skipNote || ' — nothing approved'}.${skReview ? ' Use “🧠 tick memory-review” to include remembered rows.' : ''}`, 'err'); return; }
   if (!confirm(`Write ${edits.length} segment(s) into Starling?${skAll.length ? ` (${skAll.length} skipped — see the note after)` : ''} This types into each cell — make sure no one else is editing the same task.`)) return;
@@ -6304,6 +6349,9 @@ async function init() {
   if ($('qa-toggle')) { $('qa-toggle').checked = !!QA.enabled; $('qa-toggle').addEventListener('change', async (e) => { QA.enabled = e.target.checked; await qaSave(); }); }
   await shotLoad();   // screenshot-as-context setting (#4)
   if ($('shot-toggle')) { $('shot-toggle').checked = !!SHOT.enabled; $('shot-toggle').addEventListener('change', async (e) => { SHOT.enabled = e.target.checked; await shotSave(); }); }
+  await promptLoad();   // 🤖 AI-prompt / machine-directed mode
+  if ($('pm-force')) { $('pm-force').checked = !!PROMPT.force; $('pm-force').addEventListener('change', async (e) => { PROMPT.force = e.target.checked; await promptSave(); }); }
+  if ($('pm-keys')) { $('pm-keys').value = PROMPT.patterns || ''; $('pm-keys').addEventListener('change', async (e) => { PROMPT.patterns = e.target.value.trim(); await promptSave(); }); }
   if ($('tb-grab')) $('tb-grab').addEventListener('click', async () => { $('tb-grab').disabled = true; try { await tbGrab(); } finally { $('tb-grab').disabled = false; } });
   if ($('tb-toggle')) $('tb-toggle').addEventListener('change', async (e) => {
     TB.enabled = e.target.checked; await tbSave(); tbRefresh();
