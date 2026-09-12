@@ -315,3 +315,11 @@ textarea { font-family: ui-monospace, Menlo, Consolas, monospace; resize: vertic
 #wb-tab-row { align-items: center; gap: 8px; margin-top: 8px; }
 #wb-tab { flex: 1; }
 .wbc[data-verdict="written"] { border-color: #22c55e; }
+
+/* 💵 Cost guide table */
+.cost-tbl { width: 100%; border-collapse: collapse; margin: 6px 0 2px; font-size: 11px; }
+.cost-tbl th, .cost-tbl td { text-align: left; vertical-align: top; padding: 5px 7px; border-bottom: 1px solid var(--border); }
+.cost-tbl th { font-size: 9px; letter-spacing: .04em; text-transform: uppercase; color: var(--dim2); font-weight: 800; }
+.cost-tbl td:first-child { color: var(--ink); width: 46%; }
+.cost-tbl td:last-child { color: var(--dim); }
+.cost-tbl tr:last-child td { border-bottom: none; }

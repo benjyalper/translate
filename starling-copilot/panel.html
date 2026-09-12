@@ -38,9 +38,9 @@
         <option value="gpt-5.4-mini">gpt-5.4-mini (cheap draft)</option>
       </select>
       <label class="lbl">House style</label>
-      <label class="ck"><input type="checkbox" id="plural" /> Plural form (לשון רבים) — <b>off</b> = singular gender-neutral slashes (לחץ/י), the TikTok default</label>
+      <label class="ck"><input type="checkbox" id="plural" /> Plural form (לשון רבים) — <b>off</b> = singular gender-neutral slashes (לחץ/י), the TikTok default <span class="hint">· no extra cost</span></label>
       <label class="ck"><input type="checkbox" id="qa-toggle" /> 🔎 Independent GPT QA — a second reviewer pass checks each translation for meaning/terminology/grammar errors and fixes only genuine ones (<b>~doubles</b> the API cost per Run)</label>
-      <label class="ck"><input type="checkbox" id="shot-toggle" /> 📷 Use screenshots as GPT context — when a segment has a Starling UI screenshot and the model is vision-capable, send it as extra context (helps short ambiguous strings). Falls back to text-only if unavailable. <b>beta</b> — verify on a real task</label>
+      <label class="ck"><input type="checkbox" id="shot-toggle" /> 📷 Use screenshots as GPT context — when a segment has a Starling UI screenshot and the model is vision-capable, send it as extra context (helps short ambiguous strings). Falls back to text-only if unavailable. <b>beta</b> — verify on a real task <span class="hint">· adds image tokens to each pass</span></label>
       <label class="ck"><input type="checkbox" id="pm-force" /> 🤖 Treat this task as an AI prompt (bot-directed) — imperatives address the <b>model</b>, so keep them masculine-singular (הפוך, השתמש) instead of the user slash (הפוך/הפכי). Ambiguous rows are held for you to decide.</label>
       <label class="lbl">🤖 AI-prompt key patterns <span class="hint">comma-separated · a segment whose key matches is auto-treated as bot-directed</span></label>
       <input id="pm-keys" type="text" placeholder="prompt,Tako,aigc,createHub,genai,imagine" />
@@ -66,6 +66,30 @@
         </div>
         <pre id="diag-out" class="diag"></pre>
       </details>
+    </details>
+
+    <!-- COST GUIDE -->
+    <details class="card" id="cost-card">
+      <summary>💵 What each action costs <span class="hint">— where the API money goes</span></summary>
+      <p class="hint">Every ✨ GPT action is one or more <b>passes</b> over your text, and you pay per pass. A pass's price = the segments in it <b>+ everything attached</b> (Style Brain, glossary, locked terms, memory context, screenshots) × the model rate. Deterministic actions send <b>nothing</b> to OpenAI — they're free. Bigger model = more per token: <b>gpt-5.4-mini ≪ gpt-5.4 &lt; gpt-5.5</b>.</p>
+      <table class="cost-tbl">
+        <tr><th>Action</th><th>GPT cost</th></tr>
+        <tr><td>✨ <b>Run</b> — 📑 Proofread <i>or</i> 🌐 Translate</td><td><b>1 pass</b> over the selected segments (the baseline). Proofread and Translate cost the same.</td></tr>
+        <tr><td>🔎 <b>Independent GPT QA</b></td><td><b>+1 full pass</b> → <b>~doubles</b> the Run cost.</td></tr>
+        <tr><td>📷 <b>Screenshots as context</b></td><td>No extra pass, but each screenshot adds <b>image tokens</b> to every pass that uses it (Run <i>and</i> QA). Images are the priciest tokens — noticeable on big tasks.</td></tr>
+        <tr><td>🧠 Style Brain · 🔒 locked terms · 🧠 memory context</td><td>No pass of their own, but they <b>ride along inside every Run/QA prompt</b>, making each batch bigger. Keep the brain tight (🧹 Consolidate) so Runs stay cheap.</td></tr>
+        <tr><td>🩹 Auto-fix · 🧠 memory apply · near-match · ⚖ consistency/term/placeholder checks</td><td><b>Free</b> — deterministic, no GPT.</td></tr>
+        <tr><td>🧠 <b>Distill</b> (Style Brain / Harvest)</td><td><b>1 one-off pass</b> over the pasted / harvested text.</td></tr>
+        <tr><td>🧹 <b>Consolidate rules</b></td><td><b>1 one-off pass per rule category.</b></td></tr>
+        <tr><td>🪐 <b>Learn from Corpus</b></td><td><b>1 one-off pass</b> over the whole corpus (~a few $ for a ~9k-pair corpus).</td></tr>
+        <tr><td>🧹 <b>Sweep drift</b></td><td><b>1 one-off pass</b> over the whole task.</td></tr>
+        <tr><td>⚖️ <b>Adjudicate</b> (Feishu LQA)</td><td><b>1 pass</b> over the pasted rows.</td></tr>
+        <tr><td>⛏ Term mining · 📦 Corpus build</td><td><b>Free</b> — deterministic (optional ✨ Refine adds 1 pass).</td></tr>
+        <tr><td>⬇ Harvest · ⬇ Grab term base · ➕ Add pairs to memory · 📚 Learn (add pairs)</td><td><b>Free</b> — read-only DOM/API, no GPT.</td></tr>
+        <tr><td>Plural (לשון רבים) · 🤖 AI-prompt mode</td><td><b>Free</b> — just prompt flags, no extra tokens.</td></tr>
+        <tr><td>↩ Write / ⚡ Write·Confirm·Submit · 💰 Word count · 🔎 Lookup</td><td><b>Free</b> — no GPT.</td></tr>
+      </table>
+      <p class="hint">Rule of thumb: <b>cost ≈ (number of segments) × (their length + attached context) × (model rate) × (passes)</b>. To spend less: use <b>gpt-5.4-mini</b> for drafts, keep the brain lean, turn 🔎 QA on only for final passes, and only enable 📷 screenshots when short strings are genuinely ambiguous.</p>
     </details>
 
     <!-- LOOKUP -->
@@ -315,6 +339,7 @@
       <label class="ck"><input type="checkbox" id="fill-empty" checked /> Translate empty targets too (proofread mode) — writes them in with the rest</label>
       <button id="run-gpt" class="btn">✨ Run <span id="run-model">gpt-5.4</span></button>
       <div id="run-coverage" class="cov"></div>
+      <div id="run-cost" class="hint"></div>
       <div id="gpt-info" class="info"></div>
     </section>
 

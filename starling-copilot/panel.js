@@ -1413,7 +1413,24 @@ function parseSegSel(str) {
 //   🏷 term hint → soft per-segment "terms" field (tbHintsFor; gated by the toggle)
 //   📖 glossary  → advisory, in the system prompt (brainText)
 // "covering N/total" counts segments carrying ≥1 locked or term-base match.
+// A plain-language estimate of what the next ✨ Run will cost, in GPT passes (see the 💵 card).
+// Deterministic stages (memory/auto-fix/checks) add nothing; 🔎 QA adds a whole second pass;
+// 📷 screenshots add image tokens to each pass. No dollar figure — cost scales with the model.
+function runCost() {
+  const el = $('run-cost'); if (!el) return;
+  const segs = (state && state.segments) || [];
+  if (!segs.length) { el.textContent = ''; return; }
+  const qa = !!(QA && QA.enabled);
+  const shots = !!(SHOT && SHOT.enabled);
+  const passes = qa ? 2 : 1;
+  const model = (typeof MODEL !== 'undefined' && MODEL) || ($('model') && $('model').value) || 'gpt-5.4';
+  el.textContent = `💵 ~${passes} GPT pass${passes === 1 ? '' : 'es'} over ${segs.length} segment(s) on ${model}`
+    + (qa ? ' (🔎 QA on → ×2)' : '')
+    + (shots ? ' · 📷 +image tokens' : '')
+    + ' — deterministic checks & memory are free. See “💵 What each action costs”.';
+}
 function runCoverage() {
+  runCost();
   const el = $('run-coverage'); if (!el) return;
   const segs = (state && state.segments) || [];
   if (!segs.length) { el.textContent = ''; el.className = 'cov'; return; }
@@ -6180,7 +6197,7 @@ async function init() {
   $('run-model').textContent = $('model').value;
 
   $('key-save').addEventListener('click', async () => { await store.set({ key: $('key').value.trim() }); info('harvest-info', 'Key saved.', 'good'); });
-  $('model').addEventListener('change', async () => { await store.set({ model: $('model').value }); $('run-model').textContent = $('model').value; if ($('lq-model')) $('lq-model').textContent = $('model').value; if ($('cw-model')) $('cw-model').textContent = $('model').value; if ($('mq-model')) $('mq-model').textContent = $('model').value; if ($('yc-model')) $('yc-model').textContent = $('model').value; });
+  $('model').addEventListener('change', async () => { await store.set({ model: $('model').value }); $('run-model').textContent = $('model').value; if ($('lq-model')) $('lq-model').textContent = $('model').value; if ($('cw-model')) $('cw-model').textContent = $('model').value; if ($('mq-model')) $('mq-model').textContent = $('model').value; if ($('yc-model')) $('yc-model').textContent = $('model').value; runCost(); });
   $('plural').addEventListener('change', async () => { await store.set({ plural: $('plural').checked }); });
   if ($('wb-engine')) {
     WB.engine = await store.get('wbEngine', 'api');
@@ -6346,9 +6363,9 @@ async function init() {
   // Term base (Starling's inline term references)
   await tbLoad(); tbRefresh();
   await qaLoad();   // independent GPT QA reviewer setting (#7)
-  if ($('qa-toggle')) { $('qa-toggle').checked = !!QA.enabled; $('qa-toggle').addEventListener('change', async (e) => { QA.enabled = e.target.checked; await qaSave(); }); }
+  if ($('qa-toggle')) { $('qa-toggle').checked = !!QA.enabled; $('qa-toggle').addEventListener('change', async (e) => { QA.enabled = e.target.checked; await qaSave(); runCost(); }); }
   await shotLoad();   // screenshot-as-context setting (#4)
-  if ($('shot-toggle')) { $('shot-toggle').checked = !!SHOT.enabled; $('shot-toggle').addEventListener('change', async (e) => { SHOT.enabled = e.target.checked; await shotSave(); }); }
+  if ($('shot-toggle')) { $('shot-toggle').checked = !!SHOT.enabled; $('shot-toggle').addEventListener('change', async (e) => { SHOT.enabled = e.target.checked; await shotSave(); runCost(); }); }
   await promptLoad();   // 🤖 AI-prompt / machine-directed mode
   if ($('pm-force')) { $('pm-force').checked = !!PROMPT.force; $('pm-force').addEventListener('change', async (e) => { PROMPT.force = e.target.checked; await promptSave(); }); }
   if ($('pm-keys')) { $('pm-keys').value = PROMPT.patterns || ''; $('pm-keys').addEventListener('change', async (e) => { PROMPT.patterns = e.target.value.trim(); await promptSave(); }); }
