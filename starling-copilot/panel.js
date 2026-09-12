@@ -1748,10 +1748,26 @@ function updateRevCount() {
 }
 
 async function doWrite() {
-  // Manual (tagged) segments are copy-by-hand only — never auto-written.
-  const edits = state.proposals.filter((p) => p.approved && !p.manual).map((p) => ({ seg: p.seg, text: p.next }));
-  if (!edits.length) { info('write-info', 'Nothing to auto-write (tagged segments are copy-by-hand — use their Copy buttons).', 'err'); return; }
-  if (!confirm(`Write ${edits.length} segment(s) into Starling? This types into each cell — make sure no one else is editing the same task.`)) return;
+  // A segment is written when it's not a copy-by-hand (tagged/chip) row AND it would actually
+  // change the cell: an APPROVED (visible) change, OR an EDGE-ONLY fix — a trailing space / ↵ /
+  // RTL-mark correction that sameRender() treats as "unchanged" and so used to be SILENTLY
+  // SKIPPED. Unticked 🧠 memory-review rows are still held back until you tick them.
+  const rawNext = (p) => String(p.next == null ? '' : p.next);
+  const rawOld = (p) => String(p.old == null ? '' : p.old);
+  const writeNeeded = (p) => !p.manual && (p.approved || (!p.tmOverride && rawNext(p).trim() && rawNext(p) !== rawOld(p)));
+  const toWrite = (state.proposals || []).filter(writeNeeded);
+  const edits = toWrite.map((p) => ({ seg: p.seg, text: p.next }));
+  // Skip accounting — nothing disappears silently: report how many segments aren't written and why.
+  const wset = new Set(toWrite.map((p) => p.seg));
+  const skAll = (state.proposals || []).filter((p) => !wset.has(p.seg));
+  const skManual = skAll.filter((p) => p.manual).length;
+  const skReview = skAll.filter((p) => !p.manual && p.tmOverride).length;   // unticked memory-review
+  const skOther = skAll.length - skManual - skReview;                        // unchanged / no-op
+  const skipNote = skAll.length
+    ? ` · skipped ${skAll.length} (${[skManual && `${skManual} tagged (copy-by-hand)`, skReview && `${skReview} 🧠 memory-review — tick to write`, skOther && `${skOther} unchanged`].filter(Boolean).join(' · ')})`
+    : '';
+  if (!edits.length) { info('write-info', `Nothing to write${skipNote || ' — nothing approved'}.${skReview ? ' Use “🧠 tick memory-review” to include remembered rows.' : ''}`, 'err'); return; }
+  if (!confirm(`Write ${edits.length} segment(s) into Starling?${skAll.length ? ` (${skAll.length} skipped — see the note after)` : ''} This types into each cell — make sure no one else is editing the same task.`)) return;
   $('write').disabled = true;
   info('write-info', `Writing ${edits.length} segment(s)…`);
   $('write-bar').style.width = '0%';
@@ -1820,7 +1836,7 @@ async function doWrite() {
       if (bad.length) parts.push(`${bad.length} failed`);
       const allOk = domN + apiN + storeN === results.length && !bad.length;
       const newNote = filledSegs.size ? ` · ✍ ${newOk}/${filledSegs.size} new translation${filledSegs.size === 1 ? '' : 's'} written${newBad ? ` (${newBad} NOT written — see log)` : ''}` : '';
-      info('write-info', `✅ ${results.length} segment(s): ${parts.join(' · ')}${newNote}${remembered ? ` · 🧠 ${remembered} remembered` : ''}. ${allOk ? (storeN ? 'All verified — if the editor still shows old text, reload (Ctrl+R) to refresh the display.' : 'Starling’s server has them all — if the editor still shows old text, reload (Ctrl+R) to refresh the display.') : ''}`, (bad.length || newBad) ? 'err' : 'good');
+      info('write-info', `✅ ${results.length} segment(s): ${parts.join(' · ')}${newNote}${remembered ? ` · 🧠 ${remembered} remembered` : ''}${skipNote}. ${allOk ? (storeN ? 'All verified — if the editor still shows old text, reload (Ctrl+R) to refresh the display.' : 'Starling’s server has them all — if the editor still shows old text, reload (Ctrl+R) to refresh the display.') : ''}`, (bad.length || newBad) ? 'err' : 'good');
     }
   } catch (e) {
     info('write-info', e.message, 'err');
@@ -6353,6 +6369,11 @@ async function init() {
   // Approve selection (does NOT change the view). Manual/tagged rows are copy-by-hand and never auto-written.
   $('sel-all').addEventListener('click', () => { state.proposals.forEach((p) => p.approved = !p.manual && !sameRender(p.next, p.old)); renderReview(); });
   $('sel-none').addEventListener('click', () => { state.proposals.forEach((p) => p.approved = false); renderReview(); });
+  if ($('sel-memrev')) $('sel-memrev').addEventListener('click', () => {
+    let n = 0; state.proposals.forEach((p) => { if (p.tmOverride && !p.manual) { p.approved = true; n++; } });
+    renderReview();
+    info('write-info', n ? `🧠 Ticked ${n} memory-review row(s) — they'll be written on the next ↩ Write.` : 'No 🧠 memory-review rows to tick.', n ? 'good' : '');
+  });
 
   // Feishu LQA mode
   $('lq-model').textContent = $('model').value;
