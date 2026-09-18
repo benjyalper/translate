@@ -22,7 +22,7 @@
  */
 (() => {
   'use strict';
-  const CS_VERSION = 3;
+  const CS_VERSION = 4;
 
   // ---- context: group / task / project / doc from the URL ------------------
   function ctx() {
@@ -102,9 +102,15 @@
   // ---- harvest -------------------------------------------------------------
   async function harvest() {
     if (!ctx()) throw new Error('Not a YiCAT editor URL (open a task in the editor).');
+    // The segment API's range END is EXCLUSIVE: seg_range=1-500 returns 499 rows (segs 1-499),
+    // 1-200 returns 199, etc. So we CANNOT decide "last page" from rows.length < CHUNK (it's
+    // always short by one and would stop after the very first chunk — the old bug that capped a
+    // 45-page task at ~499 segments). Instead advance past the HIGHEST seqNum actually returned
+    // and keep going until a page comes back empty; dedupe by _id so any overlap is harmless.
     const CHUNK = 500;
-    const all = [];
-    for (let start = 1; ; start += CHUNK) {
+    const all = [], seen = new Set();
+    let start = 1;
+    for (let guard = 0; guard < 4000; guard++) {          // hard safety cap (≈2M segments)
       const end = start + CHUNK - 1;
       let rows;
       try {
@@ -114,9 +120,15 @@
         if (start === 1) throw e;               // genuine failure on the first page
         break;                                  // a later over-range page just means we're done
       }
-      all.push(...rows);
-      if (rows.length < CHUNK) break;           // reached the end
-      if (start > 200000) break;                // hard safety cap
+      if (!rows.length) break;                  // no more segments → done
+      let maxSeq = start - 1, added = 0;
+      for (const row of rows) {
+        if (row && row._id != null && !seen.has(row._id)) { seen.add(row._id); all.push(row); added++; }
+        const sn = row && +row.seqNum; if (!isNaN(sn) && sn > maxSeq) maxSeq = sn;
+      }
+      const next = Math.max(maxSeq + 1, start + 1);   // step to just past the highest seq we got (no boundary gap)
+      if (next <= start || added === 0) break;         // no forward progress → stop (avoids an infinite loop)
+      start = next;
     }
     const segs = all.map((row) => {
       const src = decodeSide(row.srcSegmentAtoms);
@@ -138,17 +150,64 @@
     return segs;
   }
 
+  // ---- pagination (the editor shows PAGE_SIZE segments per page) -------------
+  // YiCAT's editor paginates the segment table (a custom pager: ".page-postion" with an
+  // "N/M" label, prev/next arrows, and a "Go to page" number input). A cell's Tiptap editor
+  // only exists while its page is shown, so writing / scrolling to a segment on another page
+  // first needs to navigate there. Harvest already reads EVERY page through the REST API, so
+  // only write/scroll are page-bound. Page size is a fixed 100 (verified: p1=1-100, p2=101-200).
+  const PAGE_SIZE = 100;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  function rowFor(segId) {
+    try {
+      const esc = (window.CSS && CSS.escape) ? CSS.escape(segId) : String(segId).replace(/["\\]/g, '\\$&');
+      const p = document.querySelector('.tgt-table-cell [contenteditable] p[segid="' + esc + '"]');
+      return p && p.closest('tr.el-table__row, tr, [role="row"]');
+    } catch (e) { return null; }
+  }
+  function pagerInfo() {
+    const el = document.querySelector('.page-postion .page-text');
+    const m = (el && el.textContent || '').match(/(\d+)\s*\/\s*(\d+)/);
+    return { cur: m ? +m[1] : 1, total: m ? +m[2] : 1, hasPager: !!m };
+  }
+  // Jump to page p by driving the "Go to page" number input (set value + Enter), then wait for
+  // the pager's own "N/M" label to read p. Bounded so a stuck render can't hang the write loop.
+  async function gotoPage(p) {
+    const info = pagerInfo();
+    if (!info.hasPager || info.cur === p) return info.cur === p || !info.hasPager;
+    const jump = document.querySelector('.page-postion .el-input__inner');
+    if (!jump) return false;
+    try {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      jump.focus(); setter.call(jump, String(p));
+      jump.dispatchEvent(new Event('input', { bubbles: true }));
+      jump.dispatchEvent(new Event('change', { bubbles: true }));
+      jump.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+      jump.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+    } catch (e) { return false; }
+    for (let i = 0; i < 50; i++) { await sleep(300); if (pagerInfo().cur === p) return true; }
+    return pagerInfo().cur === p;
+  }
+  // Make sure a segment's row is mounted: if it's not in the DOM, navigate to its page (seq→page)
+  // and wait for the row to render. Returns true once the row exists.
+  async function ensureSeg(segId, seq) {
+    if (rowFor(segId)) return true;
+    if (!seq || !pagerInfo().hasPager) return !!rowFor(segId);
+    const page = Math.ceil(seq / PAGE_SIZE);
+    await gotoPage(page);
+    for (let i = 0; i < 30; i++) { if (rowFor(segId)) return true; await sleep(200); }
+    return !!rowFor(segId);
+  }
+
   // ---- scroll a segment into view (isolated world — pure DOM, no Tiptap) ----
   // YiCAT is an Element-UI table (rows in .el-table__body-wrapper). Bringing the row
   // into view lets the human watch each write land, and helps YiCAT mount the cell's
   // editor for a row that was scrolled far off. Located by the target cell's p[segid].
-  function scrollToSeg(segId) {
-    try {
-      const esc = (window.CSS && CSS.escape) ? CSS.escape(segId) : String(segId).replace(/["\\]/g, '\\$&');
-      const p = document.querySelector('.tgt-table-cell [contenteditable] p[segid="' + esc + '"]');
-      const row = p && p.closest('tr.el-table__row, tr, [role="row"]');
-      if (row && row.scrollIntoView) { row.scrollIntoView({ block: 'center' }); return true; }
-    } catch (e) {}
+  // If seq is given and the row isn't on the current page, it navigates to that page first.
+  async function scrollToSeg(segId, seq) {
+    await ensureSeg(segId, seq);
+    const row = rowFor(segId);
+    if (row && row.scrollIntoView) { row.scrollIntoView({ block: 'center' }); return true; }
     return false;
   }
 
@@ -171,13 +230,18 @@
       window.postMessage({ __ycmain: 'req', op: 'write', reqId, segId, text: String(text || ''), tracked }, '*');
     });
   }
+  // Write each edit, navigating across pages as needed. Edits are written in segment order so
+  // the pager advances forward one page at a time (cheapest) instead of thrashing back and forth.
   async function writeAll(edits, tracked) {
+    const list = (edits || []).slice().sort((a, b) => (a.seq || 0) - (b.seq || 0));
     const results = [];
-    for (const e of edits || []) {
-      scrollToSeg(e.segId);                            // bring the row into view (visible + mounts the editor)
-      await new Promise((r) => setTimeout(r, 240));    // let the smooth-scroll + editor mount settle
+    for (const e of list) {
+      const onPage = await ensureSeg(e.segId, e.seq);  // navigate to the segment's page if it isn't mounted
+      if (!onPage) { results.push({ ok: false, segId: e.segId, error: 'could not reach segment #' + (e.seq || '?') + ' (page not found)' }); continue; }
+      await scrollToSeg(e.segId, e.seq);               // bring the row into view (visible + mounts the editor)
+      await sleep(240);                                // let the scroll + editor mount settle
       results.push(await mainWrite(e.segId, stripMarkers(e.text), tracked));
-      await new Promise((r) => setTimeout(r, 180));    // gentle; let the WS save settle
+      await sleep(180);                                // gentle; let the WS save settle
     }
     return results;
   }
@@ -195,7 +259,8 @@
           }
           case 'YC_HARVEST': sendResponse({ ok: true, segments: await harvest() }); break;
           case 'YC_WRITE': sendResponse({ ok: true, results: await writeAll(msg.edits || [], msg.tracked) }); break;
-          case 'YC_SCROLL': sendResponse({ ok: true, found: scrollToSeg(msg.segId) }); break;
+          case 'YC_SCROLL': sendResponse({ ok: true, found: await scrollToSeg(msg.segId, msg.seq) }); break;
+          case 'YC_PAGEINFO': sendResponse({ ok: true, pageSize: PAGE_SIZE, page: pagerInfo() }); break;
           default: sendResponse({ ok: false, error: 'unknown message' });
         }
       } catch (e) {

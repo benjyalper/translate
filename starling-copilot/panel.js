@@ -4109,10 +4109,10 @@ async function ycPropose() {
 function ycCopyText(c) { return ycStripMarkers(c.proposal || ''); }
 
 // Scroll the YiCAT editor to a segment so the human can see / hand-paste it (safe DOM op,
-// no write). Best-effort: a windowed row that isn't in the DOM just returns found:false.
-async function ycScrollTo(segId) {
+// no write). Passing seq lets it navigate across pages (100/page) to reach the segment.
+async function ycScrollTo(segId, seq) {
   if (!segId) return false;
-  try { const r = await sendYC({ type: 'YC_SCROLL', segId }); return !!(r && r.found); }
+  try { const r = await sendYC({ type: 'YC_SCROLL', segId, seq }); return !!(r && r.found); }
   catch (e) { return false; }
 }
 
@@ -4133,7 +4133,7 @@ async function ycWrite(i) {
   c.status_ui = 'writing'; ycRender();
   try {
     const tracked = !$('yc-untracked') || !$('yc-untracked').checked;
-    const r = await sendYC({ type: 'YC_WRITE', tracked, edits: [{ segId: c.segId, text }] });
+    const r = await sendYC({ type: 'YC_WRITE', tracked, edits: [{ segId: c.segId, seq: c.seq, text }] });
     const res = r && r.results && r.results[0];
     if (res && res.ok) { c.status_ui = 'written'; const how = res.tracked ? 'tracked change' : 'untracked draft'; c.note = `✅ Written & verified in segment ${c.seq} (${how}) — review it in YiCAT, then confirm.`; ycLog(`wrote seg ${c.seq} (${c.segId}) [${how}]`); }
     else { c.status_ui = 'proposed'; c.note = '⚠ ' + ((res && res.error) || (r && r.error) || 'write failed'); ycLog(`write failed seg ${c.seq}: ${c.note}`); }
@@ -4151,12 +4151,15 @@ async function ycWriteAll() {
       : 'Nothing approved & untagged to auto-write.', 'err');
     return;
   }
+  // Process in segment order so the editor pages forward once per page (100 segments/page) instead
+  // of jumping back and forth. Each write navigates to its segment's page automatically if needed.
+  pending.sort((a, b) => (a.c.seq || 0) - (b.c.seq || 0));
   let n = 0;
-  for (const { i } of pending) { info('yc-review-info', `Auto-writing ${n + 1}/${pending.length} — scrolling to each segment…`); await ycWrite(i); n++; }
+  for (const { i } of pending) { info('yc-review-info', `Auto-writing ${n + 1}/${pending.length} (seg #${YC.cards[i].seq}) — paging across the task as needed…`); await ycWrite(i); n++; }
   const ok = YC.cards.filter((c) => c.status_ui === 'written').length;
-  const offscreen = YC.cards.filter((c) => c.status_ui !== 'written' && /not rendered|scroll/i.test(c.note || '')).length;
+  const offscreen = YC.cards.filter((c) => c.status_ui !== 'written' && /not rendered|scroll|page not found/i.test(c.note || '')).length;
   info('yc-review-info', `Done · ${ok} written (draft).`
-    + (offscreen ? ` ${offscreen} weren't on screen — scroll to them in YiCAT and re-run.` : '')
+    + (offscreen ? ` ${offscreen} couldn't be reached — re-run to retry.` : '')
     + (taggedApproved ? ` ⚑ ${taggedApproved} tagged skipped — ⤷ Go & copy to paste by hand.` : '')
     + ' Review each and confirm.', 'good');
 }
@@ -4191,8 +4194,8 @@ function ycRender() {
       </div>
     </div>`;
   }).join('') || `<div class="info">${ycFilter === 'manual' ? 'No ✋ paste-by-hand (tagged) segments here.' : ycFilter === 'changed' ? 'No changed segments — GPT left every proposal identical to the current Hebrew. Switch to All to see them.' : 'Harvest a task to begin.'}</div>`;
-  box.querySelectorAll('[data-yc-copy]').forEach((b) => b.addEventListener('click', async () => { const c = YC.cards[+b.dataset.ycCopy]; await panelCopy(ycCopyText(c), b); ycScrollTo(c.segId); }));
-  box.querySelectorAll('[data-yc-go]').forEach((b) => b.addEventListener('click', () => ycScrollTo(YC.cards[+b.dataset.ycGo].segId)));
+  box.querySelectorAll('[data-yc-copy]').forEach((b) => b.addEventListener('click', async () => { const c = YC.cards[+b.dataset.ycCopy]; await panelCopy(ycCopyText(c), b); ycScrollTo(c.segId, c.seq); }));
+  box.querySelectorAll('[data-yc-go]').forEach((b) => b.addEventListener('click', () => { const c = YC.cards[+b.dataset.ycGo]; ycScrollTo(c.segId, c.seq); }));
   box.querySelectorAll('[data-yc-write]').forEach((b) => b.addEventListener('click', () => ycWrite(+b.dataset.ycWrite)));
   box.querySelectorAll('[data-yc-appr]').forEach((b) => b.addEventListener('change', () => { YC.cards[+b.dataset.ycAppr].approved = b.checked; }));
   const ok = YC.cards.filter((c) => c.status_ui === 'written').length;
