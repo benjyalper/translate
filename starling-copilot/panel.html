@@ -773,15 +773,24 @@
         <div class="step"><span class="num">4</span> Review &amp; copy</div>
         <div class="hint"><b>Copy</b> puts a proposal on the clipboard (plain text) so you can paste it into the segment's target cell — you stay in control and confirm each segment yourself. This is the safe default.</div>
         <div class="rev-bar" style="margin-top:8px">
-          <button id="yc-copy-all" class="btn sm">⧉ Copy all approved</button>
+          <span class="rev-grp" title="What to show">
+            <button id="yc-view-changed" class="btn xs ghost active" title="Show only segments GPT changed">Changed</button>
+            <button id="yc-view-all" class="btn xs ghost" title="Show every harvested segment">All</button>
+            <button id="yc-view-manual" class="btn xs ghost" title="Show only ✋ paste-by-hand segments — tagged rows you copy in by hand">✋ Paste by hand</button>
+          </span>
           <span class="spacer"></span>
           <span id="yc-count" class="info"></span>
         </div>
-        <label class="ck danger" style="margin-top:8px"><input type="checkbox" id="yc-enable-write" /> ⚠ Enable auto-write — writes through YiCAT's own editor and <b>reads each cell back to verify</b>. Skips tagged/locked segments; you still confirm each. The segment must be scrolled into view to write.</label>
+        <div class="rev-bar" style="margin-top:6px">
+          <button id="yc-copy-all" class="btn sm">⧉ Copy all approved</button>
+          <button id="yc-appr-all" class="btn sm ghost" title="Tick approve on every proposed segment">✓ Approve all</button>
+          <button id="yc-appr-none" class="btn sm ghost" title="Untick approve on every segment">✗ None</button>
+        </div>
+        <label class="ck danger" style="margin-top:8px"><input type="checkbox" id="yc-enable-write" /> ⚠ Enable auto-write — writes through YiCAT's own editor and <b>reads each cell back to verify</b>. It <b>scrolls to each segment</b> as it writes, so you can watch. Skips tagged segments (paste those by hand); you still confirm each.</label>
         <div id="yc-write-bar" hidden>
           <label class="ck" style="margin-top:6px"><input type="checkbox" id="yc-untracked" /> Write as plain draft (uncheck = <b>tracked change</b>: old struck out, new marked as inserted, like manual editing)</label>
           <div class="rev-bar" style="margin-top:6px">
-            <button id="yc-write-all" class="btn sm ghost">⤵ Auto-write all approved (non-tagged)</button>
+            <button id="yc-write-all" class="btn">⤵ Write all approved (scrolls to each)</button>
           </div>
         </div>
         <div id="yc-cards" class="review"></div>

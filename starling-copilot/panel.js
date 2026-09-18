@@ -4006,6 +4006,15 @@ function mqRender() {
 // YiCAT saves over a WebSocket, so there is no REST write — the human pastes.
 // ============================================================================
 const YC = { ctx: null, cards: [], write: false };
+let ycFilter = 'changed';   // review view: 'changed' | 'all' | 'manual' (✋ paste-by-hand, tagged)
+// A card is "changed" when GPT proposed something that differs from the current Hebrew
+// (an empty current target that now has a proposal counts as changed too).
+function ycIsChanged(c) { return !!(c.proposal || '').trim() && !sameRender(c.proposal, c.tgt || ''); }
+function setYcFilter(m) {
+  ycFilter = m;
+  ['changed', 'all', 'manual'].forEach((k) => { const b = $('yc-view-' + k); if (b) b.classList.toggle('active', k === m); });
+  ycRender();
+}
 function ycLog(...a) { const el = $('yc-log'); if (!el) return; el.textContent += (el.textContent ? '\n' : '') + a.join(' '); el.scrollTop = el.scrollHeight; }
 // strip circled tag markers ①②③㉑…/PUA → plain text (what you paste into a cell)
 function ycStripMarkers(text) {
@@ -4094,6 +4103,14 @@ async function ycPropose() {
 
 function ycCopyText(c) { return ycStripMarkers(c.proposal || ''); }
 
+// Scroll the YiCAT editor to a segment so the human can see / hand-paste it (safe DOM op,
+// no write). Best-effort: a windowed row that isn't in the DOM just returns found:false.
+async function ycScrollTo(segId) {
+  if (!segId) return false;
+  try { const r = await sendYC({ type: 'YC_SCROLL', segId }); return !!(r && r.found); }
+  catch (e) { return false; }
+}
+
 async function ycCopyAll() {
   const pending = YC.cards.filter((c) => c.approved && (c.proposal || '').trim());
   if (!pending.length) { info('yc-review-info', 'Nothing approved to copy.', 'err'); return; }
@@ -4122,24 +4139,39 @@ async function ycWrite(i) {
 async function ycWriteAll() {
   if (!YC.write) { info('yc-review-info', 'Enable experimental auto-write first.', 'err'); return; }
   const pending = YC.cards.map((c, i) => ({ c, i })).filter(({ c }) => c.approved && (c.proposal || '').trim() && !c.tagged && c.status_ui !== 'written');
-  if (!pending.length) { info('yc-review-info', 'Nothing approved & untagged to auto-write.', 'err'); return; }
-  info('yc-review-info', `Auto-writing ${pending.length}…`);
+  const taggedApproved = YC.cards.filter((c) => c.approved && (c.proposal || '').trim() && c.tagged && c.status_ui !== 'written').length;
+  if (!pending.length) {
+    info('yc-review-info', taggedApproved
+      ? `Nothing to auto-write — the ${taggedApproved} approved segment(s) all have inline tags. Use ⤷ Go & copy on each and paste by hand.`
+      : 'Nothing approved & untagged to auto-write.', 'err');
+    return;
+  }
   let n = 0;
-  for (const { i } of pending) { await ycWrite(i); info('yc-review-info', `Auto-writing ${++n}/${pending.length}…`); }
+  for (const { i } of pending) { info('yc-review-info', `Auto-writing ${n + 1}/${pending.length} — scrolling to each segment…`); await ycWrite(i); n++; }
   const ok = YC.cards.filter((c) => c.status_ui === 'written').length;
   const offscreen = YC.cards.filter((c) => c.status_ui !== 'written' && /not rendered|scroll/i.test(c.note || '')).length;
-  info('yc-review-info', `Done · ${ok} written (draft). ${offscreen ? `${offscreen} weren't on screen — scroll to them in YiCAT and re-run. ` : ''}Review each and confirm.`, 'good');
+  info('yc-review-info', `Done · ${ok} written (draft).`
+    + (offscreen ? ` ${offscreen} weren't on screen — scroll to them in YiCAT and re-run.` : '')
+    + (taggedApproved ? ` ⚑ ${taggedApproved} tagged skipped — ⤷ Go & copy to paste by hand.` : '')
+    + ' Review each and confirm.', 'good');
 }
 
 function ycRender() {
   const box = $('yc-cards'); if (!box) return;
-  box.innerHTML = YC.cards.map((c, i) => {
+  const shown = YC.cards.map((c, i) => ({ c, i })).filter(({ c }) =>
+    ycFilter === 'all' ? true :
+    ycFilter === 'manual' ? c.tagged :        // ✋ paste-by-hand (tagged) segments
+    ycIsChanged(c));                          // 'changed' (default)
+  box.innerHTML = shown.map(({ c, i }) => {
     const written = c.status_ui === 'written';
     const badge = written ? '<span class="lqc-badge b-valid">written</span>'
       : c.status_ui === 'writing' ? '<span class="lqc-warn">writing…</span>'
         : c.proposal ? '<span class="lqc-badge b-invalid">proposed</span>' : '';
-    const tag = c.tagged ? '<span class="lqc-warn" title="has inline tags ①②③ — paste by hand">⚑ tags</span>' : '';
+    const tag = c.tagged ? '<span class="lqc-warn" title="has inline tags ①②③ — auto-write skips it; paste by hand">⚑ tags — by hand</span>' : '';
     const canWrite = YC.write && c.proposal && !c.tagged && !written;
+    // Tagged segments can't be auto-written (inline tags), so their primary action is
+    // "⤷ Go & copy" — jump to the segment in YiCAT and copy the text to paste by hand.
+    const copyLabel = c.tagged ? '⤷ Go &amp; copy' : '⧉ Copy';
     return `<div class="lqc wbc">
       <div class="lqc-top"><span class="lqc-seg">#${c.seq}</span>${tag}${badge}</div>
       <div class="lqc-lbl">Source (EN)</div><div class="lqc-src" dir="ltr">${hl(esc(c.src))}</div>
@@ -4148,16 +4180,21 @@ function ycRender() {
       ${c.note ? `<div class="lqc-rat">${esc(c.note)}</div>` : ''}
       <div class="lqc-acts wb-acts">
         <label class="ck" style="margin:0 8px 0 0"><input type="checkbox" data-yc-appr="${i}" ${c.approved ? 'checked' : ''}/> approve</label>
-        <button class="lqc-copy${c.proposal ? '' : ' ghost'}" data-yc-copy="${i}">⧉ Copy</button>
-        ${YC.write ? `<button class="lqc-copy${canWrite ? '' : ' ghost'}" data-yc-write="${i}" ${canWrite ? '' : 'disabled'}>⤵ Write</button>` : ''}
+        <button class="lqc-copy" data-yc-go="${i}" title="Scroll the YiCAT editor to this segment">⤷ Go</button>
+        <button class="lqc-copy${c.proposal ? '' : ' ghost'}" data-yc-copy="${i}" title="${c.tagged ? 'Jump to the segment and copy the text — paste it by hand (tagged)' : 'Copy the proposal and jump to the segment'}">${copyLabel}</button>
+        ${YC.write && !c.tagged ? `<button class="lqc-copy${canWrite ? '' : ' ghost'}" data-yc-write="${i}" ${canWrite ? '' : 'disabled'}>⤵ Write</button>` : ''}
       </div>
     </div>`;
-  }).join('') || '<div class="info">Harvest a task to begin.</div>';
-  box.querySelectorAll('[data-yc-copy]').forEach((b) => b.addEventListener('click', () => panelCopy(ycCopyText(YC.cards[+b.dataset.ycCopy]), b)));
+  }).join('') || `<div class="info">${ycFilter === 'manual' ? 'No ✋ paste-by-hand (tagged) segments here.' : ycFilter === 'changed' ? 'No changed segments — GPT left every proposal identical to the current Hebrew. Switch to All to see them.' : 'Harvest a task to begin.'}</div>`;
+  box.querySelectorAll('[data-yc-copy]').forEach((b) => b.addEventListener('click', async () => { const c = YC.cards[+b.dataset.ycCopy]; await panelCopy(ycCopyText(c), b); ycScrollTo(c.segId); }));
+  box.querySelectorAll('[data-yc-go]').forEach((b) => b.addEventListener('click', () => ycScrollTo(YC.cards[+b.dataset.ycGo].segId)));
   box.querySelectorAll('[data-yc-write]').forEach((b) => b.addEventListener('click', () => ycWrite(+b.dataset.ycWrite)));
   box.querySelectorAll('[data-yc-appr]').forEach((b) => b.addEventListener('change', () => { YC.cards[+b.dataset.ycAppr].approved = b.checked; }));
   const ok = YC.cards.filter((c) => c.status_ui === 'written').length;
-  if ($('yc-count')) $('yc-count').textContent = YC.write ? `${ok}/${YC.cards.length} written` : `${YC.cards.length} ready to copy`;
+  const changedN = YC.cards.filter(ycIsChanged).length;
+  const taggedN = YC.cards.filter((c) => c.tagged).length;
+  if ($('yc-count')) $('yc-count').textContent = `${shown.length} shown · ${changedN} changed · ✋ ${taggedN} by hand`
+    + (YC.write ? ` · ${ok}/${YC.cards.length} written` : '');
 }
 
 function setMode(m) {
@@ -6520,6 +6557,11 @@ async function init() {
   $('yc-propose').addEventListener('click', ycPropose);
   $('yc-copy-all').addEventListener('click', ycCopyAll);
   $('yc-write-all').addEventListener('click', ycWriteAll);
+  if ($('yc-appr-all')) $('yc-appr-all').addEventListener('click', () => { YC.cards.forEach((c) => { if ((c.proposal || '').trim()) c.approved = true; }); ycRender(); });
+  if ($('yc-appr-none')) $('yc-appr-none').addEventListener('click', () => { YC.cards.forEach((c) => { c.approved = false; }); ycRender(); });
+  if ($('yc-view-changed')) $('yc-view-changed').addEventListener('click', () => setYcFilter('changed'));
+  if ($('yc-view-all')) $('yc-view-all').addEventListener('click', () => setYcFilter('all'));
+  if ($('yc-view-manual')) $('yc-view-manual').addEventListener('click', () => setYcFilter('manual'));
   $('yc-enable-write').addEventListener('change', (e) => {
     YC.write = e.target.checked;
     $('yc-write-bar').hidden = !YC.write;

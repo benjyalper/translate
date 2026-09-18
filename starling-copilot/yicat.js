@@ -22,7 +22,7 @@
  */
 (() => {
   'use strict';
-  const CS_VERSION = 2;
+  const CS_VERSION = 3;
 
   // ---- context: group / task / project / doc from the URL ------------------
   function ctx() {
@@ -138,6 +138,20 @@
     return segs;
   }
 
+  // ---- scroll a segment into view (isolated world — pure DOM, no Tiptap) ----
+  // YiCAT is an Element-UI table (rows in .el-table__body-wrapper). Bringing the row
+  // into view lets the human watch each write land, and helps YiCAT mount the cell's
+  // editor for a row that was scrolled far off. Located by the target cell's p[segid].
+  function scrollToSeg(segId) {
+    try {
+      const esc = (window.CSS && CSS.escape) ? CSS.escape(segId) : String(segId).replace(/["\\]/g, '\\$&');
+      const p = document.querySelector('.tgt-table-cell [contenteditable] p[segid="' + esc + '"]');
+      const row = p && p.closest('tr.el-table__row, tr, [role="row"]');
+      if (row && row.scrollIntoView) { row.scrollIntoView({ block: 'center' }); return true; }
+    } catch (e) {}
+    return false;
+  }
+
   // ---- write: bridge to the MAIN world (yicat-main.js drives Tiptap) --------
   function mainWrite(segId, text, tracked) {
     return new Promise((resolve) => {
@@ -160,8 +174,10 @@
   async function writeAll(edits, tracked) {
     const results = [];
     for (const e of edits || []) {
+      scrollToSeg(e.segId);                            // bring the row into view (visible + mounts the editor)
+      await new Promise((r) => setTimeout(r, 240));    // let the smooth-scroll + editor mount settle
       results.push(await mainWrite(e.segId, stripMarkers(e.text), tracked));
-      await new Promise((r) => setTimeout(r, 180));   // gentle; let the WS save settle
+      await new Promise((r) => setTimeout(r, 180));    // gentle; let the WS save settle
     }
     return results;
   }
@@ -179,6 +195,7 @@
           }
           case 'YC_HARVEST': sendResponse({ ok: true, segments: await harvest() }); break;
           case 'YC_WRITE': sendResponse({ ok: true, results: await writeAll(msg.edits || [], msg.tracked) }); break;
+          case 'YC_SCROLL': sendResponse({ ok: true, found: scrollToSeg(msg.segId) }); break;
           default: sendResponse({ ok: false, error: 'unknown message' });
         }
       } catch (e) {
@@ -188,5 +205,5 @@
     return true;   // async sendResponse
   };
   chrome.runtime.onMessage.addListener(onMessage);
-  window.__yc = { ver: CS_VERSION, ctx, harvest, stripMarkers, write: writeAll };
+  window.__yc = { ver: CS_VERSION, ctx, harvest, stripMarkers, write: writeAll, scrollToSeg };
 })();
