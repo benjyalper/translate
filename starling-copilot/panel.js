@@ -1399,7 +1399,7 @@ function parseSegSel(str) {
   if (!nums.size && !ranges.length && !terms.length) return null;
   return (seg) => {
     if (!seg || typeof seg !== 'object') return false;                 // matcher now takes the whole segment
-    const n = parseInt(seg.seg != null ? seg.seg : seg.rank, 10);
+    const n = parseInt(seg.seg != null ? seg.seg : (seg.rank != null ? seg.rank : seg.seq), 10);   // Starling .seg/.rank · YiCAT .seq
     if (!isNaN(n) && (nums.has(n) || ranges.some(([a, b]) => n >= a && n <= b))) return true;
     if (!terms.length) return false;
     const bits = [seg.src, seg.source, seg.tgt, seg.target, seg.key, seg.fullSrc, seg.fullSource, seg.context];
@@ -4053,10 +4053,12 @@ async function ycHarvest() {
     if (!r || !r.ok) throw new Error(r && r.error || 'harvest failed');
     const skipConfirmed = $('yc-skip-confirmed').checked;
     const skipLocked = $('yc-skip-locked').checked;
-    let skippedC = 0, skippedL = 0;
+    const sel = parseSegSel($('yc-range') ? $('yc-range').value : '');   // segment range / term to try out a subset
+    let skippedC = 0, skippedL = 0, skippedR = 0;
     YC.cards = (r.segments || [])
       .filter((s) => {
         if (!String(s.src || '').trim()) return false;              // no source → nothing to do
+        if (sel && !sel(s)) { skippedR++; return false; }           // outside the chosen range / no term match
         if (skipLocked && s.locked) { skippedL++; return false; }
         if (skipConfirmed && s.confirmed) { skippedC++; return false; }
         return true;
@@ -4064,11 +4066,11 @@ async function ycHarvest() {
       .map((s) => ({ ...s, proposal: '', status_ui: 'new', approved: false, note: '' }));
     const total = (r.segments || []).length;
     const tagged = YC.cards.filter((c) => c.tagged).length;
-    info('yc-harvest-info', `Harvested ${YC.cards.length} of ${total} segment(s)${tagged ? ` · ⚠ ${tagged} with tags` : ''}${skippedC ? ` · skipped ${skippedC} confirmed` : ''}${skippedL ? ` · skipped ${skippedL} locked` : ''}.`, 'good');
+    info('yc-harvest-info', `Harvested ${YC.cards.length} of ${total} segment(s)${sel ? ` (range "${$('yc-range').value.trim()}")` : ''}${tagged ? ` · ⚠ ${tagged} with tags` : ''}${skippedC ? ` · skipped ${skippedC} confirmed` : ''}${skippedL ? ` · skipped ${skippedL} locked` : ''}.`, 'good');
     $('yc-propose-card').hidden = YC.cards.length === 0;
     $('yc-review-card').hidden = true;
     ycRender();
-    if (!YC.cards.length) info('yc-harvest-info', 'Nothing to harvest with these filters — untick the skip options to include confirmed/locked segments.', 'err');
+    if (!YC.cards.length) info('yc-harvest-info', sel && skippedR ? `No segment matched "${$('yc-range').value.trim()}" (task has ${total}). Clear the box for all, or widen the range.` : 'Nothing to harvest with these filters — untick the skip options to include confirmed/locked segments.', 'err');
   } catch (e) {
     info('yc-harvest-info', e.message, 'err');
   } finally { btn.disabled = false; }
