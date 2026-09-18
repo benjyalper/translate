@@ -306,17 +306,28 @@
   // unambiguous multi-letter metric units are mapped — ambiguous single letters (m, g, l, t, s)
   // are left to the model/context, and data sizes (KB/MB/GB/TB), %, resolutions stay Latin.
   // Runs BEFORE numBidiFix so the number then gets its LRM wrap and the Hebrew unit sits RTL.
+  // Multi-letter metric units — safe to match case-INSENSITIVELY (no case-variant meaning clashes).
   const UNIT_MAP = [
     ['km/h', 'קמ"ש'], ['kg', 'ק"ג'], ['km', 'ק"מ'], ['cm', 'ס"מ'],
     ['mm', 'מ"מ'], ['mg', 'מ"ג'], ['ml', 'מ"ל'], ['cc', 'סמ"ק']
   ];
-  const HE_UNITS = ['קמ"ש', 'ק"ג', 'ק"מ', 'ס"מ', 'מ"מ', 'מ"ג', 'מ"ל', 'סמ"ק',
+  // Single-letter units are riskier, so each pins its own casing: 'g' → גרם only for LOWERCASE g
+  // (so "5G" network stays), 'l'/'L' → ליטר, 'V' → וולט only for UPPERCASE V (so "5v"/"v." don't
+  // match). The no-letter lookahead keeps "5goals"/"2XL"/"3version" safe. NOTE: 'm' is deliberately
+  // NOT here — after a number it's minutes OR meters OR million (5m views), too ambiguous to force
+  // deterministically; the model handles it by context (see the METRIC UNITS / TIME-UNIT prompt rules).
+  const UNIT_ONE = [['g', 'גרם', ''], ['l', 'ליטר', 'i'], ['V', 'וולט', '']];
+  const HE_UNITS = ['קמ"ש', 'ק"ג', 'ק"מ', 'ס"מ', 'מ"מ', 'מ"ג', 'מ"ל', 'סמ"ק', 'גרם', 'ליטר', 'וולט',
     'קמ״ש', 'ק״ג', 'ק״מ', 'ס״מ', 'מ״מ', 'מ״ג', 'מ״ל', 'סמ״ק'];   // ASCII-quote and gershayim variants
   function unitFix(s) {
     let t = String(s == null ? '' : s);
     if (!t || !/\d/.test(t)) return t;
-    for (const [en, he] of UNIT_MAP) {                                   // Latin metric unit after a number → Hebrew + space
+    for (const [en, he] of UNIT_MAP) {                                   // multi-letter metric unit after a number → Hebrew + space
       const re = new RegExp('(\\d)[ \\u00A0]*' + en.replace('/', '\\/') + '(?![A-Za-z/])', 'gi');
+      t = t.replace(re, '$1 ' + he);
+    }
+    for (const [en, he, flags] of UNIT_ONE) {                            // single-letter units (g/l), each with its own casing
+      const re = new RegExp('(\\d)[ \\u00A0]*' + en + '(?![A-Za-z/])', 'g' + flags);
       t = t.replace(re, '$1 ' + he);
     }
     const heAlt = HE_UNITS.map((u) => u.replace(/"/g, '\\"')).join('|');

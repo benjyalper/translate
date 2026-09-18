@@ -172,6 +172,17 @@ ok('a non-number "kg" (a word) is NOT converted', uf('the pkg here') === 'the pk
 ok('data size KB is left Latin (not a metric unit)', uf('512KB').indexOf('KB') >= 0);
 ok('no digit → untouched', uf('שלום') === 'שלום');
 ok('gershayim Hebrew unit spacing too', uf('12ק״מ') === '12 ק״מ');
+eq('grams: lowercase g → גרם (200g)', uf('משקל 200g נטו'), 'משקל 200 גרם נטו');
+eq('liters: uppercase L → ליטר (2L)', uf('בקבוק 2L'), 'בקבוק 2 ליטר');
+eq('liters: lowercase l → ליטר', uf('5l'), '5 ליטר');
+ok('5G network stays Latin (uppercase G is NOT grams)', uf('רשת 5G מהירה') === 'רשת 5G מהירה');
+ok('"5goals" is not liters (letter follows)', uf('5goals') === '5goals');
+ok('"2XL" size is not liters', uf('חולצה 2XL') === 'חולצה 2XL');
+ok('mg still wins over g (5mg → מ"ג, not מ + גרם)', uf('5mg') === '5 מ"ג');
+ok('ml still wins over l (5ml → מ"ל)', uf('5ml') === '5 מ"ל');
+eq('volts: uppercase V → וולט (12V)', uf('מתח 12V'), 'מתח 12 וולט');
+ok('lowercase v is NOT volts (5v)', uf('5v') === '5v');
+ok('"m" is left untouched (ambiguous minutes/meters/million)', uf('כבל 5m וגם 5m views') === 'כבל 5m וגם 5m views');
 // interaction with numBidiFix (mirrors polish order: unitFix then numBidiFix)
 const polishLike = (s) => PC.numBidiFix(PC.unitFix(s));
 const p1 = polishLike('משקל 450kg כולל');
