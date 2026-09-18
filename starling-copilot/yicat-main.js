@@ -121,13 +121,94 @@
     return { ok: true, tracked: false };
   }
 
+  // ---- tag-preserving write (for segments with real inline tags) -------------
+  // The proposal carries the SAME circled markers (①②③…) the harvest emitted for this cell's
+  // inline tags. We collect the cell's existing `normal-tag` nodes and splice them back at the
+  // marker positions, so a write keeps every tag object intact (a plain-text write would drop
+  // them). Refuses (→ copy-by-hand) unless the marker set exactly matches the cell's tags.
+  const TAG_NODE = 'normal-tag';
+  function markerIndex(ch) {
+    const cp = ch.codePointAt(0);
+    if (cp >= 0x2460 && cp <= 0x2473) return cp - 0x2460;          // ①..⑳  → 0..19
+    if (cp >= 0x3251 && cp <= 0x325F) return cp - 0x3251 + 20;     // ㉑..㉟ → 20..34
+    if (cp >= 0xE000 && cp <= 0xF8FF) return cp - 0xE000 + 35;     // PUA   → 35..
+    return -1;
+  }
+  function collectTags(node, out) {
+    if (!node || typeof node !== 'object') return;
+    if (node.type === TAG_NODE) out.push(node);
+    if (Array.isArray(node.content)) node.content.forEach((c) => collectTags(c, out));
+  }
+  function collectText(node, out) {
+    if (!node || typeof node !== 'object') return;
+    if (node.type === 'text') out.push(node.text || '');
+    if (Array.isArray(node.content)) node.content.forEach((c) => collectText(c, out));
+  }
+  function writeSegTagged(segId, markedText) {
+    const ed = editorFor(segId);
+    if (!ed) return { ok: false, error: 'segment not rendered on screen — scroll to it in YiCAT, then retry' };
+    if (ed.isDestroyed) return { ok: false, error: 'cell editor not live — scroll the segment into view and retry' };
+    if (ed.isEditable === false) return { ok: false, error: 'cell is not editable (locked / read-only)' };
+    let json; try { json = ed.getJSON(); } catch (e) { return { ok: false, error: 'could not read the cell to preserve its tags' }; }
+    const tags = []; collectTags(json, tags);
+    if (!tags.length) return writeSeg(segId, markedText, false);   // no real tags → just a normal write
+
+    // Parse the proposal into ordered [text | tag(index)] parts.
+    const parts = []; let buf = '';
+    for (const ch of Array.from(String(markedText || ''))) {
+      const idx = markerIndex(ch);
+      if (idx >= 0) { parts.push({ t: 'text', v: buf }); buf = ''; parts.push({ t: 'tag', i: idx }); }
+      else buf += ch;
+    }
+    parts.push({ t: 'text', v: buf });
+    const tagParts = parts.filter((p) => p.t === 'tag');
+    if (tagParts.length !== tags.length) return { ok: false, error: 'tag mismatch (' + tagParts.length + ' markers in the text vs ' + tags.length + ' tags in the cell) — paste this one by hand' };
+    const used = new Set();
+    for (const p of tagParts) { if (p.i < 0 || p.i >= tags.length || used.has(p.i)) return { ok: false, error: 'tag markers out of range / duplicated — paste this one by hand' }; used.add(p.i); }
+
+    // Build the new inline content: text nodes + the ORIGINAL tag nodes at the marker positions.
+    const content = [];
+    for (const p of parts) {
+      if (p.t === 'text') { if (p.v) content.push({ type: 'text', text: p.v }); }
+      else content.push(tags[p.i]);                                // marker index k → the k-th tag (harvest order)
+    }
+    if (!content.length) content.push({ type: 'text', text: '' });
+
+    const canToggle = typeof ed.commands.setTrackChangeDisableStatus === 'function';
+    const tc = trackChangeExt(ed);
+    const priorDisabled = (tc && tc.options) ? tc.options.disabled : null;
+    const setTracking = (on) => { if (canToggle) { try { ed.commands.setTrackChangeDisableStatus(!on); } catch (e) {} } };
+    setTracking(false);                                            // untracked: a custom-node replace won't verify under track-change
+    try {
+      const end = ed.state.doc.content.size;
+      ed.chain().focus().setTextSelection({ from: 0, to: end }).insertContent(content).run();
+    } catch (e) {
+      setTracking(priorDisabled == null ? true : !priorDisabled);
+      return { ok: false, error: 'tagged write threw: ' + String(e && e.message || e) };
+    }
+    setTracking(priorDisabled == null ? true : !priorDisabled);
+
+    // Verify: every tag survived AND the visible text matches the proposal's text (markers removed).
+    let after; try { after = ed.getJSON(); } catch (e) { after = null; }
+    const tagsAfter = []; if (after) collectTags(after, tagsAfter);
+    if (tagsAfter.length !== tags.length) return { ok: false, error: 'verify failed — ' + tagsAfter.length + '/' + tags.length + ' tags after write; please fix by hand' };
+    const wantText = norm(parts.filter((p) => p.t === 'text').map((p) => p.v).join(''));
+    const gotArr = []; if (after) collectText(after, gotArr);
+    const gotText = norm(gotArr.join(''));
+    if (gotText !== wantText) return { ok: false, error: 'verify failed — text mismatch after write; please fix by hand', got: gotText.slice(0, 100) };
+    try { ed.commands.blur && ed.commands.blur(); } catch (e) {}
+    return { ok: true, tracked: false, keptTags: tags.length };
+  }
+
   window.addEventListener('message', (ev) => {
     if (ev.source !== window) return;
     const d = ev.data;
     if (!d || d.__ycmain !== 'req') return;
     let res;
     try {
-      res = (d.op === 'write') ? writeSeg(d.segId, d.text, d.tracked) : { ok: false, error: 'unknown op' };
+      res = (d.op === 'write') ? writeSeg(d.segId, d.text, d.tracked)
+        : (d.op === 'writeTagged') ? writeSegTagged(d.segId, d.text)
+          : { ok: false, error: 'unknown op' };
     } catch (e) {
       res = { ok: false, error: String(e && e.message || e) };
     }

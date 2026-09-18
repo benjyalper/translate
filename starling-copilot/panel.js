@@ -4008,7 +4008,7 @@ function mqRender() {
 // side runs the review UI and the GPT proposals (reusing gptBatch/sysPrompt).
 // YiCAT saves over a WebSocket, so there is no REST write — the human pastes.
 // ============================================================================
-const YC = { ctx: null, cards: [], write: false };
+const YC = { ctx: null, cards: [], write: false, writeTagged: false };
 let ycFilter = 'changed';   // review view: 'changed' | 'all' | 'manual' (✋ paste-by-hand, tagged)
 // A card is "changed" when GPT proposed something that differs from the current Hebrew
 // (an empty current target that now has a proposal counts as changed too).
@@ -4127,15 +4127,17 @@ async function ycCopyAll() {
 async function ycWrite(i) {
   if (!YC.write) return;
   const c = YC.cards[i]; if (!c) return;
-  const text = ycStripMarkers(c.proposal || '').trim();
-  if (!text) { c.note = 'Nothing to write — no proposal.'; ycRender(); return; }
-  if (c.tagged) { c.note = '⚠ has tags — auto-write skips tagged segments; paste it by hand.'; ycRender(); return; }
+  const keepTags = !!(c.tagged && YC.writeTagged);          // splice the inline tags back instead of skipping
+  const plain = ycStripMarkers(c.proposal || '').trim();
+  if (!plain) { c.note = 'Nothing to write — no proposal.'; ycRender(); return; }
+  if (c.tagged && !YC.writeTagged) { c.note = '⚠ has inline tags — tick "write tagged" to splice them back, or ⤷ Go & copy to paste by hand.'; ycRender(); return; }
   c.status_ui = 'writing'; ycRender();
   try {
     const tracked = !$('yc-untracked') || !$('yc-untracked').checked;
-    const r = await sendYC({ type: 'YC_WRITE', tracked, edits: [{ segId: c.segId, seq: c.seq, text }] });
+    const text = keepTags ? String(c.proposal || '') : plain;   // keepTags → send the MARKED proposal so tags splice back
+    const r = await sendYC({ type: 'YC_WRITE', tracked, edits: [{ segId: c.segId, seq: c.seq, text, keepTags }] });
     const res = r && r.results && r.results[0];
-    if (res && res.ok) { c.status_ui = 'written'; const how = res.tracked ? 'tracked change' : 'untracked draft'; c.note = `✅ Written & verified in segment ${c.seq} (${how}) — review it in YiCAT, then confirm.`; ycLog(`wrote seg ${c.seq} (${c.segId}) [${how}]`); }
+    if (res && res.ok) { c.status_ui = 'written'; const how = res.keptTags ? `${res.keptTags} tag(s) preserved` : (res.tracked ? 'tracked change' : 'untracked draft'); c.note = `✅ Written & verified in segment ${c.seq} (${how}) — review it in YiCAT, then confirm.`; ycLog(`wrote seg ${c.seq} (${c.segId}) [${how}]`); }
     else { c.status_ui = 'proposed'; c.note = '⚠ ' + ((res && res.error) || (r && r.error) || 'write failed'); ycLog(`write failed seg ${c.seq}: ${c.note}`); }
   } catch (e) { c.status_ui = 'proposed'; c.note = '⚠ ' + e.message; ycLog(`write failed seg ${c.seq}: ${e.message}`); }
   ycRender();
@@ -4143,12 +4145,12 @@ async function ycWrite(i) {
 
 async function ycWriteAll() {
   if (!YC.write) { info('yc-review-info', 'Enable experimental auto-write first.', 'err'); return; }
-  const pending = YC.cards.map((c, i) => ({ c, i })).filter(({ c }) => c.approved && (c.proposal || '').trim() && !c.tagged && c.status_ui !== 'written');
-  const taggedApproved = YC.cards.filter((c) => c.approved && (c.proposal || '').trim() && c.tagged && c.status_ui !== 'written').length;
+  const pending = YC.cards.map((c, i) => ({ c, i })).filter(({ c }) => c.approved && (c.proposal || '').trim() && (!c.tagged || YC.writeTagged) && c.status_ui !== 'written');
+  const taggedApproved = YC.cards.filter((c) => c.approved && (c.proposal || '').trim() && c.tagged && !YC.writeTagged && c.status_ui !== 'written').length;
   if (!pending.length) {
     info('yc-review-info', taggedApproved
-      ? `Nothing to auto-write — the ${taggedApproved} approved segment(s) all have inline tags. Use ⤷ Go & copy on each and paste by hand.`
-      : 'Nothing approved & untagged to auto-write.', 'err');
+      ? `Nothing to auto-write — the ${taggedApproved} approved segment(s) all have inline tags. Tick "write tagged" to splice them, or ⤷ Go & copy to paste by hand.`
+      : 'Nothing approved to auto-write.', 'err');
     return;
   }
   // Process in segment order so the editor pages forward once per page (100 segments/page) instead
@@ -4175,10 +4177,11 @@ function ycRender() {
     const badge = written ? '<span class="lqc-badge b-valid">written</span>'
       : c.status_ui === 'writing' ? '<span class="lqc-warn">writing…</span>'
         : c.proposal ? '<span class="lqc-badge b-invalid">proposed</span>' : '';
-    const tag = c.tagged ? '<span class="lqc-warn" title="has inline tags ①②③ — auto-write skips it; paste by hand">⚑ tags — by hand</span>' : '';
-    const canWrite = YC.write && c.proposal && !c.tagged && !written;
-    // Tagged segments can't be auto-written (inline tags), so their primary action is
-    // "⤷ Go & copy" — jump to the segment in YiCAT and copy the text to paste by hand.
+    const tag = c.tagged ? (YC.writeTagged
+      ? '<span class="lqc-warn" title="has inline tags ①②③ — auto-write will splice them back and verify">⚑ tags — splice</span>'
+      : '<span class="lqc-warn" title="has inline tags ①②③ — auto-write skips it unless you tick “write tagged”; else paste by hand">⚑ tags — by hand</span>') : '';
+    const canWrite = YC.write && c.proposal && (!c.tagged || YC.writeTagged) && !written;
+    // A tagged segment is copy-by-hand unless "write tagged" is on (then Write splices the tags back).
     const copyLabel = c.tagged ? '⤷ Go &amp; copy' : '⧉ Copy';
     return `<div class="lqc wbc">
       <div class="lqc-top"><span class="lqc-seg">#${c.seq}</span>${tag}${badge}</div>
@@ -4190,7 +4193,7 @@ function ycRender() {
         <label class="ck" style="margin:0 8px 0 0"><input type="checkbox" data-yc-appr="${i}" ${c.approved ? 'checked' : ''}/> approve</label>
         <button class="lqc-copy" data-yc-go="${i}" title="Scroll the YiCAT editor to this segment">⤷ Go</button>
         <button class="lqc-copy${c.proposal ? '' : ' ghost'}" data-yc-copy="${i}" title="${c.tagged ? 'Jump to the segment and copy the text — paste it by hand (tagged)' : 'Copy the proposal and jump to the segment'}">${copyLabel}</button>
-        ${YC.write && !c.tagged ? `<button class="lqc-copy${canWrite ? '' : ' ghost'}" data-yc-write="${i}" ${canWrite ? '' : 'disabled'}>⤵ Write</button>` : ''}
+        ${YC.write && (!c.tagged || YC.writeTagged) ? `<button class="lqc-copy${canWrite ? '' : ' ghost'}" data-yc-write="${i}" ${canWrite ? '' : 'disabled'}>${c.tagged ? '⤵ Write (splice tags)' : '⤵ Write'}</button>` : ''}
       </div>
     </div>`;
   }).join('') || `<div class="info">${ycFilter === 'manual' ? 'No ✋ paste-by-hand (tagged) segments here.' : ycFilter === 'changed' ? 'No changed segments — GPT left every proposal identical to the current Hebrew. Switch to All to see them.' : 'Harvest a task to begin.'}</div>`;
@@ -6573,8 +6576,10 @@ async function init() {
   $('yc-enable-write').addEventListener('change', (e) => {
     YC.write = e.target.checked;
     $('yc-write-bar').hidden = !YC.write;
+    if (!YC.write && $('yc-write-tagged')) { $('yc-write-tagged').checked = false; YC.writeTagged = false; }
     ycRender();
   });
+  if ($('yc-write-tagged')) $('yc-write-tagged').addEventListener('change', (e) => { YC.writeTagged = e.target.checked; ycRender(); });
 
   setMode(await store.get('mode_ui', 'starling'));
 

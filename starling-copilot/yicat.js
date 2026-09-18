@@ -22,7 +22,7 @@
  */
 (() => {
   'use strict';
-  const CS_VERSION = 4;
+  const CS_VERSION = 5;
 
   // ---- context: group / task / project / doc from the URL ------------------
   function ctx() {
@@ -212,10 +212,12 @@
   }
 
   // ---- write: bridge to the MAIN world (yicat-main.js drives Tiptap) --------
-  function mainWrite(segId, text, tracked) {
+  // op 'write' = plain-text replace (markers stripped); op 'writeTagged' = tag-preserving
+  // replace (text keeps the ①②③ markers so the MAIN bridge can splice the cell's tags back).
+  function mainWrite(segId, text, tracked, op) {
     return new Promise((resolve) => {
       const reqId = 'yc' + Date.now() + '_' + Math.random().toString(36).slice(2);
-      const timer = setTimeout(() => { cleanup(); resolve({ ok: false, segId, error: 'no response from the page bridge — reload the YiCAT page' }); }, 6000);
+      const timer = setTimeout(() => { cleanup(); resolve({ ok: false, segId, error: 'no response from the page bridge — reload the YiCAT page' }); }, 8000);
       function onMsg(ev) {
         if (ev.source !== window) return;
         const d = ev.data;
@@ -227,7 +229,7 @@
       }
       function cleanup() { clearTimeout(timer); window.removeEventListener('message', onMsg); }
       window.addEventListener('message', onMsg);
-      window.postMessage({ __ycmain: 'req', op: 'write', reqId, segId, text: String(text || ''), tracked }, '*');
+      window.postMessage({ __ycmain: 'req', op: op || 'write', reqId, segId, text: String(text || ''), tracked }, '*');
     });
   }
   // Write each edit, navigating across pages as needed. Edits are written in segment order so
@@ -240,7 +242,10 @@
       if (!onPage) { results.push({ ok: false, segId: e.segId, error: 'could not reach segment #' + (e.seq || '?') + ' (page not found)' }); continue; }
       await scrollToSeg(e.segId, e.seq);               // bring the row into view (visible + mounts the editor)
       await sleep(240);                                // let the scroll + editor mount settle
-      results.push(await mainWrite(e.segId, stripMarkers(e.text), tracked));
+      // keepTags → send the MARKED text and the tag-preserving op; else strip markers, plain write.
+      results.push(e.keepTags
+        ? await mainWrite(e.segId, String(e.text || ''), tracked, 'writeTagged')
+        : await mainWrite(e.segId, stripMarkers(e.text), tracked, 'write'));
       await sleep(180);                                // gentle; let the WS save settle
     }
     return results;

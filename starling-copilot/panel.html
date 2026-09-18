@@ -790,6 +790,7 @@
         <label class="ck danger" style="margin-top:8px"><input type="checkbox" id="yc-enable-write" /> ⚠ Enable auto-write — writes through YiCAT's own editor and <b>reads each cell back to verify</b>. It <b>scrolls to each segment</b> — and <b>turns the editor's pages</b> (100/segment page) automatically — so every approved segment across the whole task is written. Skips tagged segments (paste those by hand); you still confirm each.</label>
         <div id="yc-write-bar" hidden>
           <label class="ck" style="margin-top:6px"><input type="checkbox" id="yc-untracked" /> Write as plain draft (uncheck = <b>tracked change</b>: old struck out, new marked as inserted, like manual editing)</label>
+          <label class="ck" style="margin-top:6px"><input type="checkbox" id="yc-write-tagged" /> ⚑ Also write <b>tagged</b> segments — splices the cell's inline tags back at the ①②③ positions and verifies every tag survived (refuses the segment if the tag count doesn't match). Written as a plain draft (untracked).</label>
           <div class="rev-bar" style="margin-top:6px">
             <button id="yc-write-all" class="btn">⤵ Write all approved (scrolls to each)</button>
           </div>
