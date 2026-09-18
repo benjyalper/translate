@@ -299,6 +299,31 @@
     return out;
   }
 
+  // ---- metric-unit localizer (kg → ק"ג …) + number/unit spacing -------------
+  // A metric unit stuck to (or following) a number is localized to its Hebrew abbreviation with
+  // ONE space: 450kg / 450 kg / 450ק"ג  →  450 ק"ג. Anchored to a preceding DIGIT so a unit is
+  // only converted when it's actually a measurement (never a stray "kg" in a word). Only the
+  // unambiguous multi-letter metric units are mapped — ambiguous single letters (m, g, l, t, s)
+  // are left to the model/context, and data sizes (KB/MB/GB/TB), %, resolutions stay Latin.
+  // Runs BEFORE numBidiFix so the number then gets its LRM wrap and the Hebrew unit sits RTL.
+  const UNIT_MAP = [
+    ['km/h', 'קמ"ש'], ['kg', 'ק"ג'], ['km', 'ק"מ'], ['cm', 'ס"מ'],
+    ['mm', 'מ"מ'], ['mg', 'מ"ג'], ['ml', 'מ"ל'], ['cc', 'סמ"ק']
+  ];
+  const HE_UNITS = ['קמ"ש', 'ק"ג', 'ק"מ', 'ס"מ', 'מ"מ', 'מ"ג', 'מ"ל', 'סמ"ק',
+    'קמ״ש', 'ק״ג', 'ק״מ', 'ס״מ', 'מ״מ', 'מ״ג', 'מ״ל', 'סמ״ק'];   // ASCII-quote and gershayim variants
+  function unitFix(s) {
+    let t = String(s == null ? '' : s);
+    if (!t || !/\d/.test(t)) return t;
+    for (const [en, he] of UNIT_MAP) {                                   // Latin metric unit after a number → Hebrew + space
+      const re = new RegExp('(\\d)[ \\u00A0]*' + en.replace('/', '\\/') + '(?![A-Za-z/])', 'gi');
+      t = t.replace(re, '$1 ' + he);
+    }
+    const heAlt = HE_UNITS.map((u) => u.replace(/"/g, '\\"')).join('|');
+    t = t.replace(new RegExp('(\\d)(' + heAlt + ')', 'g'), '$1 $2');     // Hebrew unit stuck to a number → add the space
+    return t;
+  }
+
   // ---- RTL numeric / operator bidi normalizer -------------------------------
   // A run of digits / comparison operators / units embedded in Hebrew (RTL) is reordered by the
   // Unicode bidi algorithm: "≤" mirrors to "≥", a minus detaches from its number, a range flips
@@ -349,6 +374,6 @@
     CONF, confName, idFold, wordCount, isShort, uiRole, keyNs, ctxSig, ctxConfidence,
     memVariants, memPut, memBest, memDecision, clusterKey, planDedupe,
     termSpans, classifyTerms, filterTermsForPrompt, segRisk, tbApplicability,
-    buildTaskContext, phTokens, phDiff, numBidiFix
+    buildTaskContext, phTokens, phDiff, unitFix, numBidiFix
   };
 });

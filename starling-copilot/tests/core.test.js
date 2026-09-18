@@ -157,5 +157,25 @@ ok('empty string safe', nf('') === '');
 const strip = (s) => String(s).replace(/[​-‏‪-‮⁠-⁩﻿]/g, '');
 ok('LRM-only wrap is invisible after stripping (no false "changed")', strip(nf('100% הושלם')) === '100% הושלם');
 
+// ---------------------------------------------------------------------------
+sec('Metric-unit localizer (unitFix)');
+const uf = PC.unitFix;
+eq('kg after a number → ק"ג with a space (450kg)', uf('משקל 450kg'), 'משקל 450 ק"ג');
+eq('kg with an existing space is normalized (450 kg)', uf('450 kg'), '450 ק"ג');
+eq('Hebrew unit stuck to a number gets the missing space (450ק"ג)', uf('העומס הוא 450ק"ג היום'), 'העומס הוא 450 ק"ג היום');
+eq('km → ק"מ', uf('נסע 12km'), 'נסע 12 ק"מ');
+eq('cm → ס"מ', uf('אורך 30cm'), 'אורך 30 ס"מ');
+eq('mm → מ"מ', uf('עובי 5mm'), 'עובי 5 מ"מ');
+eq('km/h → קמ"ש (before km)', uf('מהירות 80km/h'), 'מהירות 80 קמ"ש');
+eq('ml → מ"ל', uf('נפח 250ml'), 'נפח 250 מ"ל');
+ok('a non-number "kg" (a word) is NOT converted', uf('the pkg here') === 'the pkg here');
+ok('data size KB is left Latin (not a metric unit)', uf('512KB').indexOf('KB') >= 0);
+ok('no digit → untouched', uf('שלום') === 'שלום');
+ok('gershayim Hebrew unit spacing too', uf('12ק״מ') === '12 ק״מ');
+// interaction with numBidiFix (mirrors polish order: unitFix then numBidiFix)
+const polishLike = (s) => PC.numBidiFix(PC.unitFix(s));
+const p1 = polishLike('משקל 450kg כולל');
+ok('polish order: 450kg → 450 ק"ג and the number is LRM-wrapped', p1.indexOf('450') >= 0 && p1.indexOf('ק"ג') >= 0 && p1.indexOf(LRM) >= 0);
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
