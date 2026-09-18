@@ -61,7 +61,7 @@ async function sendMQ(msg) {
 // ---- messaging to the YiCAT tab --------------------------------------------
 async function sendYC(msg) {
   const t = await activeTab();
-  if (!t || !/^http:\/\/129\.226\.170\.49\/yizhe\/yicat\//.test(t.url || '')) {
+  if (!t || !/^https?:\/\/(?:129\.226\.170\.49|gel-yicat\.com)\/yizhe\/yicat\//.test(t.url || '')) {
     throw new Error('Open a YiCAT editor task tab, then click Detect.');
   }
   try {
