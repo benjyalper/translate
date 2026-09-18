@@ -252,7 +252,10 @@ function matchTrailingNL(src, out) {
 }
 // Full output polish: fix internal spacing, restore brand spacing, restore **bold** markers,
 // mirror a trailing literal "\n" escape and the source's full stop, then mirror leading/trailing whitespace.
-function polish(src, out) { return mirrorEdges(src, matchTrailingNL(src, matchTrailingPeriod(src, fixBold(src, fixAmounts(src, fixBrands(fixSpacing(out))))))); }
+// numBidiFix runs LAST (outermost): after all text fixes, wrap number/operator runs in LRM so
+// they render L-to-R in RTL Hebrew (≤ not mirrored, minus real, range in order). Invisible + strip-
+// ped by renderNorm, so it only makes a segment "changed" when it also fixes a real char (hyphen→−).
+function polish(src, out) { return PC.numBidiFix(mirrorEdges(src, matchTrailingNL(src, matchTrailingPeriod(src, fixBold(src, fixAmounts(src, fixBrands(fixSpacing(out)))))))); }
 // "Do these two targets render IDENTICALLY to the eye?" Used only to decide whether a proposal
 // is a *real* change — never to alter what gets written. Ignores exactly the differences a reader
 // can't see: leading/trailing whitespace & newlines (which polish() mirrors from the source), and

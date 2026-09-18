@@ -299,10 +299,56 @@
     return out;
   }
 
+  // ---- RTL numeric / operator bidi normalizer -------------------------------
+  // A run of digits / comparison operators / units embedded in Hebrew (RTL) is reordered by the
+  // Unicode bidi algorithm: "≤" mirrors to "≥", a minus detaches from its number, a range flips
+  // ("≤-25 °C" reads as "≥25-"). This wraps each such run in LRM marks (U+200E) so it renders
+  // left-to-right, converts a hyphen used as a NEGATIVE SIGN to a real minus (U+2212), and puts
+  // one space after a comparison operator: "≤-25 °C" → "‎≤ −25 °C‎", "-20°C ~ 40°C" → "‎−20°C ~ 40°C‎".
+  // Placeholders/tags ({x} {{x}} %s <tag> ①-⑳ and PUA tag markers) are masked out first so they
+  // are never wrapped or altered. LRM is invisible AND is stripped by renderNorm/idFold, so it
+  // never counts as a change nor pollutes memory matching — only a real char change (hyphen→minus,
+  // added space) is a visible edit. A hyphen between letters/digits (a code like "GL-5") is left
+  // alone — only a sign at run start or after a space/operator/open-paren becomes a minus.
+  function wrapTechRun(run) {
+    if (!/\d/.test(run) && !/[<>≤≥]/.test(run)) return run;                    // not a numeric/operator run
+    const lead = (run.match(/^[\s.,:;]*/) || [''])[0];       // keep leading spaces + sentence punctuation outside the wrap
+    const trail = (run.match(/[\s.,:;]*$/) || [''])[0];      // …and trailing, so a sentence period stays glued to the Hebrew
+    let core = run.slice(lead.length, run.length - trail.length);
+    if (!core) return run;
+    core = core.replace(/([<>≤≥])\s*(?=[−–-]?\d)/g, '$1 ');          // one space after a comparison operator
+    core = core.replace(/(^|[\s<>≤≥=(])-(?=\d)/g, '$1−');                 // hyphen negative sign → minus U+2212
+    return lead + '‎' + core + '‎' + trail;
+  }
+  function numBidiFix(s) {
+    const str = String(s == null ? '' : s).replace(/‎/g, '');             // drop our own prior LRM → idempotent (polish may run twice)
+    if (!str || !/\d|[<>≤≥]/.test(str)) return str;                            // nothing numeric to touch
+    const toks = [];
+    const masked = str.replace(/\{\{[^{}]+\}\}|\{[^{}]+\}|%\d*\$?[sd]|<[^<>]+>|[①-⑳㉑-㉟-]/g,
+      (m) => { toks.push(m); return '' + (toks.length - 1) + ''; });
+    const isHeb = (cp) => cp >= 0x0590 && cp <= 0x05FF;
+    const chars = Array.from(masked);
+    let out = '', i = 0;
+    while (i < chars.length) {
+      const c = chars[i];
+      if (c === '') {                                 // masked token: <index> — copy the whole block verbatim
+        let blk = c; i++;
+        while (i < chars.length && chars[i] !== '') { blk += chars[i]; i++; }
+        if (i < chars.length) { blk += chars[i]; i++; }     // closing 
+        out += blk; continue;
+      }
+      if (isHeb(c.codePointAt(0))) { out += c; i++; continue; }   // Hebrew letter → breaker
+      let run = '';
+      while (i < chars.length && chars[i] !== '' && !isHeb(chars[i].codePointAt(0))) { run += chars[i]; i++; }
+      out += wrapTechRun(run);
+    }
+    return out.replace(/(\d+)/g, (_, k) => toks[+k] || '');
+  }
+
   return {
     CONF, confName, idFold, wordCount, isShort, uiRole, keyNs, ctxSig, ctxConfidence,
     memVariants, memPut, memBest, memDecision, clusterKey, planDedupe,
     termSpans, classifyTerms, filterTermsForPrompt, segRisk, tbApplicability,
-    buildTaskContext, phTokens, phDiff
+    buildTaskContext, phTokens, phDiff, numBidiFix
   };
 });

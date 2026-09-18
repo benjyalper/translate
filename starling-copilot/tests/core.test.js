@@ -121,5 +121,41 @@ ok('intact placeholder passes', PC.phDiff('by {s_username}', 'על ידי {s_use
 ok('dropped placeholder caught', PC.phDiff('by {s_username}', 'על ידי המשתמש').length === 1);
 ok('altered placeholder caught', PC.phDiff('{s_username}', '{s_userName}').length > 0);
 
+// ---------------------------------------------------------------------------
+sec('RTL numeric / operator bidi normalizer (numBidiFix)');
+const LRM = '‎', MIN = '−';
+const nf = PC.numBidiFix;
+// core example: ≤-25 °C → ≤ −25 °C, wrapped, operator NOT mirrored, real minus
+const r1 = nf('טמפרטורה ≤-25 °C');
+ok('adds a space after the comparison operator', r1.indexOf('≤ ') >= 0);
+ok('hyphen sign becomes a real minus (U+2212)', r1.indexOf('≤ ' + MIN + '25') >= 0);
+ok('operator ≤ is preserved (not mirrored to ≥)', r1.indexOf('≥') < 0 && r1.indexOf('≤') >= 0);
+ok('the numeric run is wrapped in LRM marks', r1.indexOf(LRM) >= 0);
+// negative + range
+const r2 = nf('הרכב היא -20°C ~ 40°C.');
+ok('leading negative hyphen → minus', r2.indexOf(MIN + '20°C') >= 0);
+ok('range tilde preserved', r2.indexOf('~ 40°C') >= 0);
+ok('trailing sentence period stays outside the LRM wrap', /\.$/.test(r2) && r2.indexOf(MIN + '20°C ~ 40°C' + LRM) >= 0);
+// a hyphen inside a code (letters/digits) is NOT a sign
+const r3 = nf('דגם AR14J-2 ותקן SAE 1560 GL-5');
+ok('hyphen inside a code (GL-5) is left as a hyphen', r3.indexOf('GL-5') >= 0 && r3.indexOf('GL' + MIN) < 0);
+ok('hyphen inside a code (AR14J-2) is left as a hyphen', r3.indexOf('AR14J-2') >= 0);
+// placeholders are never wrapped or altered
+const r4 = nf('נותרו {s_num1} מתוך {s_num2} פריטים');
+ok('placeholder-only text (no literal number) is untouched', r4 === 'נותרו {s_num1} מתוך {s_num2} פריטים');
+ok('placeholders survive verbatim (phDiff clean)', PC.phDiff('{s_num1} {s_num2}', r4).length === 0);
+const r5 = nf('הושלמו {num}% מתוך 50% מהמשימות');
+ok('placeholder {num} intact while literal 50% is wrapped', r5.indexOf('{num}%') >= 0 && r5.indexOf(LRM + '50%' + LRM) >= 0);
+// tag markers (①) are breakers, preserved
+const r6 = nf('30°C ① הטמפרטורה');
+ok('tag marker ① preserved', r6.indexOf('①') >= 0);
+ok('30°C before the tag is wrapped', r6.indexOf(LRM + '30°C' + LRM) >= 0);
+// no-op cases
+ok('pure Hebrew (no digits) is returned unchanged', nf('שלום עולם') === 'שלום עולם');
+ok('empty string safe', nf('') === '');
+// invisible: renderNorm-style strip (bidi controls) makes an LRM-only change invisible
+const strip = (s) => String(s).replace(/[​-‏‪-‮⁠-⁩﻿]/g, '');
+ok('LRM-only wrap is invisible after stripping (no false "changed")', strip(nf('100% הושלם')) === '100% הושלם');
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
