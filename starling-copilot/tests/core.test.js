@@ -156,6 +156,12 @@ ok('empty string safe', nf('') === '');
 // invisible: renderNorm-style strip (bidi controls) makes an LRM-only change invisible
 const strip = (s) => String(s).replace(/[​-‏‪-‮⁠-⁩﻿]/g, '');
 ok('LRM-only wrap is invisible after stripping (no false "changed")', strip(nf('100% הושלם')) === '100% הושלם');
+// Hebrew prefix maqaf (מ-30 "from 30", כ-20 "about 20") must NOT become a minus sign
+ok('מ-30 keeps its prefix hyphen (not a minus)', nf('טמפרטורה מ-30 מעלות').indexOf('מ-') >= 0 && nf('טמפרטורה מ-30 מעלות').indexOf(MIN) < 0);
+ok('כ-20 keeps its prefix hyphen (not a minus)', nf('כ-20 מעלות').indexOf('כ-') >= 0 && nf('כ-20 מעלות').indexOf(MIN) < 0);
+ok('ב-5 keeps its prefix hyphen', nf('ב-5 דקות').indexOf('ב-') >= 0 && nf('ב-5 דקות').indexOf(MIN) < 0);
+ok('a genuine negative after a space still becomes a minus (של -30)', nf('של -30 מעלות').indexOf(MIN + '30') >= 0);
+ok('a range hyphen 12-15 stays a hyphen', nf('טווח 12-15').indexOf('12-15') >= 0);
 
 // ---------------------------------------------------------------------------
 sec('Metric-unit localizer (unitFix)');

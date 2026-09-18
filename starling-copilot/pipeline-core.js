@@ -318,7 +318,8 @@
   // deterministically; the model handles it by context (see the METRIC UNITS / TIME-UNIT prompt rules).
   const UNIT_ONE = [['g', 'גרם', ''], ['l', 'ליטר', 'i'], ['V', 'וולט', '']];
   const HE_UNITS = ['קמ"ש', 'ק"ג', 'ק"מ', 'ס"מ', 'מ"מ', 'מ"ג', 'מ"ל', 'סמ"ק', 'גרם', 'ליטר', 'וולט',
-    'קמ״ש', 'ק״ג', 'ק״מ', 'ס״מ', 'מ״מ', 'מ״ג', 'מ״ל', 'סמ״ק'];   // ASCII-quote and gershayim variants
+    'קמ״ש', 'ק״ג', 'ק״מ', 'ס״מ', 'מ״מ', 'מ״ג', 'מ״ל', 'סמ״ק',
+    'מטרים', 'מטר', 'קילוגרם', 'קילומטר', 'שניות', 'דקות', 'שעות'];   // gershayim + spelled-out word forms
   function unitFix(s) {
     let t = String(s == null ? '' : s);
     if (!t || !/\d/.test(t)) return t;
@@ -376,7 +377,15 @@
       if (isHeb(c.codePointAt(0))) { out += c; i++; continue; }   // Hebrew letter → breaker
       let run = '';
       while (i < chars.length && chars[i] !== '' && !isHeb(chars[i].codePointAt(0))) { run += chars[i]; i++; }
-      out += wrapTechRun(run);
+      // A hyphen directly attached to a preceding Hebrew letter is a PREFIX maqaf (מ-30 = "from 30",
+      // כ-20 = "about 20", ב-5), NOT a negative sign — peel it off so it stays a hyphen (outside the
+      // wrap, glued to the Hebrew prefix) and is never turned into a minus.
+      const prev = out.length ? out[out.length - 1] : '';
+      if (run && (run[0] === '-' || run[0] === '־') && prev && isHeb(prev.codePointAt(0))) {
+        out += run[0] + wrapTechRun(run.slice(1));
+      } else {
+        out += wrapTechRun(run);
+      }
     }
     return out.replace(/(\d+)/g, (_, k) => toks[+k] || '');
   }
