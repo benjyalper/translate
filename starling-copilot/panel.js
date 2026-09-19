@@ -420,7 +420,7 @@ const STYLE_GUIDE =
   '  • TOOLTIP / INLINE INSTRUCTION / CTA / BODY sentence telling the user to act NOW → IMPERATIVE slash: it has a direct object (often "your …"), a purpose clause ("… to …"), or is a full imperative sentence. "Save your changes" → שמור/שמרי את השינויים; "Record your ending" → הקלט/הקליטי את הסיום; promo "Get funds…" → קבל/י מימון….\n' +
   '  • BARE VERB with no other signal ("Save" / "Share" / "Follow" alone) → default to the GERUND (it is usually a button/label). BUT in PROOFREAD mode, if the existing target already uses a register that is valid for a plausible role, KEEP it — do NOT flip שמירה↔שמור/שמרי just because the source is a bare verb.\n' +
   '  • FLAG ONLY AS A LAST RESORT: if the item has a "key" or "context", they resolve the role — use them and do NOT set "flag". Only when NO "key" and NO "context" are provided AND the English is genuinely ambiguous AND the existing target does not settle it, return your best-guess Hebrew and set "flag" to a short note of the dilemma so a human can check the real context — e.g. "Save: gerund (שמירה) if a button, imperative (שמור/שמרי) if a tooltip — assumed button". Leave "flag" empty otherwise.\n' +
-  '- SLASH FORM (gender-inclusive 2nd person) — short vs long: use the SHORT form (masculine word + "/" + feminine ending) ONLY when both genders share the same written stem: גלה/י, שתף/י, שלם/י, בחר/י, לחץ/י. When the spelling differs (typically a חולם-מלא ו in the masculine that the feminine drops, OR a הפעיל/פועל verb whose feminine inserts a י), write BOTH words IN FULL: בדוק/בדקי, אמור/אמרי, שמור/שמרי, כתוב/כתבי, and especially הרם/הרימי, משוך/משכי, הזז/הזיזי, הנמך/הנמיכי, החלף/החליפי, החזר/החזירי (NEVER the short הרם/י, משוך/י, הזז/י, הנמך/י, החלף/י, החזר/י — those misread). Test: if "masculine + /י" would misread, use the full long form.\n' +
+  '- SLASH FORM (gender-inclusive 2nd person) — short vs long: use the SHORT form (masculine word + "/" + feminine ending) ONLY when both genders share the same written stem: גלה/י, שתף/י, שלם/י, בחר/י, לחץ/י. When the spelling differs (typically a חולם-מלא ו in the masculine that the feminine drops, OR a הפעיל/פועל verb whose feminine inserts a י), write BOTH words IN FULL: בדוק/בדקי, אמור/אמרי, שמור/שמרי, כתוב/כתבי, and especially הרם/הרימי, משוך/משכי, הזז/הזיזי, הנמך/הנמיכי, החלף/החליפי, החזר/החזירי, החזק/החזיקי, הרחק/הרחיקי, הארך/האריכי, הגדר/הגדירי (NEVER the short הרם/י, משוך/י, הזז/י, הנמך/י, החלף/י, החזר/י, החזק/י, הרחק/י, הארך/י, הגדר/י — those misread). Test: if "masculine + /י" would misread, use the full long form.\n' +
   '- DO NOT TRANSLATE (DNT): "TikTok" is a brand name — always keep it EXACTLY as "TikTok" (Latin, same casing); never translate or transliterate it. A Hebrew prefix attaches with a maqaf: ב-TikTok, ל-TikTok, ה-TikTok, מ-TikTok.\n' +
   '- CURRENCY POSITION: put the currency symbol or code immediately AFTER the number, adjacent, no space, for every currency (symbols and letter codes alike): "$20" → 20$, "£40" → 40£, "Rp1,000" → 1,000Rp, "₪50" → 50₪, "MX$67,000" → 67,000MX$. Keep the digits and the currency identity exactly as the source — only the symbol/code moves after the number.\n';
 
@@ -1085,6 +1085,10 @@ const FIX_SEED = [
   { from: 'הנמך/י', to: 'הנמך/הנמיכי' }, { from: 'הנמיכו', to: 'הנמך/הנמיכי' },
   { from: 'החלף/י', to: 'החלף/החליפי' }, { from: 'החליפו', to: 'החלף/החליפי' },
   { from: 'החזר/י', to: 'החזר/החזירי' }, { from: 'החזירו', to: 'החזר/החזירי' },
+  { from: 'החזק/י', to: 'החזק/החזיקי' }, { from: 'החזיקו', to: 'החזק/החזיקי' },
+  { from: 'הרחק/י', to: 'הרחק/הרחיקי' }, { from: 'הרחיקו', to: 'הרחק/הרחיקי' },
+  { from: 'הארך/י', to: 'הארך/האריכי' }, { from: 'האריכו', to: 'הארך/האריכי' },
+  { from: 'הגדר/י', to: 'הגדר/הגדירי' }, { from: 'הגדירו', to: 'הגדר/הגדירי' },
 ];
 let FIX = { rules: [], enabled: true, seeded: false, updatedAt: 0 };
 async function fixLoad() {
@@ -1098,7 +1102,7 @@ async function fixLoad() {
   }
   // One-time top-up: when new built-in rules ship, add the ones an already-seeded user is missing
   // (matched by `from`), ONCE per seedVersion — so it never re-adds a rule the user later deletes.
-  const SEED_VERSION = 2;
+  const SEED_VERSION = 3;
   if ((FIX.seedVersion || 0) < SEED_VERSION) {
     const have = new Set((FIX.rules || []).map((r) => String(r.from == null ? '' : r.from).trim()));
     let added = 0;
