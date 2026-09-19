@@ -186,9 +186,21 @@ ok('"5goals" is not liters (letter follows)', uf('5goals') === '5goals');
 ok('"2XL" size is not liters', uf('חולצה 2XL') === 'חולצה 2XL');
 ok('mg still wins over g (5mg → מ"ג, not מ + גרם)', uf('5mg') === '5 מ"ג');
 ok('ml still wins over l (5ml → מ"ל)', uf('5ml') === '5 מ"ל');
-eq('volts: uppercase V → וולט (12V)', uf('מתח 12V'), 'מתח 12 וולט');
+eq('volts stay the Latin symbol V, spaced (12V → 12 V)', uf('מתח 12V'), 'מתח 12 V');
+eq('a translated וולט is turned back into V (12 וולט → 12 V)', uf('מתח 12 וולט'), 'מתח 12 V');
 ok('lowercase v is NOT volts (5v)', uf('5v') === '5v');
-ok('"m" is left untouched (ambiguous minutes/meters/million)', uf('כבל 5m וגם 5m views') === 'כבל 5m וגם 5m views');
+ok('"m" is left untouched by default (ambiguous minutes/meters/million)', uf('כבל 5m וגם 5m views') === 'כבל 5m וגם 5m views');
+// rpm / r/min → סיבובים/דקה (always on)
+eq('r/min after a number → סיבובים/דקה, spaced', uf('מהירות 1500r/min'), 'מהירות 1500 סיבובים/דקה');
+eq('r/min with a space → סיבובים/דקה', uf('1500 r/min'), '1500 סיבובים/דקה');
+eq('rpm → סיבובים/דקה', uf('at 3000 rpm'), 'at 3000 סיבובים/דקה');
+eq('standalone r/min (table header) → סיבובים/דקה', uf('(r/min)'), '(סיבובים/דקה)');
+// measurement-mode toggle: m→מ' , s→שנ' only when the 2nd arg is true
+eq('measure OFF: 5m stays', uf('כבל 5m'), 'כבל 5m');
+eq('measure ON: 5m → 5 מ\'', uf('כבל 5m', true), "כבל 5 מ'");
+eq('measure ON: 20s → 20 שנ\'', uf('תוך 20s', true), "תוך 20 שנ'");
+ok('measure ON: uppercase 5M stays (million/mega)', uf('5M', true) === '5M');
+ok('measure ON: r/min still not broken by the m rule', uf('1500r/min', true) === '1500 סיבובים/דקה');
 // interaction with numBidiFix (mirrors polish order: unitFix then numBidiFix)
 const polishLike = (s) => PC.numBidiFix(PC.unitFix(s));
 const p1 = polishLike('משקל 450kg כולל');

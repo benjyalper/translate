@@ -316,20 +316,39 @@
   // match). The no-letter lookahead keeps "5goals"/"2XL"/"3version" safe. NOTE: 'm' is deliberately
   // NOT here — after a number it's minutes OR meters OR million (5m views), too ambiguous to force
   // deterministically; the model handles it by context (see the METRIC UNITS / TIME-UNIT prompt rules).
-  const UNIT_ONE = [['g', 'גרם', ''], ['l', 'ליטר', 'i'], ['V', 'וולט', '']];
-  const HE_UNITS = ['קמ"ש', 'ק"ג', 'ק"מ', 'ס"מ', 'מ"מ', 'מ"ג', 'מ"ל', 'סמ"ק', 'גרם', 'ליטר', 'וולט',
+  const UNIT_ONE = [['g', 'גרם', ''], ['l', 'ליטר', 'i']];
+  // Ambiguous single letters — ONLY converted in "measurement mode" (a per-task toggle), because
+  // outside a measurement doc "5m" is million/minutes and "5s" is a model name (iPhone 5s). Lowercase
+  // only, so "5M"/"5S" stay. In measurement mode: m→מ' (meters), s→שנ' (seconds).
+  const MEASURE_ONE = [['m', "מ'", ''], ['s', "שנ'", '']];
+  const HE_UNITS = ['קמ"ש', 'ק"ג', 'ק"מ', 'ס"מ', 'מ"מ', 'מ"ג', 'מ"ל', 'סמ"ק', 'גרם', 'ליטר',
     'קמ״ש', 'ק״ג', 'ק״מ', 'ס״מ', 'מ״מ', 'מ״ג', 'מ״ל', 'סמ״ק',
     'מטרים', 'מטר', 'קילוגרם', 'קילומטר', 'שניות', 'דקות', 'שעות'];   // gershayim + spelled-out word forms
-  function unitFix(s) {
+  function unitFix(s, measure) {
     let t = String(s == null ? '' : s);
-    if (!t || !/\d/.test(t)) return t;
+    if (!t || !/\d|r\/min|rpm|וולט/i.test(t)) return t;
+    // rpm / r/min → "סיבובים/דקה" (ALWAYS): digit-adjacent (adds a space) and standalone.
+    t = t.replace(/(\d)[  ]*r\/min(?![A-Za-z])/gi, '$1 סיבובים/דקה');
+    t = t.replace(/(^|[^A-Za-z0-9\/])r\/min(?![A-Za-z])/gi, '$1סיבובים/דקה');
+    t = t.replace(/(\d)[  ]*rpm(?![A-Za-z])/gi, '$1 סיבובים/דקה');
+    t = t.replace(/(^|[^A-Za-z0-9\/])rpm(?![A-Za-z])/gi, '$1סיבובים/דקה');
+    // Volts stay the LATIN symbol "V" (never translated) — space it after a number, and turn a
+    // translated "וולט" back into "V".
+    t = t.replace(/(\d)[  ]*וולט(?![א-ת])/g, '$1 V');
+    t = t.replace(/(\d)[  ]*V(?![A-Za-z])/g, '$1 V');
     for (const [en, he] of UNIT_MAP) {                                   // multi-letter metric unit after a number → Hebrew + space
       const re = new RegExp('(\\d)[ \\u00A0]*' + en.replace('/', '\\/') + '(?![A-Za-z/])', 'gi');
       t = t.replace(re, '$1 ' + he);
     }
-    for (const [en, he, flags] of UNIT_ONE) {                            // single-letter units (g/l), each with its own casing
+    for (const [en, he, flags] of UNIT_ONE) {                            // single-letter units (g/l/V), each with its own casing
       const re = new RegExp('(\\d)[ \\u00A0]*' + en + '(?![A-Za-z/])', 'g' + flags);
       t = t.replace(re, '$1 ' + he);
+    }
+    if (measure) {                                                       // measurement-task toggle: m→מ' , s→שנ'
+      for (const [en, he, flags] of MEASURE_ONE) {
+        const re = new RegExp('(\\d)[ \\u00A0]*' + en + '(?![A-Za-z/])', 'g' + (flags || ''));
+        t = t.replace(re, '$1 ' + he);
+      }
     }
     const heAlt = HE_UNITS.map((u) => u.replace(/"/g, '\\"')).join('|');
     t = t.replace(new RegExp('(\\d)(' + heAlt + ')', 'g'), '$1 $2');     // Hebrew unit stuck to a number → add the space
