@@ -1604,8 +1604,8 @@ function runCost() {
   const qa = !!(QA && QA.enabled);
   const shots = !!(SHOT && SHOT.enabled);
   const passes = qa ? 2 : 1;
-  const model = (typeof MODEL !== 'undefined' && MODEL) || ($('model') && $('model').value) || 'gpt-5.4';
-  el.textContent = `💵 ~${passes} GPT pass${passes === 1 ? '' : 'es'} over ${segs.length} segment(s) on ${model}`
+  const model = (typeof MODEL !== 'undefined' && MODEL) || ($('model') && $('model').value) || 'claude-opus-5';
+  el.textContent = `💵 ~${passes} model pass${passes === 1 ? '' : 'es'} over ${segs.length} segment(s) on ${model}`
     + (qa ? ' (🔎 QA on → ×2)' : '')
     + (shots ? ' · 📷 +image tokens' : '')
     + ' — deterministic checks & memory are free. See “💵 What each action costs”.';
@@ -6425,7 +6425,11 @@ async function tbImport(file) {
 
 async function init() {
   $('key').value = await store.get('key', '');
+  // One-time switch (2026-09-28): Claude Opus 5 won the Claude-vs-GPT pilot, so an existing saved
+  // model (e.g. gpt-5.4) is moved to it ONCE. Afterwards the dropdown choice sticks as usual.
+  if (!(await store.get('modelClaudeDefault', false))) { await store.set({ model: 'claude-opus-5', modelClaudeDefault: true }); }
   $('model').value = await store.get('model', 'claude-opus-5');
+  if ($('run-model')) $('run-model').textContent = $('model').value;
   if ($('akey')) $('akey').value = await store.get('akey', '');
   await llmUsageLoad(); llmCostRender();
   if ($('llm-cost-reset')) $('llm-cost-reset').addEventListener('click', async () => { if (!confirm('Reset the LLM cost log? (Rates are kept.)')) return; LLMU = { days: {} }; try { await store.set({ llmUsage: LLMU }); } catch (e) {} llmCostRender(); });
