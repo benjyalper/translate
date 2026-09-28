@@ -1132,6 +1132,20 @@
           </select>
         </div>
 
+        <!-- Pre-filled targets: PM packages often arrive with old/TM
+             translations already in place (incl. locked ones). -->
+        <div class="tlang-row" style="margin-top:.5rem;align-items:center;flex-wrap:wrap">
+          <span class="tlang-lbl">Pre-filled:</span>
+          <select id="tr-prefilled" style="flex:1;min-width:260px;padding:.45rem .7rem;background:#0f0f17;border:1px solid var(--border);border-radius:6px;color:#e2e8f0;font-size:.8rem">
+            <option value="review" selected>Review &amp; fix pre-filled targets + re-translate unconfirmed TM fuzzies (recommended)</option>
+            <option value="drafts">Only re-translate unconfirmed TM fuzzies (Draft), keep confirmed pre-fills</option>
+            <option value="skip">Translate empty segments only (legacy)</option>
+          </select>
+          <label style="display:flex;align-items:center;gap:.35rem;font-size:.75rem;color:#cbd5e1;cursor:pointer" title="Locked segments were pre-filled by the PM. Fixing them is usually right, but tell the PM — the bilingual .xlsx marks every change.">
+            <input type="checkbox" id="tr-review-locked" checked/> include PM-locked
+          </label>
+        </div>
+
         <button class="tbtn gold" id="tr-btn" onclick="trTranslate()" disabled>🚀 Translate</button>
 
         <!-- Progress -->
@@ -4790,9 +4804,16 @@ function trExtractSegments(content) {
   let um;
   while ((um = unitRe.exec(content)) !== null) {
     const unitId = um[1], unitBody = um[2];
+    // Scan ONLY <seg-source> for source mrks. Scanning the whole unit body
+    // also matched the filled seg-mrks inside <target>, so every pre-filled
+    // segment appeared twice (the 2nd time with the Hebrew as "source") —
+    // double-counting pre-translated words and making the Proofreader review
+    // Hebrew-vs-Hebrew. Units without <seg-source> fall back to the body.
+    const segSrc = unitBody.match(/<seg-source>([\s\S]*?)<\/seg-source>/);
+    const srcScope = segSrc ? segSrc[1] : unitBody;
     const srcRe = /<mrk\s+mtype="seg"\s+mid="(\d+)">([\s\S]*?)<\/mrk>/g;
     let sm;
-    while ((sm = srcRe.exec(unitBody)) !== null) {
+    while ((sm = srcRe.exec(srcScope)) !== null) {
       const mid = sm[1], rawSrc = sm[2];
       // Extract inline tags as placeholders and store the map on the segment
       const { text: sourceText, tagMap } = trXmlToPlaceholders(rawSrc);
@@ -4802,7 +4823,14 @@ function trExtractSegments(content) {
         const tgtMrk = tgtBlock[1].match(new RegExp(`<mrk\\s+mtype="seg"\\s+mid="${mid}">(([\\s\\S]*?))<\\/mrk>`));
         if (tgtMrk) targetText = tgtMrk[2].trim();
       }
-      segs.push({ unitId, mid, rawSrc, sourceText, targetText, tagMap });
+      // Segment status from <sdl:seg id="N" …> — tells a confirmed pre-fill
+      // apart from an unconfirmed TM fuzzy (conf="Draft") and a PM-locked one.
+      const segDef = unitBody.match(new RegExp(`<sdl:seg\\s+id="${mid}"([^>]*)>`));
+      const segAttrs = segDef ? segDef[1] : '';
+      const conf    = (segAttrs.match(/\bconf="([^"]*)"/) || [])[1] || '';
+      const percent = (segAttrs.match(/\bpercent="([^"]*)"/) || [])[1] || '';
+      const locked  = /\blocked="true"/.test(segAttrs);
+      segs.push({ unitId, mid, rawSrc, sourceText, targetText, tagMap, conf, percent, locked });
     }
   }
   return segs;
@@ -5804,7 +5832,9 @@ function gmClearTM() {
 
 async function trTranslateBatch(texts, apiKey, model) {
   const chosen = model || (document.getElementById('tr-model') && document.getElementById('tr-model').value) || 'gpt-5.4-mini';
-  const numbered = texts.map((t, i) => `${i+1}. ${t}`).join('\n');
+  // Line breaks inside a segment travel as {{BR}}: the numbered one-line-per-
+  // item format (and parseNumberedResponse) would otherwise flatten them.
+  const numbered = texts.map((t, i) => `${i+1}. ${String(t).replace(/\r?\n/g, '{{BR}}')}`).join('\n');
 
   // Build base system prompt — uses the current target language (auto-detected
   // from the .sdlppx if possible, else whatever the user picked).
@@ -5813,7 +5843,9 @@ async function trTranslateBatch(texts, apiKey, model) {
   let systemPrompt =
     `You are a professional translator. Translate each numbered item into ${targetName} (${targetCode}).
 Rules:
-- Preserve ALL placeholders exactly: {{TAG_0}}, {{TAG_1}}, etc.
+- Preserve ALL placeholders exactly: {{TAG_0}}, {{TAG_1}}, etc. Placeholders stand for variables (e.g. a file name or a number) — put them where that value belongs in the translated sentence.
+- {{BR}} is a line break — keep every {{BR}} (same count) at the matching position
+- Keep product/brand names, e-mail addresses and URLs exactly as in the source
 - Output ONLY the numbered translations, one per line, same order
 - Use formal ${targetName} suitable for professional documents
 - No explanations or notes`;
@@ -5862,16 +5894,211 @@ Rules:
   if (!res.ok) throw new Error(data.error?.message || ('GPT error ' + res.status));
   // Robust parser: handles multi-line continuation under each "N." marker
   const raw = (data.choices?.[0]?.message?.content || '').trim();
-  return parseNumberedResponse(raw, texts.length);
+  return parseNumberedResponse(raw, texts.length).map(s => s.replace(/\s*\{\{BR\}\}\s*/g, '\n'));
 }
 
-async function trProcessXliff(content, apiKey, onProgress, model) {
+// ─── Pre-filled segment handling ──────────────────────────────
+// PMs often ship packages whose targets are already filled: old translations
+// carried over from the source file (locked, origin="mt"), 100% TM matches,
+// and unconfirmed TM fuzzies left as conf="Draft". The translator used to
+// touch ONLY empty targets, so every error in those pre-fills went straight
+// back to the PM (HE 7 / adas_he.po, 2026-09-28: "Ultrasonic sensor ready"
+// pre-filled as "…error", 86% fuzzy "Connecting…"→"Connected", literal "\ n"
+// escapes, "\"" backslashes, a space inside an e-mail address, מונה/מד mixed).
+
+// Conf values that mean "a human/PM confirmed this". Anything else with a
+// target (Draft, Rejected*, or no conf at all) is an unconfirmed pre-fill.
+const TR_CONFIRMED_CONF = new Set(['Translated', 'ApprovedTranslation', 'ApprovedSignOff']);
+
+function trDecodeEntities(s) {
+  return String(s || '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+}
+
+// Existing target XML → the SOURCE's {{TAG_n}} numbering (so a reviewed
+// target can be written back with seg.tagMap) + decoded entities.
+// Returns null when the target holds a tag the source doesn't have — such
+// segments are left alone rather than risk dropping markup.
+function trTargetToPlaceholders(targetXml, tagMap) {
+  let bad = false;
+  const used = new Set();
+  const text = String(targetXml || '').replace(TR_INLINE_TAG_RE, (tag) => {
+    let idx = -1;
+    (tagMap || []).forEach((t, i) => { if (idx === -1 && t === tag && !used.has(i)) idx = i; });
+    if (idx === -1) { bad = true; return tag; }
+    used.add(idx);
+    return `{{TAG_${idx}}}`;
+  });
+  return bad ? null : trDecodeEntities(text);
+}
+
+// Deterministic clean-up of a target (placeholder text, entities decoded),
+// judged against its source. Fixes file-format debris that GPT review may
+// not reliably catch. Returns the (possibly) cleaned text.
+function trCleanTarget(src, tgt) {
+  let t = String(tgt || '');
+  const s = String(src || '');
+  if (!s.includes('\\')) {
+    // PO/C escape debris: "\n" / "\\n" / "\ n" typed as text → real line break
+    t = t.replace(/\\{1,2} ?n(?![a-z])/g, '\n');
+    // Escaped quotes: \" → "
+    t = t.replace(/\\+(["'])/g, '$1');
+  }
+  // E-mails / URLs from the source that got spaces inserted after . @ /
+  const links = s.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+|(?:https?:\/\/|www\.)[^\s{}]+/g) || [];
+  for (const link of links) {
+    if (t.includes(link)) continue;
+    const pat = link.split(/([.@/])/).map(p => /^[.@/]$/.test(p)
+      ? '\\s?' + p.replace(/[.]/, '\\.') + '\\s?'
+      : p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('');
+    t = t.replace(new RegExp(pat, 'g'), link);
+  }
+  if (!/ {2}/.test(s)) t = t.replace(/ {2,}/g, ' ');
+  if (!/\( /.test(s)) t = t.replace(/\( +/g, '(');
+  if (!/ \)/.test(s)) t = t.replace(/ +\)/g, ')');
+  return t;
+}
+
+// Give a translation the same leading/trailing whitespace as its source.
+// Targets are read trimmed and GPT output is trimmed, so a source ending in a
+// line break ("File %1 does not exist.\n") used to lose it in the target.
+function trKeepEdgeSpace(src, text) {
+  const s = String(src || '');
+  return s.match(/^\s*/)[0] + String(text || '').trim() + s.match(/\s*$/)[0];
+}
+
+function trPlaceholderSig(text) {
+  return (String(text).match(/\{\{TAG_\d+\}\}/g) || []).sort().join('|');
+}
+
+// GPT review of pre-filled targets. Returns [{fix, reason}] aligned with
+// `items` ({src, tgt}); fix === null means "keep". Fixes that drop/add a
+// placeholder or change the number of line breaks are discarded.
+async function trReviewBatch(items, apiKey, model, fileContext) {
+  const targetCode = trLang || 'he-IL';
+  const targetName = trLangName(targetCode);
+  const relevant = trFindRelevantTerms(items.map(i => i.src));
+  const gloss = relevant.length
+    ? '\n\nGLOSSARY — these renderings are MANDATORY:\n' + relevant.map(t => `- "${t.source}" → "${t.target}"`).join('\n')
+    : '';
+  const ctx = fileContext
+    ? `\n\nOTHER STRINGS IN THIS FILE (for terminology consistency only — do not review these):\n${fileContext}`
+    : '';
+  const systemPrompt =
+`You are a senior ${targetName} (${targetCode}) reviewer checking existing translations of a software/UI file before delivery.
+For each item decide: KEEP, or FIX with the full corrected target.
+FIX only real errors: wrong meaning / mistranslation (e.g. "ready" rendered as "error", "connecting" as "connected", "open" as "download", "port" as "opening"), omissions/additions, grammar or gender-agreement errors, spelling errors, an English word left untranslated that should be translated (brand/product names, codes, e-mails, URLs stay as-is), the same English term rendered differently from the rest of the file, broken characters (stray backslashes, "\\n" as text, spaces inside e-mails/URLs).
+Do NOT rephrase acceptable translations for style. When in doubt, KEEP.
+Rules for a fix: keep every {{TAG_n}} placeholder and every {{BR}} (line break) exactly; UI imperatives stay imperative; use formal ${targetName}.
+Reply with JSON: {"results":[{"n":1,"fix":null},{"n":2,"fix":"<full corrected target>","reason":"<short English reason>"}]} — one entry per item, in order.${gloss}${ctx}`;
+  const user = JSON.stringify(items.map((it, i) => ({
+    n: i + 1, source: it.src.replace(/\r?\n/g, '{{BR}}'), target: it.tgt.replace(/\r?\n/g, '{{BR}}'),
+  })));
+  try {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model, temperature: 0.1, response_format: { type: 'json_object' },
+        messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: user }],
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error?.message || ('GPT error ' + res.status));
+    const parsed = JSON.parse(data.choices?.[0]?.message?.content || '{}');
+    const byN = new Map((parsed.results || []).map(r => [r.n, r]));
+    return items.map((it, i) => {
+      const r = byN.get(i + 1);
+      if (!r || !r.fix || typeof r.fix !== 'string') return { fix: null };
+      const fix = r.fix.replace(/\s*\{\{BR\}\}\s*/g, '\n').trim();
+      const nl = (x) => (x.match(/\n/g) || []).length;
+      if (!fix || fix === it.tgt.trim()) return { fix: null };
+      if (trPlaceholderSig(fix) !== trPlaceholderSig(it.src)) return { fix: null };
+      if (nl(fix) !== nl(it.src) && nl(fix) !== nl(it.tgt)) return { fix: null };
+      return { fix, reason: String(r.reason || 'Reviewer fix') };
+    });
+  } catch (e) {
+    console.warn('[trados] review batch failed:', e.message);
+    return items.map(() => ({ fix: null }));
+  }
+}
+
+// opts.prefilled: 'review' (default) — re-translate unconfirmed pre-fills
+//                 (TM fuzzies / Draft) and review confirmed ones;
+//                 'drafts' — only re-translate unconfirmed pre-fills;
+//                 'skip'   — legacy: touch empty targets only.
+// opts.reviewLocked: include PM-locked segments in the review.
+async function trProcessXliff(content, apiKey, onProgress, model, opts) {
+  opts = Object.assign({ prefilled: 'review', reviewLocked: true }, opts || {});
+  const status = new Map(); // "unitId#mid" → { status, prev, reason }
+  const key = (s) => `${s.unitId}#${s.mid}`;
+  const segs0 = trExtractSegments(content);
+  // Unconfirmed pre-fills (e.g. an 86% TM fuzzy left as Draft) are treated
+  // like empty segments: translated from scratch and confirmed.
+  const redo = opts.prefilled === 'skip' ? [] : segs0.filter(s =>
+    s.targetText && !s.locked && !TR_CONFIRMED_CONF.has(s.conf) && trIsTranslatable(s.sourceText));
+  const redoKeys = new Set(redo.map(key));
+  for (const s of redo) status.set(key(s), { status: `re-translated (was ${s.conf || 'unconfirmed'}${s.percent ? ' ' + s.percent + '%' : ''})`, prev: s.targetText });
+  const res = await trProcessXliffCore(content, apiKey, onProgress, model, redoKeys);
+  content = res.content;
+  for (const k of res.newKeys) if (!status.has(k)) status.set(k, { status: 'translated (new)' });
+
+  // Review confirmed pre-fills: deterministic clean-up, then GPT review.
+  let revised = 0, reviewed = 0;
+  if (opts.prefilled === 'review') {
+    const segs = trExtractSegments(content);
+    const pool = segs.filter(s => s.targetText && !redoKeys.has(key(s)) && !res.newKeys.has(key(s))
+      && (opts.reviewLocked || !s.locked) && !trHasChinese(s.sourceText) && trIsTranslatable(s.sourceText));
+    const items = [];
+    for (const s of pool) {
+      const tgt = trTargetToPlaceholders(s.targetText, s.tagMap);
+      if (tgt == null) continue;
+      const src = trDecodeEntities(s.sourceText);
+      items.push({ seg: s, src, tgt, cleaned: trCleanTarget(src, tgt) });
+    }
+    // A compact slice of the whole file gives the reviewer the terminology
+    // actually used elsewhere (so "meter" doesn't stay מונה here and מד there).
+    const fileContext = segs.filter(s => s.targetText && trCountWords(s.sourceText) <= 12).slice(0, 120)
+      .map(s => `${trPlainText(s.rawSrc)} → ${trPlainText(s.targetText)}`).join('\n');
+    const BATCH = 25;
+    for (let i = 0; i < items.length; i += BATCH) {
+      const batch = items.slice(i, i + BATCH);
+      if (onProgress) onProgress(i, items.length, 'Reviewing pre-filled');
+      const out = await trReviewBatch(batch.map(b => ({ src: b.src, tgt: b.cleaned })), apiKey, model, fileContext);
+      batch.forEach((b, j) => {
+        let next = out[j].fix ? trCleanTarget(b.src, out[j].fix) : b.cleaned;
+        const reason = out[j].fix ? out[j].reason : 'Clean-up: broken escape / spacing';
+        if (next.trim() === b.tgt.trim()) return;
+        content = prReplaceTargetText(content, b.seg, trKeepEdgeSpace(b.src, next));
+        status.set(key(b.seg), { status: b.seg.locked ? 'revised (PM-locked)' : 'revised', prev: b.seg.targetText, reason });
+        revised++;
+      });
+      reviewed += batch.length;
+      if (i + BATCH < items.length) await new Promise(r => setTimeout(r, 300));
+    }
+    const check = trValidateXml(content);
+    if (!check.ok) throw new Error('Reviewed SDLXLIFF failed XML validation: ' + check.message);
+  }
+  return Object.assign(res, { content, status, revised, reviewed, redone: redo.length });
+}
+
+async function trProcessXliffCore(content, apiKey, onProgress, model, redoKeys) {
+  redoKeys = redoKeys || new Set();
   const segs  = trExtractSegments(content);
-  const empty = segs.filter(s => !s.targetText && trIsTranslatable(s.sourceText));
+  const isRedo = (s) => redoKeys.has(`${s.unitId}#${s.mid}`);
+  const empty = segs.filter(s => (!s.targetText || isRedo(s)) && trIsTranslatable(s.sourceText));
+  const newKeys = new Set();
+  // Write a translation: empty targets are filled; unconfirmed pre-fills
+  // (redo) have their existing target replaced and are confirmed.
+  const put = (c, s, text) => {
+    newKeys.add(`${s.unitId}#${s.mid}`);
+    text = trKeepEdgeSpace(trDecodeEntities(s.sourceText), text);
+    return s.targetText ? prReplaceTargetText(c, s, text) : trInsertTranslation(c, s, text);
+  };
 
   // Word counts (across all segments in this file)
   const totalWords          = segs.reduce((sum, s) => sum + trCountWords(s.sourceText), 0);
-  const preTranslatedSegs   = segs.filter(s => s.targetText && trIsTranslatable(s.sourceText));
+  const preTranslatedSegs   = segs.filter(s => s.targetText && !isRedo(s) && trIsTranslatable(s.sourceText));
   const preTranslatedWords  = preTranslatedSegs.reduce((sum, s) => sum + trCountWords(s.sourceText), 0);
   const toTranslateWords    = empty.reduce((sum, s) => sum + trCountWords(s.sourceText), 0);
 
@@ -5880,6 +6107,7 @@ async function trProcessXliff(content, apiKey, onProgress, model) {
     total: segs.length,
     content,
     pairs: [],
+    newKeys,
     totalWords,
     preTranslatedSegments: preTranslatedSegs.length,
     preTranslatedWords,
@@ -5896,27 +6124,36 @@ async function trProcessXliff(content, apiKey, onProgress, model) {
 
   let copied = 0;
   for (const s of toCopy) {
-    content = trInsertTranslation(content, s, s.sourceText); // source → target as-is
+    content = put(content, s, trDecodeEntities(s.sourceText)); // source → target as-is
     copied++;
   }
 
+  // Repetitions: translate each distinct source ONCE and write that same
+  // translation to every occurrence (Trados rep-defs expect identical
+  // targets; separate GPT calls used to give "Connecting…" two renderings).
+  const uniqueSrc = [...new Set(toTranslate.map(s => s.sourceText))];
   const BATCH = 20;
   let translated = 0;
   let translatedWords = 0;
   const pairs = []; // captured source/target pairs for optional TM save
-  for (let i = 0; i < toTranslate.length; i += BATCH) {
-    const batch = toTranslate.slice(i, i + BATCH);
-    if (onProgress) onProgress(i, toTranslate.length);
-    const translations = await trTranslateBatch(batch.map(s => s.sourceText), apiKey, model);
-    for (let j = 0; j < batch.length; j++) {
-      if (translations[j]) {
-        content = trInsertTranslation(content, batch[j], translations[j]);
-        pairs.push({ source: batch[j].sourceText, target: translations[j] });
-        translated++;
-        translatedWords += trCountWords(batch[j].sourceText);
-      }
-    }
-    if (i + BATCH < toTranslate.length) await new Promise(r => setTimeout(r, 500));
+  const bySrc = new Map();
+  for (let i = 0; i < uniqueSrc.length; i += BATCH) {
+    const batch = uniqueSrc.slice(i, i + BATCH);
+    if (onProgress) onProgress(i, uniqueSrc.length);
+    const translations = await trTranslateBatch(batch.map(trDecodeEntities), apiKey, model);
+    batch.forEach((src, j) => {
+      if (!translations[j]) return;
+      bySrc.set(src, trCleanTarget(trDecodeEntities(src), translations[j]));
+      pairs.push({ source: src, target: translations[j] });
+    });
+    if (i + BATCH < uniqueSrc.length) await new Promise(r => setTimeout(r, 500));
+  }
+  for (const s of toTranslate) {
+    const t = bySrc.get(s.sourceText);
+    if (!t) continue;
+    content = put(content, s, t);
+    translated++;
+    translatedWords += trCountWords(s.sourceText);
   }
   // Sanity check: ensure the assembled SDLXLIFF is well-formed XML before
   // we bundle it into the return package. If a translation slipped a bad
@@ -5932,6 +6169,7 @@ async function trProcessXliff(content, apiKey, onProgress, model) {
     total: segs.length,
     content,
     pairs,
+    newKeys,
     totalWords,
     preTranslatedSegments: preTranslatedSegs.length,
     preTranslatedWords,
@@ -5952,11 +6190,15 @@ function trPlainText(xml) {
 
 // Build a bilingual .xlsx (File · Segment · Source · Target) from collected
 // rows. Uses the already-loaded SheetJS (values only — no styling needed).
+// Extra columns show what the run did to each segment so the reviewer can
+// filter straight to the changes (Status ≠ "pre-filled (kept)").
 function trBuildExcelBlob(rows) {
-  const header = ['#', 'File', 'Segment', 'Source', 'Target (HE)'];
-  const aoa = [header, ...rows.map((r, i) => [i + 1, r.file, r.id, r.src, r.tgt])];
+  const header = ['#', 'File', 'Segment', 'Source', 'Target (HE)', 'Status', 'Previous target', 'Reason', 'PM-locked'];
+  const aoa = [header, ...rows.map((r, i) => [i + 1, r.file, r.id, r.src, r.tgt,
+    r.status || '', r.prev || '', r.reason || '', r.locked || ''])];
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = [{ wch: 5 }, { wch: 26 }, { wch: 12 }, { wch: 64 }, { wch: 64 }];
+  ws['!cols'] = [{ wch: 5 }, { wch: 26 }, { wch: 12 }, { wch: 64 }, { wch: 64 }, { wch: 26 }, { wch: 64 }, { wch: 40 }, { wch: 10 }];
+  ws['!autofilter'] = { ref: `A1:I${aoa.length}` };
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Translation');
   const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
@@ -6058,6 +6300,11 @@ async function trTranslate() {
     // package. Same content as what lands in the .sdlrpx — different envelope.
     const translatedFiles = [];
     const bilingualRows = []; // clean source/target per segment → bilingual .xlsx
+    let revisedAll = 0, reviewedAll = 0, redoneAll = 0;
+    const trPrefilledOpts = {
+      prefilled: (document.getElementById('tr-prefilled') || {}).value || 'review',
+      reviewLocked: !!(document.getElementById('tr-review-locked') || { checked: true }).checked,
+    };
     for (let fi = 0; fi < xliffEntries.length; fi++) {
       const { path: relPath, entry } = xliffEntries[fi];
       const rawContent = await entry.async('string');
@@ -6065,12 +6312,16 @@ async function trTranslate() {
         translated, total, content: newContent, pairs,
         totalWords, preTranslatedSegments, preTranslatedWords,
         toTranslateWords, translatedWords, copiedSegments,
-      } = await trProcessXliff(rawContent, apiKey, (done, all) => {
+        status: segStatus, revised, reviewed, redone,
+      } = await trProcessXliff(rawContent, apiKey, (done, all, phase) => {
         const base = 20 + (fi / xliffEntries.length) * 70;
         const inc  = (done / all) * (70 / xliffEntries.length);
         bar.style.width = (base + inc) + '%';
-        txt.textContent = `File ${fi+1}/${xliffEntries.length} (${trModel}): segments ${done}–${Math.min(done+20,all)} of ${all}…`;
-      }, trModel);
+        txt.textContent = `File ${fi+1}/${xliffEntries.length} (${trModel}): ${phase || 'segments'} ${done}–${Math.min(done+20,all)} of ${all}…`;
+      }, trModel, trPrefilledOpts);
+      revisedAll  += revised  || 0;
+      reviewedAll += reviewed || 0;
+      redoneAll   += redone   || 0;
       totalTranslated     += translated;
       totalSegments       += total;
       totalWordsAll       += totalWords          || 0;
@@ -6101,7 +6352,12 @@ async function trTranslate() {
         const src = trPlainText(s.rawSrc);
         const tgt = trPlainText(s.targetText);
         if (!src && !tgt) continue;
-        bilingualRows.push({ file: fileName, id: key, src, tgt });
+        const st = segStatus && segStatus.get(key);
+        bilingualRows.push({ file: fileName, id: key, src, tgt,
+          status: st ? st.status : (tgt ? 'pre-filled (kept)' : 'empty'),
+          prev: st && st.prev ? trPlainText(st.prev) : '',
+          reason: st && st.reason ? st.reason : '',
+          locked: s.locked ? 'locked' : '' });
       }
     }
     // Stash for post-actions (TM save, term suggestions)
@@ -6146,6 +6402,8 @@ async function trTranslate() {
     // Compact badge row at the top
     document.getElementById('tr-badges').innerHTML = `
       <span class="tres-badge tb-ok">✅ ${fmt(totalTranslated)} segments translated</span>
+      ${redoneAll > 0 ? `<span class="tres-badge tb-lang">♻️ ${fmt(redoneAll)} unconfirmed pre-fills re-translated</span>` : ''}
+      ${reviewedAll > 0 ? `<span class="tres-badge tb-lang">🔍 ${fmt(revisedAll)} of ${fmt(reviewedAll)} pre-filled segments corrected</span>` : ''}
       <span class="tres-badge tb-seg">📑 ${fmt(totalSegments)} segments in file</span>
       <span class="tres-badge tb-lang">📝 ${fmt(translatedWordsAll)} / ${fmt(totalWordsAll)} words</span>
       <span class="tres-badge tb-lang">📄 ${xliffEntries.length} file(s)</span>
@@ -8196,7 +8454,7 @@ async function prBuildRevisedSdlxliffs(toApply) {
     let content = prRawSDLXLIFFs[fi].content;
     const segs = trExtractSegments(content);
     const segMap = new Map();
-    segs.forEach(s => segMap.set(s.mid, s));
+    segs.forEach(s => segMap.set(`${s.unitId}#${s.mid}`, s));
     // Dedupe by mid so a single segment can't be track-changed twice in
     // one download. Without this, a duplicate entry in `toApply` (e.g. the
     // same seg landing in two batches, or both a Chinese-source push and a
@@ -8206,11 +8464,11 @@ async function prBuildRevisedSdlxliffs(toApply) {
     const seenMids = new Set();
     const applicable = toApply.filter(t => {
       if (t.fileIdx !== fi) return false;
-      if (seenMids.has(t.mid)) {
+      if (seenMids.has(`${t.unitId}#${t.mid}`)) {
         console.warn(`[proofreader] dropping duplicate fix for mid=${t.mid} in file ${fi} — upstream prAllIssues has a dupe`);
         return false;
       }
-      seenMids.add(t.mid);
+      seenMids.add(`${t.unitId}#${t.mid}`);
       return true;
     });
     // Each tracked fix pushes TWO entries here: one for the insertion and
@@ -8218,7 +8476,7 @@ async function prBuildRevisedSdlxliffs(toApply) {
     const revsForThisFile = [];
 
     for (const t of applicable) {
-      const seg = segMap.get(t.mid);
+      const seg = segMap.get(`${t.unitId}#${t.mid}`);
       if (!seg) continue;
       const fix = t.issues[0].suggestion;
       if (trackChanges) {
