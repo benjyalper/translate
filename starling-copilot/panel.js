@@ -1364,6 +1364,104 @@ async function reviewPass(proposals, key, model, taskCtx) {
 
 // ---- GPT: system prompt (identical policy to the admin Copy Deck tool) ------
 // tiktok=true appends the TikTok Hebrew Style Guide (Starling / Feishu). Omit it for memoQ/Crowdin/YiCAT.
+// ---- LLM COST LOG (2026-09-28) --------------------------------------------
+// llmFetch() records every call's token usage here, aggregated per day × model (compact: one
+// entry per day per model). Cost = tokens × the per-model rates, which are editable because the
+// providers' real prices (and your plan) can differ from these defaults. Anthropic rates are the
+// published list prices; the GPT ones are assumptions — check your OpenAI billing page.
+const LLM_PRICE_DEFAULTS = {
+  'claude-opus-5': { in: 5, out: 25, cr: 0.5, cw: 6.25 },
+  'claude-sonnet-5': { in: 2, out: 10, cr: 0.2, cw: 2.5 },
+  'gpt-5.4': { in: 2.5, out: 15, cr: 0.25, cw: 2.5 },
+  'gpt-5.5': { in: 5, out: 30, cr: 0.5, cw: 5 },
+  'gpt-5.4-mini': { in: 0.4, out: 1.6, cr: 0.04, cw: 0.4 }
+};
+let LLMU = { days: {} }, LLMP = {}, llmSaveTimer = null;
+async function llmUsageLoad() {
+  try { LLMU = await store.get('llmUsage', { days: {} }); } catch (e) {} if (!LLMU || !LLMU.days) LLMU = { days: {} };
+  try { LLMP = await store.get('llmPrices', {}); } catch (e) {} if (!LLMP) LLMP = {};
+}
+function llmModelKey(model) {   // "gpt-5.4-2026-03-05" → "gpt-5.4"; longest known prefix wins
+  const m = String(model || '?').toLowerCase();
+  const known = [...new Set([...Object.keys(LLM_PRICE_DEFAULTS), ...Object.keys(LLMP)])].sort((a, b) => b.length - a.length);
+  return known.find((k) => m === k || m.startsWith(k + '-')) || m;
+}
+function llmRate(model) { const k = llmModelKey(model); return Object.assign({ in: 0, out: 0, cr: 0, cw: 0 }, LLM_PRICE_DEFAULTS[k] || {}, LLMP[k] || {}); }
+function llmCost(model, a) { const p = llmRate(model); return ((a.in || 0) * p.in + (a.cr || 0) * p.cr + (a.cw || 0) * p.cw + (a.out || 0) * p.out) / 1e6; }
+function llmRecord(model, u) {
+  try {
+    const d = new Date(), day = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    const k = day + '|' + llmModelKey(model);
+    const e = LLMU.days[k] || (LLMU.days[k] = { n: 0, in: 0, cr: 0, cw: 0, out: 0 });
+    e.n++; e.in += u.in || 0; e.cr += u.cr || 0; e.cw += u.cw || 0; e.out += u.out || 0;
+    clearTimeout(llmSaveTimer); llmSaveTimer = setTimeout(() => { store.set({ llmUsage: LLMU }).catch(() => {}); if ($('llm-cost-out')) llmCostRender(); }, 800);
+  } catch (e) {}
+}
+// Pay per month from the Word-count computation above (same date field + status filter), if computed.
+function llmPayByMonth() {
+  const out = new Map();
+  if (!PAY || !PAY.rows || !PAY.dateField) return out;
+  const rate = Number($('pc-rate').value) || 0, sel = $('pc-status').value;
+  for (const r of PAY.rows) {
+    if (sel !== 'all' && String(r.s) !== sel) continue;
+    const ms = r.dates && r.dates[PAY.dateField]; if (!ms) continue;
+    const dt = new Date(ms), key = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0');
+    out.set(key, (out.get(key) || 0) + r.w * rate);
+  }
+  return out;
+}
+function llmCostRender() {
+  const box = $('llm-cost-out'); if (!box) return;
+  const money = (x) => '$' + x.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const tok = (x) => x >= 1e6 ? (x / 1e6).toFixed(2) + 'M' : x >= 1e3 ? (x / 1e3).toFixed(1) + 'K' : String(x);
+  const months = new Map(), models = new Map();
+  let total = 0, calls = 0;
+  for (const [k, a] of Object.entries(LLMU.days || {})) {
+    const [day, model] = k.split('|'), c = llmCost(model, a), mon = day.slice(0, 7);
+    total += c; calls += a.n;
+    const m = months.get(mon) || { cost: 0, n: 0, by: {} }; m.cost += c; m.n += a.n; m.by[model] = (m.by[model] || 0) + c; months.set(mon, m);
+    const md = models.get(model) || { cost: 0, n: 0, in: 0, out: 0, cr: 0 }; md.cost += c; md.n += a.n; md.in += (a.in || 0) + (a.cw || 0); md.cr += a.cr || 0; md.out += a.out || 0; models.set(model, md);
+  }
+  if (!calls) { box.innerHTML = '<div class="hint">No model calls logged yet — costs appear here after your next Run.</div>'; llmRatesRender([]); return; }
+  const pay = llmPayByMonth();
+  const monLabel = (k) => { const [y, m] = k.split('-'); return new Date(Number(y), Number(m) - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' }); };
+  const mrows = [...months.keys()].sort().reverse().map((k) => {
+    const m = months.get(k), p = pay.get(k);
+    const share = p ? ` <span class="hint">(${(100 * m.cost / p).toFixed(100 * m.cost / p < 1 ? 2 : 1)}% of ${money(p)} pay)</span>` : '';
+    const split = Object.entries(m.by).sort((a, b) => b[1] - a[1]).map(([mo, c]) => `${esc(mo)} ${money(c)}`).join(' · ');
+    return `<tr><td>${monLabel(k)}</td><td style="text-align:right">${m.n}</td><td style="text-align:right;font-weight:600">${money(m.cost)}${share}</td><td class="hint">${split}</td></tr>`;
+  }).join('');
+  const drows = [...models.entries()].sort((a, b) => b[1].cost - a[1].cost).map(([mo, a]) =>
+    `<tr><td>${esc(mo)}</td><td style="text-align:right">${a.n}</td><td style="text-align:right">${tok(a.in)}${a.cr ? ` <span class="hint">+${tok(a.cr)} cached</span>` : ''}</td><td style="text-align:right">${tok(a.out)}</td><td style="text-align:right;font-weight:600">${money(a.cost)}</td></tr>`).join('');
+  box.innerHTML =
+    `<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:baseline;font-weight:600">
+       <div><span style="font-size:1.7em">${calls}</span> model calls</div>
+       <div>≈ <span style="font-size:1.7em;color:#b45309">${money(total)}</span> spent</div>
+     </div>
+     <table style="width:100%;margin-top:10px;border-collapse:collapse;font-size:.92em">
+       <thead><tr style="text-align:left;border-bottom:1px solid #8884"><th>Month</th><th style="text-align:right">Calls</th><th style="text-align:right">Cost</th><th>By model</th></tr></thead>
+       <tbody>${mrows}</tbody>
+     </table>
+     <table style="width:100%;margin-top:10px;border-collapse:collapse;font-size:.92em">
+       <thead><tr style="text-align:left;border-bottom:1px solid #8884"><th>Model</th><th style="text-align:right">Calls</th><th style="text-align:right">Input tokens</th><th style="text-align:right">Output</th><th style="text-align:right">Cost</th></tr></thead>
+       <tbody>${drows}</tbody>
+     </table>`;
+  llmRatesRender([...models.keys()]);
+}
+function llmRatesRender(seen) {
+  const box = $('llm-rates'); if (!box) return;
+  const names = [...new Set([...Object.keys(LLM_PRICE_DEFAULTS), ...(seen || [])])];
+  const cell = (m, f) => `<input type="number" step="0.01" min="0" data-m="${esc(m)}" data-f="${f}" value="${llmRate(m)[f]}" style="width:64px" />`;
+  box.innerHTML = `<table style="font-size:.9em;border-collapse:collapse"><thead><tr style="text-align:left"><th>Model</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th></tr></thead><tbody>` +
+    names.map((m) => `<tr><td>${esc(m)}${/^gpt/.test(m) ? ' <span class="hint">(assumed)</span>' : ''}</td><td>${cell(m, 'in')}</td><td>${cell(m, 'out')}</td><td>${cell(m, 'cr')}</td><td>${cell(m, 'cw')}</td></tr>`).join('') + '</tbody></table>';
+  box.querySelectorAll('input').forEach((inp) => inp.addEventListener('change', async () => {
+    const m = inp.getAttribute('data-m'), f = inp.getAttribute('data-f');
+    LLMP[m] = Object.assign({}, LLMP[m] || {}, { [f]: Number(inp.value) || 0 });
+    try { await store.set({ llmPrices: LLMP }); } catch (e) {}
+    llmCostRender();
+  }));
+}
+
 // ---- LLM ROUTER (2026-09-28) ----------------------------------------------
 // Every model call in this panel is written against the OpenAI chat-completions shape. llmFetch()
 // keeps that contract: for a gpt-* model it is a plain fetch to OpenAI; for a claude-* model it
@@ -1372,7 +1470,17 @@ async function reviewPass(proposals, key, model, taskCtx) {
 // back into { choices:[{message:{content}}], usage }, so no caller has to change.
 async function llmFetch(opts) {
   let body = null; try { body = JSON.parse(opts && opts.body); } catch (e) {}
-  if (!body || !/^claude-/i.test(String(body.model || ''))) return fetch('https://api.openai.com/v1/chat/completions', opts);
+  if (!body || !/^claude-/i.test(String(body.model || ''))) {
+    const r = await fetch('https://api.openai.com/v1/chat/completions', opts);
+    try {
+      r.clone().json().then((j) => {
+        const u = j && j.usage; if (!u) return;
+        const cached = (u.prompt_tokens_details && u.prompt_tokens_details.cached_tokens) || 0;
+        llmRecord((body && body.model) || j.model, { in: (u.prompt_tokens || 0) - cached, cr: cached, cw: 0, out: u.completion_tokens || 0 });
+      }).catch(() => {});
+    } catch (e) {}
+    return r;
+  }
   const fail = (status, message) => ({ ok: false, status, json: async () => ({ error: { message } }) });
   const akey = await store.get('akey', '');
   if (!akey) return fail(401, 'Add your Anthropic API key in ⚙️ Settings to use ' + body.model + '.');
@@ -1401,6 +1509,7 @@ async function llmFetch(opts) {
     });
   } catch (e) { return fail(0, 'Network error reaching Claude: ' + (e && e.message || e)); }
   const j = await r.json().catch(() => ({}));
+  if (j && j.usage) llmRecord(j.model || body.model, { in: j.usage.input_tokens || 0, cr: j.usage.cache_read_input_tokens || 0, cw: j.usage.cache_creation_input_tokens || 0, out: j.usage.output_tokens || 0 });   // billed even on refusal/max_tokens
   if (!r.ok) return fail(r.status, (j.error && j.error.message) || ('Claude error ' + r.status));
   if (j.stop_reason === 'refusal') return fail(422, 'Claude declined this batch (' + ((j.stop_details && j.stop_details.category) || 'policy') + ') — try GPT for it.');
   if (j.stop_reason === 'max_tokens') return fail(413, 'Claude reached max_tokens — run fewer segments at a time.');
@@ -4406,6 +4515,7 @@ function pcRender() {
      </table>
      ${monthly}
      <div class="hint" style="margin-top:6px">Sums the <b>Weighted word count</b> column (weightingWordCountV2). Translation tasks only; bold row = current filter.</div>`;
+  llmCostRender();
 }
 
 // ---- 📦 CORPUS BUILDER (singular lane) ------------------------------------
@@ -6317,6 +6427,8 @@ async function init() {
   $('key').value = await store.get('key', '');
   $('model').value = await store.get('model', 'claude-opus-5');
   if ($('akey')) $('akey').value = await store.get('akey', '');
+  await llmUsageLoad(); llmCostRender();
+  if ($('llm-cost-reset')) $('llm-cost-reset').addEventListener('click', async () => { if (!confirm('Reset the LLM cost log? (Rates are kept.)')) return; LLMU = { days: {} }; try { await store.set({ llmUsage: LLMU }); } catch (e) {} llmCostRender(); });
   $('plural').checked = await store.get('plural', false);   // default OFF = singular gender-neutral slashes (TikTok guide); ON = plural לשון רבים for other clients
   MEASURE = await store.get('measureMode', false);          // 📐 measurement task → unitFix forces m→מ' , s→שנ'
   if ($('measure-toggle')) { $('measure-toggle').checked = !!MEASURE; $('measure-toggle').addEventListener('change', async (e) => { MEASURE = e.target.checked; try { await store.set({ measureMode: MEASURE }); } catch (_) {} }); }

@@ -841,6 +841,13 @@
       <div id="pc-info" class="info"></div>
       <div id="pc-out" hidden style="margin-top:10px"></div>
     </section>
+    <section class="card" id="llm-cost-card">
+      <div class="step"><span class="num">🤖</span> LLM costs (estimated)</div>
+      <p class="hint">Every model call this panel makes (Run, reviewer, sweep, Feishu LQA, distill…) is logged here from the API's own token counts × the rates below. Counting started with this version — earlier usage isn't known. Your OpenAI / Anthropic billing pages show the invoiced amount; if they differ, adjust the rates. When the pay above has been computed, each month also shows LLM cost as a share of that month's pay.</p>
+      <div id="llm-cost-out"></div>
+      <details class="sub" style="margin-top:8px"><summary>Rates (USD per 1M tokens)</summary><div id="llm-rates" style="margin-top:6px"></div></details>
+      <div class="row" style="margin-top:8px"><button id="llm-cost-reset" class="btn sm ghost">Reset cost log</button></div>
+    </section>
     </div><!-- /view-pay -->
   </div>
 
