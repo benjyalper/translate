@@ -1,5 +1,13 @@
 # TikTok Hebrew (he-IL) Style Guide — working reference
 
+> **⚠ Superseded for the model prompt (2026-09-28).** The text the extension actually sends now lives in
+> **`rulebook.js`** — this guide plus Benjy's 19 rulings of 28 Sep 2026 (slash forms, currency mirrors the
+> source, hyphen ranges, quotes for UI names without markup, prefix + placeholder, unlock → לשחרר, loading
+> labels, hashtags stay Latin, no slash on group plurals, …). Where this file disagrees with `rulebook.js`
+> (e.g. en-dash ranges, currency side, `20s → 20 שניות`, translating hashtags), **`rulebook.js` wins**.
+> Checked by `tests/rulebook.test.js`.
+
+
 Distilled from the official **Hebrew Style Guide** (Feishu / Lark:
 `bytedance.sg.larkoffice.com/docx/AdLvdq9eOon3Bjxb0wHc16TXn5d`, last modified Jan 2026).
 This is the reference the Starling Copilot bakes into its GPT prompts for the **TikTok**

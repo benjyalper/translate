@@ -6,7 +6,9 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
-const SRC = fs.readFileSync(path.join(__dirname, '..', 'panel.js'), 'utf8');
+const PANEL = fs.readFileSync(path.join(__dirname, '..', 'panel.js'), 'utf8');
+const RULEBOOK = fs.readFileSync(path.join(__dirname, '..', 'rulebook.js'), 'utf8');
+const SRC = PANEL + '\n' + RULEBOOK;   // the prompt text moved to rulebook.js (2026-09-28); wiring asserts check both
 const PC = require('../pipeline-core.js');   // sanity: the core loads in Node
 
 let pass = 0, fail = 0;
@@ -22,6 +24,19 @@ ok('Test A — "due to" = because of example', /due to.*because of/i.test(SRC) &
 ok('Test B — "verification application" example', /verification application/i.test(SRC));
 ok('Test C — Highlight-as-verb example', /Highlight the relevant section/i.test(SRC));
 ok('priority hierarchy preamble present', /PRIORITIES, in order/.test(SRC));
+
+sec('Rulebook wiring (2026-09-28)');
+const HTML = fs.readFileSync(path.join(__dirname, '..', 'panel.html'), 'utf8');
+ok('panel.html loads rulebook.js before panel.js', HTML.indexOf('rulebook.js') > 0 && HTML.indexOf('rulebook.js') < HTML.indexOf('src="panel.js"'));
+ok('sysPrompt delegates to RB.systemPrompt', /function sysPrompt\(mode, plural, tiktok, srcs\)[\s\S]{0,80}RB\.systemPrompt/.test(PANEL));
+ok('STYLE_GUIDE is the rulebook text', /const STYLE_GUIDE = RB\.STYLE;/.test(PANEL));
+ok('brain glossary is relevance-filtered, rules opt-in', /BRAIN\.injectRules/.test(PANEL) && /lockSrcHas\(h, g\.en\)/.test(PANEL));
+ok('lock checks use active (quarantined) terms', (PANEL.match(/RB\.activeLockTerms/g) || []).length >= 2);
+ok('Auto-fix skips quarantined rules', /if \(!RB\.fixRuleActive\(r\)\) continue;/.test(PANEL));
+ok('Auto-fix seed: נסו → נסה/נסי (ruling 1)', PANEL.includes("{ from: 'נסו', to: 'נסה/נסי' }") && !PANEL.includes("{ from: 'נסו', to: 'נסה/י' }"));
+ok('Auto-fix seed version bumped to 4', /const SEED_VERSION = 4;/.test(PANEL));
+ok('rbCheck runs after tbCheck', idx(/rbCheck\(proposals\);/) > idx(/tbCheck\(proposals\);   \/\/     … term-base/));
+ok('Feishu LQA prompt: currency mirrors source', /POSITION \(ruling 2\)/.test(PANEL) && !/goes AFTER the number for every foreign currency/.test(PANEL));
 
 sec('Processing ORDER (#4/#12/#13/#14) — asserted over the real chain');
 const iTm = idx(/tmApply\(proposals\);\s*\/\/ 1\)/);

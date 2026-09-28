@@ -390,39 +390,10 @@ async function refreshConn() {
 
 // TikTok Hebrew Style Guide — injected into the TikTok modes only (🐦 Starling, ⚖️ Feishu LQA).
 // NOT applied to memoQ / Crowdin (other clients). Full reference: HEBREW-STYLE-GUIDE.md.
-const STYLE_GUIDE =
-  '\nTIKTOK HEBREW STYLE GUIDE (he-IL):\n' +
-  '- VOICE: inclusive, approachable, conversational, clear and casual — keep it short, natural and consistent; plain everyday Hebrew.\n' +
-  '- INTERNAL CONSISTENCY (across the items in THIS batch): if the same word, verb, or fixed collocation recurs in several items, render it with ONE consistent Hebrew choice throughout — do not alternate synonyms arbitrarily. E.g. "take (time)" → pick אורך OR לוקח and use the SAME one wherever it appears ("take so long" and "takes six business days" should both use it); likewise a recurring noun/verb should keep one rendering unless the grammar or sense of a specific item clearly requires another. This applies to FREE lexical choices, not only glossary terms.\n' +
-  '- REGISTER: medium-low. Prefer the lower/natural register — use אנחנו (not אנו), עכשיו (not כעת), על (not אודות), ל־ (not עבור).\n' +
-  '- UI CONTEXT overrides the address form:\n' +
-  '  • Buttons / labels / titles → GERUND (שם פעולה), never the infinitive and never the imperative: "Save" → שמירה (not לשמור, not שמור/שמרי). Titles are short with NO trailing period.\n' +
-  '  • Tooltips / inline instructions → a conjugated verb (with the gender slash for 2nd person): "Record your ending" → הקלט/הקליטי את הסיום.\n' +
-  '  • When a string names another UI element, keep the name and do NOT wrap it in quotes (the app bolds it).\n' +
-  '- ERROR MESSAGES: neutral, helpful tone — no blaming words like "failed"/נכשל; describe the situation without assigning fault.\n' +
-  '- AMPERSAND: Hebrew has no "&" — render it as the word ו ("A & B" → "A ו-B").\n' +
-  '- QUOTES: straight double quotes " " only — never curly/diagonal “ ” and never single quotes.\n' +
-  '- SLASH BETWEEN ALTERNATIVES (not the gender slash): avoid "/" between whole words — use או; a slash is OK only when space is very tight.\n' +
-  '- SEMICOLONS: avoid — split into shorter sentences. COMMAS: follow Hebrew grammar, don\'t copy English commas that break it.\n' +
-  '- ELLIPSIS "…": for an action in progress ("מתבצעת העלאה…").\n' +
-  '- BRACKETS: translate text inside [square brackets]; NEVER translate or alter text inside {curly braces} (code placeholders).\n' +
-  '- GLOSSARY (approved terms — TRANSLATE / transliterate these, do NOT keep them in Latin): "LIVE" as the live-streaming feature / badge / action when it stands alone ("Go LIVE", "LIVE now", a "LIVE" label, "watch LIVE") → "שידור חי" (e.g. "Go LIVE" → "התחל/י שידור חי", "LIVE now" → "עכשיו בשידור חי"); "Snap" → "סנאפ"; "Blink" → "בלינק". EXCEPTION: the product name "TikTok LIVE" stays in Latin exactly as "TikTok LIVE".\n' +
-  '- APPROVED PHRASINGS (render these source strings with EXACTLY this Hebrew, keeping the {placeholder} in the position shown): "Commented on {s_user}\'s post." → "הגיב/ה על הפוסט של {s_user}." — a possessive "X\'s post" becomes "הפוסט של X", so the {placeholder} moves to the END (right before the final period), NOT the front.\n' +
-  '  • "Get funds in 3 simple steps" → "קבל/י מימון ב-3 צעדים פשוטים" — for an ACTION CTA / promo headline led by an imperative verb ("Get…", "Start…", "Claim…"), prefer the IMPERATIVE slash (קבל/י) over the gerund (קבלת מימון). The "titles → gerund" rule is for functional button / menu labels, NOT action headlines urging the user to act.\n' +
-  '- HASHTAGS: translate the words of a hashtag and keep it as ONE token — no spaces inside — camel-casing each Hebrew word: "#asktiktok" → "#שאלואתטיקטוק". A brand hashtag stays Latin ("#TikTokTest" stays "#TikTokTest"). Never insert a space inside a hashtag.\n' +
-  '- HEBREW DUAL (a count of exactly 2): Hebrew has a real dual form — USE it for 2 and do NOT write "2 <plural>": "2 days" → "יומיים" (not "2 ימים"), "2 years" → "שנתיים", "2 months" → "חודשיים", "2 weeks" → "שבועיים", "2 hours" → "שעתיים", "2 minutes" → "שתי דקות". For 3+ keep the numeral + plural ("{n} ימים").\n' +
-  '- NUMBER FORMATTING: use digits, not spelled-out words ("2", not "שתיים"); a space between a number and its unit ("512 KB"); a minus sign for negatives ("–50%"). A price / number RANGE uses an EN-DASH ("$1–$20", "12–15"); a HYPHEN only joins a compound or a Hebrew prefix ("חד-פעמי", "ב-TikTok") — do not swap them.\n' +
-  '- UNITS — MATCH THE SOURCE FORM, and be CONSISTENT (the SAME unit renders the SAME way throughout a task): an ABBREVIATED source unit becomes the Hebrew ABBREVIATION, a SPELLED-OUT source unit becomes the Hebrew WORD, always with ONE space after the number (keep the digit). Abbreviations → s→"שנ\'" (seconds), min→"דק\'" (minutes), h/hr→"שע\'" (hours), m→"מ\'" (METERS), km→"ק"מ", cm→"ס"מ", mm→"מ"מ", kg→"ק"ג", mg→"מ"ג", ml→"מ"ל", cc→"סמ"ק", km/h→"קמ"ש", g→"גרם", l/L→"ליטר", and r/min or rpm→"סיבובים/דקה". Spelled out → seconds→"שניות", minutes→"דקות", hours→"שעות", days→"ימים", meter/meters→"מטר", kilometer→"קילומטר", kilogram→"קילוגרם", gram→"גרם", liter→"ליטר". Examples: "20s"→"20 שנ\'", "20 seconds"→"20 שניות", "a 5m cable"→"כבל 5 מ\'", "5 meters"→"5 מטר", "450kg"→"450 ק"ג", "1500 r/min"→"1500 סיבובים/דקה". VOLTS stay the LATIN symbol: "12V"→"12 V" (spaced, NOT translated to וולט). DISAMBIGUATE by context: "m" is METERS (מ\') in a dimension context, MINUTES (דק\') in a time context, and MILLION in "5m views/likes" (keep the meaning — not a unit); a MODEL/name like "iPhone 5s" stays as-is. STAY LATIN exactly as source: volts "V", data sizes (KB/MB/GB/TB), "%", resolutions (1080p/4K), "60fps", "Mbps", and a network generation ("5G" stays "5G").\n' +
-  '- DASHES: hyphen (-) joins compounds/prefixes; an en-dash (–) sets off a clause the way an em-dash would ("הצעה מיוחדת – לא כדאי לפספס").\n' +
-  '- EXCLAMATION MARKS: use sparingly — overuse dilutes them; do not add one the source does not have.\n' +
-  '- REGISTER DEPENDS ON THE UI ROLE (the SAME English verb maps to different Hebrew depending on where the string sits — this is the #1 recurring dilemma, e.g. "Save" → שמירה as a button but שמור/שמרי as a tooltip). Decide the role FIRST from the item\'s "key" and "context" whenever the item carries them (a "_title"/"_btn" key or a context note usually settles it outright); only when those are absent, fall back to these signals in the source (and, in proofread, the existing target):\n' +
-  '  • TITLE / SUBTITLE / BUTTON / LABEL / MENU / TAB / SETTING name → GERUND (שם פעולה): a short Title-Case fragment that NAMES an action or feature, has no object aimed at the user, no "your", no full-sentence punctuation. "Save" → שמירה; "Save new items" → שמירת פריטים חדשים; "Add friends" → הוספת חברים; "Edit profile" → עריכת פרופיל.\n' +
-  '  • TOOLTIP / INLINE INSTRUCTION / CTA / BODY sentence telling the user to act NOW → IMPERATIVE slash: it has a direct object (often "your …"), a purpose clause ("… to …"), or is a full imperative sentence. "Save your changes" → שמור/שמרי את השינויים; "Record your ending" → הקלט/הקליטי את הסיום; promo "Get funds…" → קבל/י מימון….\n' +
-  '  • BARE VERB with no other signal ("Save" / "Share" / "Follow" alone) → default to the GERUND (it is usually a button/label). BUT in PROOFREAD mode, if the existing target already uses a register that is valid for a plausible role, KEEP it — do NOT flip שמירה↔שמור/שמרי just because the source is a bare verb.\n' +
-  '  • FLAG ONLY AS A LAST RESORT: if the item has a "key" or "context", they resolve the role — use them and do NOT set "flag". Only when NO "key" and NO "context" are provided AND the English is genuinely ambiguous AND the existing target does not settle it, return your best-guess Hebrew and set "flag" to a short note of the dilemma so a human can check the real context — e.g. "Save: gerund (שמירה) if a button, imperative (שמור/שמרי) if a tooltip — assumed button". Leave "flag" empty otherwise.\n' +
-  '- SLASH FORM (gender-inclusive 2nd person) — short vs long: use the SHORT form (masculine word + "/" + feminine ending) ONLY when both genders share the same written stem: גלה/י, שתף/י, שלם/י, בחר/י, לחץ/י. When the spelling differs (typically a חולם-מלא ו in the masculine that the feminine drops, OR a הפעיל/פועל verb whose feminine inserts a י), write BOTH words IN FULL: בדוק/בדקי, אמור/אמרי, שמור/שמרי, כתוב/כתבי, and especially הרם/הרימי, משוך/משכי, הזז/הזיזי, הנמך/הנמיכי, החלף/החליפי, החזר/החזירי, החזק/החזיקי, הרחק/הרחיקי, הארך/האריכי, הגדר/הגדירי (NEVER the short הרם/י, משוך/י, הזז/י, הנמך/י, החלף/י, החזר/י, החזק/י, הרחק/י, הארך/י, הגדר/י — those misread). Test: if "masculine + /י" would misread, use the full long form.\n' +
-  '- DO NOT TRANSLATE (DNT): "TikTok" is a brand name — always keep it EXACTLY as "TikTok" (Latin, same casing); never translate or transliterate it. A Hebrew prefix attaches with a maqaf: ב-TikTok, ל-TikTok, ה-TikTok, מ-TikTok.\n' +
-  '- CURRENCY POSITION: put the currency symbol or code immediately AFTER the number, adjacent, no space, for every currency (symbols and letter codes alike): "$20" → 20$, "£40" → 40£, "Rp1,000" → 1,000Rp, "₪50" → 50₪, "MX$67,000" → 67,000MX$. Keep the digits and the currency identity exactly as the source — only the symbol/code moves after the number.\n';
+// The TikTok he-IL style text now lives in rulebook.js (RB) — ONE source of truth shared with the
+// offline evaluation harness and tests/rulebook.test.js. It encodes Benjy's 19 rulings (2026-09-28)
+// on top of the TikTok Hebrew Style Guide; edit it there, not here.
+const STYLE_GUIDE = RB.STYLE;
 
 // ---- STYLE BRAIN: user-fed style docs distilled into extra rules + glossary --
 // Kept in chrome.storage as { rules:[{id,cat,text,source,ts}], glossary:[{id,en,he,note,source,ts}], updatedAt }.
@@ -431,20 +402,28 @@ const STYLE_GUIDE =
 let BRAIN = { rules: [], glossary: [], updatedAt: 0 };
 async function brainLoad() { try { BRAIN = await store.get('styleBrain', { rules: [], glossary: [], updatedAt: 0 }); } catch (e) {} if (!BRAIN.rules) BRAIN.rules = []; if (!BRAIN.glossary) BRAIN.glossary = []; return BRAIN; }
 async function brainSave() { BRAIN.updatedAt = Date.now(); try { await store.set({ styleBrain: BRAIN }); } catch (e) {} }
-function brainText() {
-  let s = STYLE_GUIDE;
-  s += lockText();   // MANDATORY locked terms — sit at the top so they outrank the ingested rules/glossary below
-  const rules = (BRAIN && BRAIN.rules) || [], gloss = (BRAIN && BRAIN.glossary) || [];
+// What the TikTok prompt gets on top of the rulebook: 🔒 locked terms (quarantined entries dropped,
+// ruled terms added) + ONLY the brain glossary entries whose English occurs in the segments being
+// sent (was: the WHOLE brain — ~250K characters — on every call, contradictions included).
+// The ~1,400 distilled brain rules are no longer sent unless BRAIN.injectRules is switched on:
+// many contradict the rulings (currency side, en-dash ranges, hashtags) and the rulebook replaces them.
+const BRAIN_GLOSS_MAX = 60;
+function brainExtras(srcs) {
+  let s = lockText();
+  const rules = (BRAIN && BRAIN.injectRules && BRAIN.rules) || [], gloss = (BRAIN && BRAIN.glossary) || [];
+  const hay = (srcs || []).map((x) => String(x == null ? '' : x));
+  const rel = hay.length ? gloss.filter((g) => g && g.en && g.he && hay.some((h) => lockSrcHas(h, g.en))).slice(0, BRAIN_GLOSS_MAX) : [];
   if (rules.length) {
     s += '- ADDITIONAL HOUSE RULES (distilled from official style docs — follow these too; if one contradicts a rule above, the more specific / more recent one wins):\n';
     for (const r of rules) s += '  • ' + (r.cat ? '[' + r.cat + '] ' : '') + r.text.trim() + '\n';
   }
-  if (gloss.length) {
-    s += '- ADDITIONAL GLOSSARY (approved EN→HE from official docs — render these consistently; a brand kept inside a translated term still stays Latin):\n';
-    for (const g of gloss) s += '  • "' + g.en + '" → "' + g.he + '"' + (g.note ? ' — ' + g.note : '') + '\n';
+  if (rel.length) {
+    s += '- ADDITIONAL GLOSSARY (your approved EN→HE entries that occur in these segments — prefer them when the sense matches; the rulebook and locked terms win on conflict):\n';
+    for (const g of rel) s += '  • "' + g.en + '" → "' + g.he + '"' + (g.note ? ' — ' + g.note : '') + '\n';
   }
   return s;
 }
+function brainText(srcs) { return STYLE_GUIDE + brainExtras(srcs); }
 
 // ---- CONSISTENCY MEMORY: self-populating exact-match translation memory -----
 // Every segment you WRITE is remembered as source → your target. On the next
@@ -683,13 +662,7 @@ async function lockSave() { LOCK.updatedAt = Date.now(); try { await store.set({
 function lockCount() { return LOCK && LOCK.terms ? LOCK.terms.length : 0; }
 function lockEsc(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 // The locked block for the GPT prompt (empty when no terms, so it costs nothing).
-function lockText() {
-  const terms = (LOCK && LOCK.terms) || [];
-  if (!terms.length) return '';
-  let s = '- LOCKED TERMS (MANDATORY — NON-NEGOTIABLE): each source term below MUST be rendered with EXACTLY the Hebrew given. You may ONLY attach a Hebrew prefix (ב/ל/ה/מ/ו/ש/כ — with a maqaf before a Latin term, e.g. ב-TikTok) and let it inflect for grammar; NEVER substitute a synonym, reorder its words, or reword it. This OVERRIDES any other glossary or house rule.\n';
-  for (const t of terms) s += '  • "' + t.en + '" → "' + t.he + '"' + (t.note ? ' — ' + t.note : '') + '\n';
-  return s;
-}
+function lockText() { return RB.lockBlock((LOCK && LOCK.terms) || []); }   // + ruled terms, − quarantined entries (rulebook.js)
 // Is the locked EN term present in the source (boundary-aware, case-insensitive)?
 function lockSrcHas(src, en) {
   const e = String(en == null ? '' : en).trim(); if (!e) return false;
@@ -707,14 +680,14 @@ function lockTgtHas(tgt, he) {
 }
 // Which locked terms are required by the source but missing from the target.
 function lockViolations(src, tgt) {
-  const terms = (LOCK && LOCK.terms) || []; if (!terms.length) return [];
+  const terms = RB.activeLockTerms((LOCK && LOCK.terms) || []); if (!terms.length) return [];
   const out = [];
   for (const t of terms) { if (lockSrcHas(src, t.en) && !lockTgtHas(tgt, t.he)) out.push(t); }
   return out;
 }
 // Tag every proposal with p.lockMiss = ["EN → HE", …] (or null) for the review badge.
 function lockCheck(proposals) {
-  const terms = (LOCK && LOCK.terms) || [];
+  const terms = RB.activeLockTerms((LOCK && LOCK.terms) || []);
   for (const p of proposals) {
     if (!terms.length) { p.lockMiss = null; continue; }
     const v = lockViolations(p.src, p.next);
@@ -802,7 +775,7 @@ async function icSweepGpt(items, key, model) {
     'Do NOT choose a winner — offer the renderings and let the human pick. Only report GENUINE avoidable drift where the SAME meaning is expressed by different words; do NOT report differences the grammar or sense of a segment requires (singular vs plural of a different meaning, a noun vs a verb use), and do NOT report glossary/term choices. ' +
     'Return ONLY JSON: {"groups":[{"concept":"information","reason":"information: מידע vs פרטים","renderings":["מידע","פרטים"],"members":[{"i":3,"rewrites":["…מידע…","…פרטים…"]}]}]}. ' +
     'Return an empty "groups" array if everything is already consistent. No commentary, no markdown, no code fences.';
-  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+  const r = await llmFetch({
     method: 'POST',
     headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model, temperature: 0.1, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: sys }, { role: 'user', content: 'Check these segments for internal consistency drift:\n' + JSON.stringify({ items }) }] })
@@ -881,7 +854,9 @@ function tbHintsFor(src) {
   const out = [];
   for (const t of TB.terms) {
     if (t && t.en && t.he && lockSrcHas(src, t.en)) {
+      if (t.dnt && !(t.tasks || []).includes(CUR_TASK)) continue;   // a campaign DNT only applies in its own task
       const h = { en: t.en, he: t.he };
+      if (t.dnt) h.dnt = true;
       if (t.pos) h.pos = t.pos;
       if (t.def) h.definition = String(t.def).trim();   // #1 — send Starling's own definition when it exists
       out.push(h);
@@ -900,6 +875,16 @@ function tbHintsFor(src) {
 // likely differs (e.g. "Due→לתשלום" in "due to"), is NOT reported as a definite deviation — it is
 // either suppressed or labelled "uncertain". Locked-term validation stays strict and separate.
 // Never mutates text; only sets the review badge.
+// 🧾 RULEBOOK CHECKS — deterministic findings from rulebook.js (slash form, plural slash, prefix +
+// placeholder, currency side, ranges, thresholds, k/m, %, hashtags, loading labels, unlock, teen,
+// button register, period mirror). Flag-only: never rewrites; the review card shows each finding.
+function rbCheck(proposals) {
+  for (const p of proposals) {
+    if (p.manual) { p.rbFind = null; continue; }
+    const f = RB.checkSegment(p.src, p.next, { key: p.key || (p.seg && p.seg.key) || '' });
+    p.rbFind = f.length ? f : null;
+  }
+}
 function tbCheck(proposals) {
   for (const p of proposals) { p.termHint = null; p.termUncertain = null; }
   if (!TB || !TB.enabled || !(TB.terms || []).length) return;
@@ -909,6 +894,7 @@ function tbCheck(proposals) {
     for (const t of TB.terms) {
       if (!t.en || !t.he) continue;
       if (!lockSrcHas(p.src, t.en)) continue;
+      if (t.dnt) { if ((t.tasks || []).includes(CUR_TASK) && String(p.next || '').indexOf(t.en) < 0) miss.push({ en: t.en, he: t.en + ' (DNT — exact, incl. casing)' }); continue; }
       const hasHe = lockTgtHas(p.next, t.he);
       const verdict = PC.tbApplicability(p.src, t, hasHe);   // 'ok' | 'warn' | 'uncertain' | 'suppress'
       if (verdict === 'warn') miss.push({ en: t.en, he: t.he });
@@ -945,9 +931,24 @@ function btnCheck(proposals) {
 }
 // Read the open task's term references from the page's MAIN world (executeScript world:'MAIN'
 // — the popover data is preloaded on each span's React vnode, so no hover simulation is needed).
-async function tbGrab() {
+// Auto-grab (2026-09-28): the term references + DNT flags are read automatically once per task
+// per panel session, before the first Run — no more forgotten manual grabs. Task-specific DNTs
+// (campaign names) are scoped to their task instead of becoming global 🔒 locks.
+let CUR_TASK = '';
+const TB_GRABBED = new Set();
+async function tbAutoGrab() {
+  if (!TB || !TB.enabled) return;
+  const t = await activeTab(); if (!t || !/starling\.bytedance\.com/.test(t.url || '')) return;
+  const m = String(t.url || '').match(/taskid=(\d+)/i); CUR_TASK = m ? m[1] : '';
+  if (!CUR_TASK || TB_GRABBED.has(CUR_TASK)) return;
+  await tbGrab({ silent: true, taskId: CUR_TASK });
+  TB_GRABBED.add(CUR_TASK);
+}
+async function tbGrab(opts) {
+  const o = opts || {};
   const t = await activeTab();
   if (!t) { tbInfo('Open your Starling task tab first.', 'err'); return; }
+  const grabTask = o.taskId || ((String(t.url || '').match(/taskid=(\d+)/i) || [])[1] || '');
   tbInfo('Scanning the task for term references…');
   let scraped = [];
   try {
@@ -1043,11 +1044,17 @@ async function tbGrab() {
     });
     scraped = (r && r.result) || [];
   } catch (e) { tbInfo('Scrape failed: ' + e.message + ' — open the task’s String editor and try again.', 'err'); return; }
+  if (!scraped.length && o.silent) return;   // auto-grab on a task without terms: stay quiet
   if (!scraped.length) { tbInfo('No term references found here. Open a task’s String editor — terms are the dotted-underline words in the Source column.', 'err'); return; }
   let softN = 0, lockedN = 0, updatedN = 0, alreadyN = 0;
   for (const e of scraped) {
     const en = String(e.en || '').trim(); if (!en) continue;
-    if (e.dnt) {                                   // DNT / brand → 🔒 Locked (keep-as-is, dedupe by en)
+    const globalBrand = RB.LATIN_ALLOW.some((x) => x.toLowerCase() === en.toLowerCase());
+    if (e.dnt && !globalBrand) {                   // campaign / task DNT → kept verbatim, but ONLY in this task
+      const prevD = (TB.terms || []).find((x) => (x.en || '') === en && x.dnt);
+      if (prevD) { const ts = new Set(prevD.tasks || []); if (grabTask) ts.add(grabTask); prevD.tasks = [...ts]; alreadyN++; }
+      else { TB.terms.push({ id: tbUid(), en, he: en, dnt: true, tasks: grabTask ? [grabTask] : [], pos: e.pos || '', def: e.def || '', ts: Date.now() }); lockedN++; }
+    } else if (e.dnt) {                            // global brand DNT → 🔒 Locked (keep-as-is, dedupe by en)
       if (!(LOCK.terms || []).some((x) => (x.en || '').toLowerCase() === en.toLowerCase())) { LOCK.terms.push({ id: brainUid(), en, he: (String(e.he || '').trim() || en), note: 'DNT · term base', ts: Date.now() }); lockedN++; }
       else alreadyN++;                             // DNT term already in 🔒 Locked — dedupe, but report it (not a miss)
     } else {                                        // translatable → soft term hint (overwrite same en)
@@ -1061,7 +1068,7 @@ async function tbGrab() {
   }
   await tbSave(); if (lockedN) await lockSave();
   tbRefresh(); if (lockedN && typeof lockRefresh === 'function') lockRefresh();
-  tbInfo(`Grabbed ${scraped.length} term(s): ${softN} translatable (soft hints)${lockedN ? ` · 🔒 ${lockedN} DNT locked` : ''}${alreadyN ? ` · 🔒 ${alreadyN} DNT already locked` : ''}${updatedN ? ` · ${updatedN} updated` : ''}.`, 'good');
+  tbInfo(`Grabbed ${scraped.length} term(s): ${softN} translatable (soft hints)${lockedN ? ` · 📌 ${lockedN} DNT kept verbatim` : ''}${alreadyN ? ` · ${alreadyN} DNT already known` : ''}${o.silent ? ' (auto-grabbed before the Run)' : ''}${updatedN ? ` · ${updatedN} updated` : ''}.`, 'good');
 }
 
 // ---- AUTO-FIX: deterministic post-GPT rewriter ("smart scanner") -----------
@@ -1075,8 +1082,8 @@ async function tbGrab() {
 // by editing the row. Stored as { rules:[{id,from,to,note,ts}], enabled, seeded, updatedAt }.
 const HEB_L = 'א-ת';
 const FIX_SEED = [
-  { from: 'שלמו', to: 'שלם/י' }, { from: 'הצטרפו', to: 'הצטרף/י' }, { from: 'נסו', to: 'נסה/י' },
-  { from: 'חכו', to: 'חכה/י' }, { from: 'היכנסו', to: 'היכנס/י' }, { from: 'בדקו', to: 'בדוק/בדקי' },
+  { from: 'שלמו', to: 'שלם/י' }, { from: 'הצטרפו', to: 'הצטרף/י' }, { from: 'נסו', to: 'נסה/נסי' },
+  { from: 'חכו', to: 'חכה/חכי' }, { from: 'היכנסו', to: 'היכנס/י' }, { from: 'בדקו', to: 'בדוק/בדקי' },
   // Irregular imperatives whose feminine changes INTERNAL letters — the naive short slash (הרם/י)
   // misreads, so lock in the full long form. Both the wrong short slash AND the plural map to it.
   { from: 'הרם/י', to: 'הרם/הרימי' }, { from: 'הרימו', to: 'הרם/הרימי' },
@@ -1089,6 +1096,14 @@ const FIX_SEED = [
   { from: 'הרחק/י', to: 'הרחק/הרחיקי' }, { from: 'הרחיקו', to: 'הרחק/הרחיקי' },
   { from: 'הארך/י', to: 'הארך/האריכי' }, { from: 'האריכו', to: 'הארך/האריכי' },
   { from: 'הגדר/י', to: 'הגדר/הגדירי' }, { from: 'הגדירו', to: 'הגדר/הגדירי' },
+  // Ruling 1 (2026-09-28): ל״ה, hif'il and holam verbs whose feminine is NOT masculine+י → both words in full.
+  { from: 'צפו', to: 'צפה/צפי' }, { from: 'צפה/י', to: 'צפה/צפי' }, { from: 'נסה/י', to: 'נסה/נסי' },
+  { from: 'גלו', to: 'גלה/גלי' }, { from: 'גלה/י', to: 'גלה/גלי' }, { from: 'קנו', to: 'קנה/קני' }, { from: 'קנה/י', to: 'קנה/קני' },
+  { from: 'פנו', to: 'פנה/פני' }, { from: 'פנה/י', to: 'פנה/פני' }, { from: 'ראה/י', to: 'ראה/ראי' }, { from: 'תיהנה/י', to: 'תיהנה/תיהני' },
+  { from: 'העלה/י', to: 'העלה/העלי' }, { from: 'השלם/י', to: 'השלם/השלימי' }, { from: 'הקש/י', to: 'הקש/הקישי' },
+  { from: 'הוסף/י', to: 'הוסף/הוסיפי' }, { from: 'הזן/י', to: 'הזן/הזיני' }, { from: 'הפעל/י', to: 'הפעל/הפעילי' },
+  { from: 'הצג/י', to: 'הצג/הציגי' }, { from: 'הורד/י', to: 'הורד/הורידי' }, { from: 'הסר/י', to: 'הסר/הסירי' },
+  { from: 'עבור/י', to: 'עבור/עברי' }, { from: 'שמור/י', to: 'שמור/שמרי' }, { from: 'כתוב/י', to: 'כתוב/כתבי' }, { from: 'זכור/י', to: 'זכור/זכרי' },
 ];
 let FIX = { rules: [], enabled: true, seeded: false, updatedAt: 0 };
 async function fixLoad() {
@@ -1102,11 +1117,17 @@ async function fixLoad() {
   }
   // One-time top-up: when new built-in rules ship, add the ones an already-seeded user is missing
   // (matched by `from`), ONCE per seedVersion — so it never re-adds a rule the user later deletes.
-  const SEED_VERSION = 3;
+  const SEED_VERSION = 4;
   if ((FIX.seedVersion || 0) < SEED_VERSION) {
     const have = new Set((FIX.rules || []).map((r) => String(r.from == null ? '' : r.from).trim()));
     let added = 0;
     for (const s of FIX_SEED) { if (!have.has(s.from)) { FIX.rules.push({ id: fixUid(), from: s.from, to: s.to, note: '', ts: Date.now() }); added++; } }
+    // v4 (ruling 1): a stored rule the rulebook quarantines as a malformed slash (e.g. נסו → נסה/י) is
+    // corrected to the built-in long form when one exists for the same "from". Logged, not silent.
+    for (const r of FIX.rules) {
+      const seed = FIX_SEED.find((x) => x.from === String(r.from || '').trim());
+      if (seed && seed.to !== r.to && !RB.fixRuleActive(r)) { console.info('[Auto-fix v4] ' + r.from + ': ' + r.to + ' → ' + seed.to + ' (ruling 1)'); r.to = seed.to; r.note = (r.note ? r.note + ' · ' : '') + 'corrected per ruling 1'; }
+    }
     FIX.seedVersion = SEED_VERSION;
     try { await store.set({ autoFix: FIX }); } catch (e) {}
   }
@@ -1122,6 +1143,7 @@ function fixApplyText(text, skipSlash) {
   for (const r of (FIX.rules || [])) {
     const from = String(r.from == null ? '' : r.from).trim(), to = String(r.to == null ? '' : r.to);
     if (!from || !to) continue;
+    if (!RB.fixRuleActive(r)) continue;                // quarantined (malformed slash / other client's glossary) — see rulebook.js
     if (skipSlash && to.indexOf('/') >= 0) continue;   // 🤖 prompt/machine-directed segment: never force a gender slash onto a bot-directed verb
     let re; try { re = new RegExp('(^|[^' + HEB_L + '])(ו?)(' + fixEsc(from) + ')(?![' + HEB_L + '])', 'g'); } catch (_) { continue; }
     // A plural-imperative→slash rule (from ends in ו, to has a gender slash) must NOT fire on a
@@ -1231,7 +1253,7 @@ async function qaSave() { QA.updatedAt = Date.now(); try { await store.set({ qaR
 let SHOT = { enabled: false, updatedAt: 0 };
 async function shotLoad() { try { SHOT = await store.get('shotContext', { enabled: false, updatedAt: 0 }); } catch (e) {} if (!SHOT) SHOT = { enabled: false, updatedAt: 0 }; if (SHOT.enabled === undefined) SHOT.enabled = false; return SHOT; }
 async function shotSave() { SHOT.updatedAt = Date.now(); try { await store.set({ shotContext: SHOT }); } catch (e) {} }
-function modelVision(model) { return /gpt-5|gpt-4o|gpt-4\.1|o4|vision/i.test(String(model || '')); }   // GPT-5 family + 4o are multimodal
+function modelVision(model) { return /gpt-5|gpt-4o|gpt-4\.1|o4|vision|^claude-/i.test(String(model || '')); }   // GPT-5 family, 4o and Claude are multimodal   // GPT-5 family + 4o are multimodal
 const SHOT_MAX_BYTES = 1500000;   // skip very large screenshots to keep cost/latency sane
 // Fetch each slice item's first screenshot as a data: URL, IN the Starling tab (credentialed),
 // returning [{i, dataUrl}]. Any failure is swallowed per-item — the caller falls back to text.
@@ -1312,7 +1334,7 @@ async function reviewPass(proposals, key, model, taskCtx) {
       for (const im of images) { userContent.push({ type: 'text', text: `item i=${im.i}:` }); userContent.push({ type: 'image_url', image_url: { url: im.dataUrl, detail: 'low' } }); }
     }
     try {
-      const r = await fetch('https://api.openai.com/v1/chat/completions', {
+      const r = await llmFetch({
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' },
         body: JSON.stringify({ model, temperature: 0.1, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: sysBase }, { role: 'user', content: userContent }] })
@@ -1342,35 +1364,58 @@ async function reviewPass(proposals, key, model, taskCtx) {
 
 // ---- GPT: system prompt (identical policy to the admin Copy Deck tool) ------
 // tiktok=true appends the TikTok Hebrew Style Guide (Starling / Feishu). Omit it for memoQ/Crowdin/YiCAT.
-function sysPrompt(mode, plural, tiktok) {
-  const base =
-    'You are a professional English→Hebrew (he-IL) localization specialist for TikTok product UI and help-center content.\n' +
-    'PRIORITIES, in order (a higher rule wins when they conflict): (1) MEANING — translate the actual meaning of "src" IN CONTEXT; no omissions, no additions; never mistranslate an ambiguous English word from a glossary surface-match alone. (2) CONTEXT — use "key", "context", "fullSource", and the UI role they imply. (3) LOCKED TERMS — the mandatory glossary below is non-negotiable. (4) PREFERRED TERMS — the per-item "terms" apply ONLY when their sense/POS match the occurrence. (5) NATURAL HEBREW — idiomatic professional localization, not literal word-for-word. (6) PROJECT STYLE — the house rules below (gender, register, punctuation, placeholders, numbers, brands). The preservation and style rules that follow are how to EXECUTE these priorities, not a licence to bury meaning under formatting.\n' +
-    'STRICT PRESERVATION (applies to every item):\n' +
-    '- Keep EVERY placeholder and tag byte-for-byte and in the same order and count: {x}, {{x}}, %s, %1$s, HTML like <b>…</b> / <p> / <ul> / <li> / <br>, XLIFF inline tags like <g id="1">…</g> / <x/>, and circled markers ①②③. Never translate, rename, reorder, add, or drop any of them.\n' +
-    '- Keep "TikTok" and other brand / product / feature names in Latin script — do not translate or transliterate them, and keep them EXACTLY as in the source including internal spaces and capitalization: "TikTok Lite" stays "TikTok Lite" (never "TikTok-Lite" or "TikTokLite"). When adding a Hebrew prefix to a Latin name use a maqaf between the prefix and the name (ב-TikTok Lite / וב-TikTok Lite), never inside the name.\n' +
-    '- MARKDOWN EMPHASIS: keep every **bold** and *italic* marker from the source — same count, wrapping the SAME term (its Hebrew equivalent, or the Latin brand kept verbatim). If the source wraps a term in **…** the target MUST wrap the corresponding term in **…** too. Never drop the asterisks (a common failure) and never add new ones.\n' +
-    '- PUNCTUATION: MIRROR the source\'s sentence-final full stop (.). If the English source ends with "." the Hebrew MUST end with "."; if the source does NOT end with "." the Hebrew must NOT end with ".". Never add or drop it independently. Keep "?", "!", "…" and all mid-sentence punctuation as the meaning requires.\n' +
-    '- NUMBERS & CURRENCY (do-not-translate): keep every number, amount, date and currency symbol/code from the SOURCE — the SAME digits, the SAME currency and the SAME grouping ("67,000" stays "67,000", "MX$" stays "MX$", "₩" stays "₩"). Never translate, convert to another currency, localize or change the figure, and never keep a different (stale TM) figure from the old target. HEBREW POSITION: place the currency symbol or code AFTER the number for EVERY foreign currency — symbols ($, MX$, ₩, €, £, ₪, ฿, R$…) and letter codes (Rp, kr, zł…) alike — adjacent, no space: "Under $20" → "מתחת ל-20$" (never "$20"), "$100+" → "מעל ל-100$", "MX$67,000" → "67,000MX$", "₩4,500,000" → "4,500,000₩", "Rp150,000" → "150,000Rp". Only the symbol/code moves to follow the number (the he-IL number-formatting convention); the digits and currency identity stay exactly as in the source.\n' +
-    '- HEBREW NUMBER POSITION for counted nouns (time units, people, items — any "{n} <noun>"): Hebrew places the number differently for 1 vs many. SINGULAR / CLDR-"one" form (count is exactly 1) → put the NOUN BEFORE the placeholder: "{s_num} hour" → "שעה {s_num}", "{s_num} day" → "יום {s_num}", "{s_num} min" → "דקה {s_num}", "1 person" → "אדם {s_number}" (mirrors שעה אחת / יום אחד / אדם אחד). PLURAL form → put the PLACEHOLDER FIRST with the plural noun: "{s_num} hours" → "{s_num} שעות", "{s_num} days" → "{s_num} ימים", "{s_num} people" → "{s_number} אנשים". Keep the {placeholder} byte-for-byte — only its POSITION changes. Compounds follow the same rule per noun, e.g. "{s_num} hour {s_num} min" → "שעה {s_num} ו-{s_num} דקות".\n' +
-    '- STATUS-LABEL VERBS: translate English past-participle status labels as Hebrew VERB phrases, not noun phrases — "Last updated" → "עודכן לאחרונה" (NOT the noun "עדכון אחרון" / "עידכון אחרון", which also wrongly implies a final update), "Last modified" → "נערך לאחרונה", "Last edited" → "נערך לאחרונה", "Last synced" → "סונכרן לאחרונה", "Last seen" → "נצפה לאחרונה", "Last saved" → "נשמר לאחרונה". Keep any {placeholder}, its colon and position (e.g. "Last updated: {s_updateDate}" → "עודכן לאחרונה: {s_updateDate}").\n' +
-    '- NO ADDITIONS: render ONLY what the source says. Never add names, facts, titles or clauses not present or implied in the source (e.g. do not insert a person\'s name like "דיוגו דאלוט" / "ראמי רביע" when the source has none). If the existing target contains such an addition, REMOVE it.\n' +
-    '- NO SPACE BEFORE PUNCTUATION: no space before "." "," ":" ";" "!" "?"; no double spaces; no leading/trailing spaces.\n' +
-    '- SEGMENT CONTEXT (each item MAY include extra fields "key", "context", "fullSource" — USE them to decide, and NEVER echo them into the output):\n' +
-    '  • "key" = the string\'s resource key; its suffix/segments hint at the UI ROLE — resolve the register/role dilemma (gerund vs imperative) from it instead of guessing: suffixes like "_title"/"_heading"/"_desc"/"_subtitle" ⇒ a title/label/body → GERUND (שם פעולה); "_btn"/"_button"/"_cta" ⇒ a button → GERUND; "_toast"/"_tip"/"_tooltip"/"_hint"/"_placeholder" ⇒ inline instruction → IMPERATIVE slash; a list/enum namespace (e.g. "reasonForDispute", "...Reasons...") ⇒ a selectable option → short noun/nominal phrase. When "key" or "context" makes the role clear, do NOT set "flag".\n' +
-    '  • "context" = a human note from the string owner explaining the meaning, intent, what a term does or does NOT mean, or which tokens are variables. Treat it as AUTHORITATIVE and follow it, but never translate the note itself. Because it is written for THIS specific string, it OUTRANKS any general house-style rule or glossary term (built-in OR ingested from a style doc) whenever they conflict for this item — the per-item note wins.\n' +
-    '  • "fullSource" = the COMPLETE source string when "src" is only a split fragment of it. Use it to understand the fragment in context, but translate ONLY the "src" fragment — do NOT translate, add, or repeat the rest of "fullSource".\n' +
-    '  • "terms" = client-approved term references whose English appears in THIS segment, each as {"en","he","pos","definition"?}. A term is EVIDENCE about how a particular SENSE is translated — it is NOT a search-and-replace rule for every occurrence of the same English letters. APPLY a term ONLY when the occurrence in "src" has the SAME meaning/sense AND the SAME grammatical function as the term\'s "definition" and "pos". If the sense or the part of speech does not match, IGNORE that term for this occurrence and translate by the actual sentence context. A surface word-match alone never proves a term applies. When several terms overlap, the MULTI-WORD / more specific match wins over a single word it contains (terms are listed most-specific first). These are STRONG DEFAULTS, not locked terms: the per-item "context" note and correct Hebrew grammar still win. Never echo this field. EXAMPLES: (a) term {"en":"Due","he":"לתשלום","pos":"adjective","definition":"owed or expected to be paid"} does NOT apply to "unavailable due to their privacy settings" — here "due to" means "because of" → עקב / בשל / מפני ש…, never לתשלום. (b) term {"en":"Application","he":"הגשת בקשה"} must NOT force "הגשת" into "verification application" when the meaning is the request itself → בקשת האימות. (c) a NOUN term for "Highlight" must NOT be forced onto "Highlight the relevant section", where it is a VERB → הדגש/י.\n' +
-    (plural
-      ? '- FORM OF ADDRESS: Hebrew MUST be in לשון רבים — plural, gender-neutral forms (e.g. הצטרפו, שלמו, לחצו, קראו ואשרו) — never masculine singular and never slash forms like שלם/י.\n'
-      : '- FORM OF ADDRESS: use the SINGULAR, gender-neutral second person with a slash for both genders (לחץ/י, את/ה, בחר/י). Put the final letter (אות סופית) BEFORE the slash. If the masculine and feminine suffixes differ, write BOTH words in full to avoid a malformed feminine (התחל/התחילי, not התחל/י). Use the imperative when the source is imperative. NEVER use the plural form of address (לשון רבים) and NEVER use masculine-singular alone — even when the source number/gender is ambiguous, DEFAULT to this singular gender-slash form. Convert any plural imperative to it: הצטרפו→הצטרף/י, נסו→נסה/י, חכו→חכה/י, היכנסו→היכנס/י, שלמו→שלם/י, לחצו→לחץ/י, קראו→קרא/י; and when the stem differs write both words IN FULL: בדקו→בדוק/בדקי, אמרו→אמור/אמרי, שמרו→שמור/שמרי.\n') +
-    '- MACHINE-DIRECTED PROMPTS: an item marked "machinePrompt": true is an AI-generation PROMPT whose imperatives address the MODEL, not a person. For such items OVERRIDE the form-of-address rule above and decide EACH imperative by what it acts on: a verb telling the MODEL to produce/transform the output, scene, style or reference (make/turn/apply/use/refer to/surround/include/avoid/keep/render/generate/add/ensure → הפוך, השתמש, הקף, התייחס, כלול, הימנע, שמור, צור) → MASCULINE-SINGULAR imperative, NO gender slash. A verb the END USER performs in the app (tap/click/open/save/share/select → הקש/י, פתח/י, שמור/שמרי) → keep the gender slash. ONE item may contain BOTH — render each verb by its own addressee; never force a slash onto a model-directed verb, and never force masculine onto a user action.\n' +
-    (tiktok ? brainText() : '') +
-    '- Return ONLY the JSON object requested. No commentary, no markdown, no code fences.';
-  if (mode === 'translate') return base + '\nTASK: Translate each item\'s English "src" into natural, idiomatic Hebrew.';
-  return base + '\nTASK: Proofread and correct each item\'s Hebrew "tgt" (use "src" as the reference meaning): fix grammar, spelling, terminology, and punctuation' +
-    (plural ? ', and convert imperatives / second person to plural gender-neutral' : ', and convert imperatives / second person to the singular gender-neutral slash form (לחץ/י)') +
-    '. Preserve the original meaning. If an item is already correct, return it unchanged.';
+// ---- LLM ROUTER (2026-09-28) ----------------------------------------------
+// Every model call in this panel is written against the OpenAI chat-completions shape. llmFetch()
+// keeps that contract: for a gpt-* model it is a plain fetch to OpenAI; for a claude-* model it
+// converts the request to the Anthropic Messages API (system prompt cached, adaptive thinking,
+// server-side refusal fallback, no sampling params — Opus 5 rejects them) and converts the reply
+// back into { choices:[{message:{content}}], usage }, so no caller has to change.
+async function llmFetch(opts) {
+  let body = null; try { body = JSON.parse(opts && opts.body); } catch (e) {}
+  if (!body || !/^claude-/i.test(String(body.model || ''))) return fetch('https://api.openai.com/v1/chat/completions', opts);
+  const fail = (status, message) => ({ ok: false, status, json: async () => ({ error: { message } }) });
+  const akey = await store.get('akey', '');
+  if (!akey) return fail(401, 'Add your Anthropic API key in ⚙️ Settings to use ' + body.model + '.');
+  const sys = [], msgs = [];
+  for (const m of (body.messages || [])) {
+    if (m.role === 'system') { sys.push(typeof m.content === 'string' ? m.content : (m.content || []).map((p) => p.text || '').join('\n')); continue; }
+    const content = typeof m.content === 'string' ? m.content : (m.content || []).map((p) => {
+      if (p.type === 'text') return { type: 'text', text: p.text };
+      if (p.type === 'image_url') {
+        const u = String((p.image_url && p.image_url.url) || ''), mm = u.match(/^data:(image\/[a-z+.-]+);base64,(.+)$/i);
+        return mm ? { type: 'image', source: { type: 'base64', media_type: mm[1], data: mm[2] } } : { type: 'image', source: { type: 'url', url: u } };
+      }
+      return null;
+    }).filter(Boolean);
+    msgs.push({ role: m.role === 'assistant' ? 'assistant' : 'user', content });
+  }
+  const sysText = sys.join('\n\n') + (body.response_format ? '\n\nReturn ONLY one JSON object — no prose, no code fences.' : '');
+  const req = { model: body.model, max_tokens: 16000, thinking: { type: 'adaptive' }, fallbacks: 'default', messages: msgs };
+  if (sysText.trim()) req.system = [{ type: 'text', text: sysText, cache_control: { type: 'ephemeral' } }];
+  let r;
+  try {
+    r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': akey, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'server-side-fallback-2026-07-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+      body: JSON.stringify(req)
+    });
+  } catch (e) { return fail(0, 'Network error reaching Claude: ' + (e && e.message || e)); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) return fail(r.status, (j.error && j.error.message) || ('Claude error ' + r.status));
+  if (j.stop_reason === 'refusal') return fail(422, 'Claude declined this batch (' + ((j.stop_details && j.stop_details.category) || 'policy') + ') — try GPT for it.');
+  if (j.stop_reason === 'max_tokens') return fail(413, 'Claude reached max_tokens — run fewer segments at a time.');
+  let text = (j.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
+  if (body.response_format) { const a = text.indexOf('{'), b = text.lastIndexOf('}'); if (a >= 0 && b > a) text = text.slice(a, b + 1); }
+  const u = j.usage || {};
+  const out = { model: j.model, choices: [{ message: { role: 'assistant', content: text } }],
+    usage: { prompt_tokens: (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0), completion_tokens: u.output_tokens || 0, cache_read_tokens: u.cache_read_input_tokens || 0 } };
+  return { ok: true, status: 200, json: async () => out };
+}
+
+// The system prompt is built by rulebook.js (identical to what the evaluation harness tested).
+// srcs = the English sources in this batch, so only relevant brain-glossary entries are sent.
+function sysPrompt(mode, plural, tiktok, srcs) {
+  return RB.systemPrompt({ mode, plural, tiktok, extra: tiktok ? brainExtras(srcs) : '' });
 }
 
 async function gptBatch(items, mode, key, model, plural, extraSys, tiktok, images) {
@@ -1385,13 +1430,13 @@ async function gptBatch(items, mode, key, model, plural, extraSys, tiktok, image
     userContent = [{ type: 'text', text: user }];
     for (const im of images) { userContent.push({ type: 'text', text: `item i=${im.i}:` }); userContent.push({ type: 'image_url', image_url: { url: im.dataUrl, detail: 'low' } }); }
   }
-  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+  const r = await llmFetch({
     method: 'POST',
     headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model, temperature: mode === 'translate' ? 0.2 : 0.1,
       response_format: { type: 'json_object' },
-      messages: [{ role: 'system', content: sysPrompt(mode, plural, tiktok) + (extraSys ? '\n' + extraSys : '') }, { role: 'user', content: userContent }]
+      messages: [{ role: 'system', content: sysPrompt(mode, plural, tiktok, (items || []).map((x) => x && x.src)) + (extraSys ? '\n' + extraSys : '') }, { role: 'user', content: userContent }]
     })
   });
   const data = await r.json();
@@ -1513,6 +1558,7 @@ async function doHarvest() {
 }
 
 async function doGpt() {
+  try { await tbAutoGrab(); } catch (e) { dbg('term auto-grab skipped', e && e.message); }
   const key = await store.get('key', '');
   if (!key) { info('gpt-info', 'Add your OpenAI key in Settings first.', 'err'); $('settings').open = true; return; }
   const model = $('model').value;
@@ -1561,6 +1607,7 @@ async function doGpt() {
           const it = { i: j + 1, src: String(s.src || ''), tgt: String(s.tgt || '') };
           if (s.key) it.key = String(s.key);                 // role hint (…_title/_btn/_toast/…)
           if (s.context) it.context = String(s.context);     // translator note from Starling
+          if (s.comments) it.comments = String(s.comments);  // Comment-panel threads (PM / language manager) — authoritative like context
           if (s.fullSrc) it.fullSource = String(s.fullSrc);  // complete string when src is a split fragment
           if (isPromptCtx(s.key)) { it.machinePrompt = true; s._promptCtx = true; }   // 🤖 AI-prompt key → bot-directed address
           else s._promptCtx = false;
@@ -1595,7 +1642,7 @@ async function doGpt() {
               const tagWrapped = hasTags(next) || hasTags(s.src) || hasTags(s.tgt);
               const manual = !!s.chip || tagWrapped;
               const flag = (o.flag && String(o.flag).trim()) ? String(o.flag).trim() : '';
-              proposals.push({ seg: s.seg, src: s.src, old: s.tgt, next: next, tagged: !!s.tagged || tagWrapped, chip: !!s.chip, tagWrapped: tagWrapped, manual: manual, filled: gm === 'translate' && wasEmpty, flag: flag, promptCtx: !!s._promptCtx, key: s.key || '', context: s.context || '', fullSrc: s.fullSrc || '', shots: s.shots || [], termsUsed: s._terms || [], classified: s._classified || [], risk: s._risk || [], shotImg: imgByI.get(idx + 1) || null, approved: !manual && next !== String(s.tgt) });
+              proposals.push({ seg: s.seg, src: s.src, old: s.tgt, next: next, tagged: !!s.tagged || tagWrapped, chip: !!s.chip, tagWrapped: tagWrapped, manual: manual, filled: gm === 'translate' && wasEmpty, flag: flag, promptCtx: !!s._promptCtx, key: s.key || '', context: s.context || '', comments: s.comments || '', fullSrc: s.fullSrc || '', shots: s.shots || [], termsUsed: s._terms || [], classified: s._classified || [], risk: s._risk || [], shotImg: imgByI.get(idx + 1) || null, approved: !manual && next !== String(s.tgt) });
               dbg('seg', s.seg, { src: s.src, terms: (s._classified || []).map((c) => `${c.term.en}→${c.term.he}${c.term.pos ? ' (' + c.term.pos + ')' : ''} [${c.status}]${c.term.definition ? ' «' + c.term.definition + '»' : ''}`), risk: s._risk || [], key: s.key || '', hasContext: !!s.context, shotAttached: !!imgByI.get(idx + 1), out: next });
               done++;
               if (gm === 'translate' && wasEmpty) filled++;
@@ -1615,6 +1662,7 @@ async function doGpt() {
     lockCheck(proposals); // 4) validators — locked-term …
     consistCheck(proposals); //     … in-task drift …
     tbCheck(proposals);   //     … term-base applicability (soft) …
+    rbCheck(proposals);   //     … 🧾 rulebook checks (Benjy's rulings, flag-only) …
     btnCheck(proposals);  //     … button/label register (imperative on a button → שם פעולה, soft) …
     promptGate(proposals);//     … 🤖 AI-prompt hold: bot-directed segment still carrying a slash → held for review …
     phCheck(proposals);   //     … and the placeholder guard, all on the reviewer's FINAL text (#12/#26)
@@ -1712,6 +1760,8 @@ function renderReview() {
         ${boldIssue(p.src, p.next) ? `<span class="rc-warn" title="Markdown **bold** from the source (**${esc(boldIssue(p.src, p.next))}**) isn't wrapped in the target — the asterisks were dropped. Add ** around the matching term.">⚠ bold</span>` : ''}
         ${p.flag ? `<span class="rc-warn" title="${esc(p.flag)}" style="background:#7a5c0a">⚠ register</span>` : ''}
         ${p.lockMiss ? `<span class="rc-warn" style="background:#b91c1c" title="MANDATORY locked term missing from the target — must be rendered exactly (a prefix is OK): ${esc(p.lockMiss.join(' · '))}. Fix the Hebrew, then this clears.">🔒 locked term</span>` : ''}
+        ${p.comments ? `<span class="rc-warn" style="background:#1e3a8a" title="Starling comment on this string (sent to the model as authoritative context): ${esc(p.comments)}">💬 comment</span>` : ''}
+        ${p.rbFind ? `<span class="rc-warn" style="background:${p.rbFind.some((f) => f.severity === 'error') ? '#9f1239' : '#6b21a8'}" title="Rulebook (rulings of 28 Sep): ${esc(p.rbFind.map((f) => f.msg).join(' · '))}">🧾 rulebook ×${p.rbFind.length}</span>` : ''}
         ${p.fixApplied ? `<span class="rc-warn" style="background:#0e7490" title="Auto-corrected by your locked 🩹 Auto-fix rules: ${esc(p.fixApplied.join(' · '))}. Edit the text to revert.">✎ auto-fixed</span>` : ''}
         ${p.fuzzy && p.fuzzy.matches.length ? `<span class="rc-warn" style="background:#3b0764" title="No exact memory match, but ${p.fuzzy.matches.length} near-match(es) from your past work are shown below — click “use” to adopt one. Nothing is applied automatically.">🧠 ${p.fuzzy.matches.length} near-match${p.fuzzy.matches.length === 1 ? '' : 'es'}</span>` : ''}
         ${p.consist && p.consist.length ? p.consist.map((c) => `<span class="rc-warn" style="background:#7c2d12" title="Consistency check: “${esc(c.en)}” was translated as “${esc(c.he)}” on its own (segment ${esc(String(c.from))}), but this segment's target doesn't appear to use that wording. Flag only — nothing was changed. Fix the Hebrew by hand if it should match, or click 🔒 lock to make “${esc(c.en)}” → “${esc(c.he)}” mandatory everywhere.">⚖ consistency: ${esc(c.en)}</span><button class="rc-lockterm" type="button" data-en="${esc(c.en)}" data-he="${esc(c.he)}" title="Lock “${esc(c.en)}” → “${esc(c.he)}” as a mandatory term (adds it to 🔒 Locked terms)">🔒 lock</button>`).join('') : ''}
@@ -2243,11 +2293,11 @@ function lqParseRange(str, max) {
 function lqSys(plural) {
   return 'You are a senior English→Hebrew (he-IL) localization QA reviewer for TikTok product & help-center copy.\n' +
     'For each item an automated checker flagged a POSSIBLE error in the Hebrew "tgt", described by "error_type" / "error_comment", with a machine "ai_suggested" rewrite. Judge whether the flagged error is a REAL error.\n' +
-    'HOUSE STYLE for any Hebrew you output (FORM OF ADDRESS): ' + (plural ? 'plural, gender-neutral (לשון רבים — e.g. הצטרפו, לחצו, קראו) — never masculine-singular, never שלם/י slash forms. ' : 'singular, gender-neutral with a slash for both genders (לחץ/י, את/ה, בחר/י) — final letter before the slash; write both words in full when the suffixes differ (התחל/התחילי, not התחל/י); NOT the plural form and NOT masculine-singular alone. ') +
+    'HOUSE STYLE for any Hebrew you output (FORM OF ADDRESS): ' + (plural ? 'plural, gender-neutral (לשון רבים — e.g. הצטרפו, לחצו, קראו) — never masculine-singular, never שלם/י slash forms. ' : 'singular, gender-neutral with a slash for both genders (לחץ/י, את/ה, בחר/י) — final letter before the slash; write both words in full when the feminine is not simply masculine+י (נסה/נסי, צפה/צפי, השלם/השלימי, בדוק/בדקי — never נסה/י); a group of people takes the plain masculine plural with no slash (יוצרים, not יוצרים/ות); NOT the plural form and NOT masculine-singular alone. ') +
     'Keep "TikTok" and brand / product / feature names in Latin script, EXACTLY as in "src" including internal spaces/capitalization ("TikTok Lite" stays "TikTok Lite", never "TikTok-Lite"/"TikTokLite"; a Hebrew prefix takes a maqaf before the name: ב-TikTok Lite). Keep EVERY placeholder / tag byte-for-byte and in order: {x}, {{x}}, %s, %1$s, <b>…</b>, <g id="1">…</g>, ①②③.\n' +
     brainText() + '\n' +
     'PUNCTUATION: MIRROR the English "src" sentence-final full stop (.). If "src" ends with "." then "corrected" MUST end with "."; if "src" does NOT end with "." then "corrected" must NOT end with ".". Never add or drop it independently. Keep "?", "!", "…" as the meaning requires.\n' +
-    'NUMBERS & CURRENCY (do-not-translate): "corrected" must keep every number, amount and currency symbol/code from "src" — same digits, same currency, same grouping — never translate/convert/localize/change the figure, and never keep a different (stale TM) figure from "tgt". A differing figure IS a valid error → verdict "valid" and fix it. HEBREW POSITION: the currency symbol/code goes AFTER the number for every foreign currency ($, MX$, ₩, €, £, Rp, R$, kr…): "$20"→"20$", "$100+"→"100$+", "MX$67,000"→"67,000MX$", "Rp150,000"→"150,000Rp". A target that puts the symbol BEFORE the number (e.g. "$20") when the figure is otherwise right is a positional error → "valid", fix the order only (do not treat the moved symbol as a changed amount).\n' +
+    'NUMBERS & CURRENCY (do-not-translate): "corrected" must keep every number, amount and currency symbol/code from "src" — same digits, same currency, same grouping — never translate/convert/localize/change the figure, and never keep a different (stale TM) figure from "tgt". A differing figure IS a valid error → verdict "valid" and fix it. POSITION (ruling 2): the currency symbol/code stays exactly where the SOURCE puts it ("$20" stays "$20", "Rp150,000" stays "Rp150,000"). A target that MOVED the symbol to the other side of the number is a positional error → "valid", fix the order only.\n' +
     'ADDITIONS: if "tgt" contains a name, word or clause NOT present or implied in "src" (e.g. a player name like "ראמי רביע" the source omits), the Addition flag is VALID → verdict "valid" and "corrected" must REMOVE the added content. Never introduce content not in "src".\n' +
     'SPACING: "corrected" must have no space before "." "," ":" ";" "!" "?", no double spaces, and no leading/trailing spaces.\n' +
     'TERMINOLOGY SKEPTICISM: you do NOT have the project glossary / terminology reference. When the checker justifies an error ONLY by citing a "terminology reference", "approved target string", "terminology list" or "should remain in English" that you cannot see, do NOT assume it is correct — treat such unverifiable claims skeptically and lean "invalid" unless the Hebrew is independently wrong. Common English words/phrases ("for you", "tips", "settings", "learn more") are NOT brand names and are normally translated to Hebrew; only unmistakable product/feature proper nouns (e.g. TikTok, TikTok LIVE) must stay in Latin script. Note: standalone "LIVE" (the live-streaming feature/badge) is NOT kept in Latin — per the glossary it is translated to "שידור חי"; only the full product name "TikTok LIVE" stays in Latin.\n' +
@@ -2273,7 +2323,7 @@ async function lqRun() {
   const callGpt = async (items) => {
     const body = { model, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: lqSys(plural) }, { role: 'user', content: 'Adjudicate these items. Return one entry per item with the same "i".\n' + JSON.stringify({ items }) }] };
     if (!dropTemp) body.temperature = 0.1;
-    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+    const resp = await llmFetch({
       method: 'POST', headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' }, body: JSON.stringify(body)
     });
     const data = await resp.json();
@@ -2621,7 +2671,7 @@ function wbBuildIndex() {
 }
 const WB_FIELDS = [['key', 'Key'], ['valid', 'Valid (Y/N)'], ['final', 'Final Translation'], ['src', 'Source (EN)'], ['tgt', 'Current target'], ['lang', 'Language'], ['updated', 'Updated on Starling']];
 const STAR_KEY_URL = 'https://starling.bytedance.com/#/all-task?pageNum=1&pageSize=10&progress=all&translateTypeList=%5B%5D&sortType=1&order=0&sourceLocales=en&targetLocales=he-IL&textKeys=';
-const CS_EXPECT = 40;   // must match content.js CS_VERSION
+const CS_EXPECT = 41;   // must match content.js CS_VERSION
 
 // Direct call surface — invokes the page's window.__wb.* via chrome.scripting.executeScript.
 // This bypasses chrome.runtime messaging entirely, so a stale/duplicate content-script
@@ -5001,7 +5051,7 @@ async function pmGptRefine(items, key, model) {
     '- Set "keep": false when "en" is NOT a reusable term — a function/stop word (before, more, your), a context-only fragment, or too variable to pin as one Hebrew string.\n' +
     'Return ONLY JSON {"out":[{"i":<number>,"he":"<canonical hebrew>","keep":<true|false>,"note":"<optional short>"}]}, one per input item, same "i".';
   const payload = items.map((it) => ({ i: it.i, en: it.en, mined_he: it.he, ex: (it.ex || []).map((e) => ({ src: String(e.src || '').slice(0, 160), tgt: String(e.tgt || '').slice(0, 160) })) }));
-  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+  const r = await llmFetch({
     method: 'POST', headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model, temperature: 0.1, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: sys }, { role: 'user', content: JSON.stringify({ items: payload }) }] })
   });
@@ -5132,7 +5182,7 @@ async function clGpt(key, model, sys, user, tempState) {
   const callGpt = async () => {
     const body = { model, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: sys }, { role: 'user', content: user }] };
     if (!tempState.drop) body.temperature = 0.1;
-    const r = await fetch('https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const r = await llmFetch({ method: 'POST', headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const data = await r.json(); if (!r.ok) throw new Error((data.error && data.error.message) || ('HTTP ' + r.status)); return data;
   };
   try { return await callGpt(); }
@@ -5470,7 +5520,8 @@ function lkSearch(q) {
 function snapshotAll() {
   return {
     _meta: { kind: 'starling-copilot-backup', ver: 1, ts: Date.now(), at: new Date().toISOString() },
-    styleBrain: BRAIN, consistencyTM: TM, lockedTerms: LOCK, autoFix: FIX, pluralMemory: PM, corpusIndex: CB.index || null
+    styleBrain: BRAIN, consistencyTM: TM, lockedTerms: LOCK, autoFix: FIX, pluralMemory: PM, corpusIndex: CB.index || null,
+    termBase: TB   // Starling term references + their DNT flags (was missing from backups before 2026-09-28)
   };
 }
 function backupAll() {
@@ -5478,7 +5529,7 @@ function backupAll() {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
   a.download = 'starling-brains-backup-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.json'; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-  cbInfo(`Backup downloaded — ${BRAIN.rules.length} rules · ${BRAIN.glossary.length} terms · ${tmCount()} memory · ${lockCount()} locked · ${fixCount()} auto-fix · ${pmCount()} plural. Keep it to roll back anytime.`, 'good');
+  cbInfo(`Backup downloaded — ${BRAIN.rules.length} rules · ${BRAIN.glossary.length} terms · ${tmCount()} memory · ${lockCount()} locked · ${fixCount()} auto-fix · ${pmCount()} plural · ${tbCount()} term-base. Keep it to roll back anytime.`, 'good');
 }
 async function restoreAll(file) {
   try {
@@ -5491,6 +5542,7 @@ async function restoreAll(file) {
     if (o.lockedTerms) { LOCK = o.lockedTerms; if (!LOCK.terms) LOCK.terms = []; await lockSave(); lockRefresh(); }
     if (o.autoFix) { FIX = o.autoFix; if (!FIX.rules) FIX.rules = []; await fixSave(); fixRefresh(); }
     if (o.pluralMemory) { PM = o.pluralMemory; if (!PM.map) PM.map = {}; await pmSave(); }
+    if (o.termBase) { TB = o.termBase; if (!TB.terms) TB.terms = []; if (TB.enabled === undefined) TB.enabled = true; await tbSave(); if (typeof tbRefresh === 'function') tbRefresh(); }
     if (o.corpusIndex) { CB.index = o.corpusIndex; try { await store.set({ corpusIndex: CB.index }); } catch (e) {} cbClassify(); cbRender(); cbBadge(); clBadge(); }
     cbInfo('Restored all brains from the backup. (The pre-restore state was also downloaded, just in case.)', 'good');
   } catch (e) { cbInfo('Restore failed: ' + (e.message || e), 'err'); }
@@ -5645,7 +5697,7 @@ async function brainDistill() {
     const existing = ((BRAIN.rules || []).map((r) => '- [' + r.cat + '] ' + r.text).join('\n') + '\n' + (BRAIN.glossary || []).map((g) => '- "' + g.en + '" → "' + g.he + '"').join('\n')).trim();
     const sys = 'You distill a TikTok Hebrew (he-IL) localization STYLE GUIDE document into a COMPACT, deduplicated ruleset for a translator/proofreader. Extract ONLY concrete, actionable rules and approved term mappings — no history, no rationale-only prose, no examples-only fluff, no generic localization common sense. Each rule ≤ ~30 words, imperative and specific. Categorize each rule as one of: ' + BRAIN_CATS.join(' | ') + '. Put exact EN→HE term equivalences in "glossary" (not "rules"). CRITICAL: do NOT repeat anything already covered by the EXISTING RULES the user provides. If a new rule CONTRADICTS an existing one, put it in "conflicts" (not "rules") with a short "conflictsWith" note naming what it clashes with. Return ONLY JSON: {"rules":[{"cat":"…","text":"…"}],"glossary":[{"en":"…","he":"…","note":"…"}],"conflicts":[{"cat":"…","text":"…","conflictsWith":"…"}]}. Keep Hebrew in Hebrew; never translate the rule text itself.';
     const user = 'EXISTING RULES (already enforced — do NOT repeat any of these):\n' + (existing || '(none ingested yet — but a built-in guide already covers voice, register, singular-slash address form, punctuation, numbers/dual, placeholders, and a base glossary; skip anything those cover)') + '\n\nSTYLE-GUIDE DOCUMENT TO DISTILL:\n' + doc.slice(0, 24000);
-    const r = await fetch('https://api.openai.com/v1/chat/completions', {
+    const r = await llmFetch({
       method: 'POST', headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model, temperature: 0.1, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: sys }, { role: 'user', content: user }] })
     });
@@ -5830,7 +5882,7 @@ async function hvDistill() {
       const callGpt = async () => {
         const body = { model, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: sys }, { role: 'user', content: user }] };
         if (!dropTemp) body.temperature = 0.1;
-        const r = await fetch('https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const r = await llmFetch({ method: 'POST', headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         const data = await r.json();
         if (!r.ok) throw new Error((data.error && data.error.message) || ('HTTP ' + r.status));
         return data;
@@ -5940,7 +5992,7 @@ async function lrnDistill() {
       const callGpt = async () => {
         const body = { model, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: sys }, { role: 'user', content: user }] };
         if (!dropTemp) body.temperature = 0.1;
-        const rr = await fetch('https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const rr = await llmFetch({ method: 'POST', headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         const data = await rr.json();
         if (!rr.ok) throw new Error((data.error && data.error.message) || ('HTTP ' + rr.status));
         return data;
@@ -6263,13 +6315,15 @@ async function tbImport(file) {
 
 async function init() {
   $('key').value = await store.get('key', '');
-  $('model').value = await store.get('model', 'gpt-5.4');
+  $('model').value = await store.get('model', 'claude-opus-5');
+  if ($('akey')) $('akey').value = await store.get('akey', '');
   $('plural').checked = await store.get('plural', false);   // default OFF = singular gender-neutral slashes (TikTok guide); ON = plural לשון רבים for other clients
   MEASURE = await store.get('measureMode', false);          // 📐 measurement task → unitFix forces m→מ' , s→שנ'
   if ($('measure-toggle')) { $('measure-toggle').checked = !!MEASURE; $('measure-toggle').addEventListener('change', async (e) => { MEASURE = e.target.checked; try { await store.set({ measureMode: MEASURE }); } catch (_) {} }); }
   $('selectors').value = await store.get('selectorsRaw', '');
   $('run-model').textContent = $('model').value;
 
+  if ($('akey-save')) $('akey-save').addEventListener('click', async () => { await store.set({ akey: $('akey').value.trim() }); info('harvest-info', 'Anthropic key saved.', 'good'); });
   $('key-save').addEventListener('click', async () => { await store.set({ key: $('key').value.trim() }); info('harvest-info', 'Key saved.', 'good'); });
   $('model').addEventListener('change', async () => { await store.set({ model: $('model').value }); $('run-model').textContent = $('model').value; if ($('lq-model')) $('lq-model').textContent = $('model').value; if ($('cw-model')) $('cw-model').textContent = $('model').value; if ($('mq-model')) $('mq-model').textContent = $('model').value; if ($('yc-model')) $('yc-model').textContent = $('model').value; runCost(); });
   $('plural').addEventListener('change', async () => { await store.set({ plural: $('plural').checked }); });
@@ -6312,6 +6366,8 @@ async function init() {
     if (p !== 'benjytrans') { alert('Wrong password — nothing was cleared.'); return false; }
     return true;
   };
+  $('brain-inject-rules').checked = !!(BRAIN && BRAIN.injectRules);
+  $('brain-inject-rules').addEventListener('change', async (e) => { BRAIN.injectRules = !!e.target.checked; await brainSave(); brainInfo(BRAIN.injectRules ? 'Brain rules will be sent with every Run (legacy mode).' : 'Brain rules are no longer sent — the rulebook applies. Glossary entries still ride along when they occur in the batch.', ''); });
   $('brain-clear').addEventListener('click', async () => {
     if (!clearPass('all ingested rules & glossary terms (the built-in guide stays)')) return;
     BRAIN.rules = []; BRAIN.glossary = []; await brainSave(); brainRefresh(); brainInfo('Cleared — back to the built-in guide only.', '');

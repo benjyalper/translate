@@ -31,9 +31,16 @@
         <input id="key" type="password" placeholder="sk-proj-…" />
         <button id="key-save" class="btn sm">Save</button>
       </div>
+      <label class="lbl">Anthropic API key <span class="hint">for Claude models · stored only in this browser</span></label>
+      <div class="row">
+        <input id="akey" type="password" placeholder="sk-ant-…" />
+        <button id="akey-save" class="btn sm">Save</button>
+      </div>
       <label class="lbl">Model</label>
       <select id="model">
-        <option value="gpt-5.4" selected>gpt-5.4 (recommended)</option>
+        <option value="claude-opus-5" selected>Claude Opus 5 (best Hebrew in the 28 Sep pilot · ~9× GPT cost)</option>
+        <option value="claude-sonnet-5">Claude Sonnet 5 (cheaper Claude · not yet piloted)</option>
+        <option value="gpt-5.4">gpt-5.4 (cheap &amp; fast)</option>
         <option value="gpt-5.5">gpt-5.5 (tone-sensitive)</option>
         <option value="gpt-5.4-mini">gpt-5.4-mini (cheap draft)</option>
       </select>
@@ -113,6 +120,7 @@
         <button id="brain-export" class="btn sm ghost" title="Download the whole brain as JSON (back up / commit to git)">Export</button>
         <label class="btn sm ghost" style="cursor:pointer">Import<input id="brain-import" type="file" accept="application/json" hidden /></label>
       </div>
+      <label class="ck"><input type="checkbox" id="brain-inject-rules" /> Also send the distilled brain <b>rules</b> with every Run <span class="hint">(legacy · off by default — the 🧾 rulebook of 28 Sep replaces them; many contradict the rulings. Glossary entries are still sent, but only those that occur in the batch.)</span></label>
       <div id="brain-info" class="info"></div>
       <div id="brain-review" class="brain-review" hidden></div>
       <details class="sub" id="brain-harvest">
@@ -838,6 +846,7 @@
 
   <script src="vendor/xlsx.mini.min.js"></script>
   <script src="pipeline-core.js"></script>
+  <script src="rulebook.js"></script>
   <script src="panel.js"></script>
 </body>
 </html>

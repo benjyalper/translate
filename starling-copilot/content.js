@@ -13,7 +13,7 @@
   // tab is running an older version, re-injects this file via chrome.scripting so stale tabs
   // self-heal (no page reload needed). Re-injection tears down the previous version's message
   // listener first (below) so there's never a double-listener race.
-  const CS_VERSION = 40;
+  const CS_VERSION = 41;
   if (window.__scVer === CS_VERSION) return;                         // this exact version already live here
   if (typeof window.__scCleanup === 'function') { try { window.__scCleanup(); } catch (e) {} }  // remove an older/stale one
   window.__scVer = CS_VERSION;
@@ -209,6 +209,15 @@
         seg.fullSrc = m.fullSource || '';
         seg.shots = m.shots || [];
       }
+      // COMMENTS (the editor's Comment panel — PM / language-manager threads). One task-wide read;
+      // attached per segment by string key (or rank). Best-effort: a failure leaves segments as-is.
+      try {
+        const cm = await apiComments(t);
+        if (cm && cm.ok) for (const seg of segs) {
+          const list = (seg.key && cm.byKey[seg.key]) || cm.byRank[String(seg.seg)] || [];
+          if (list.length) seg.comments = list.join(' | ');
+        }
+      } catch (e) { /* comments are optional context */ }
       // BACKFILL: the DOM scroll-scrape can drop a virtualized row, silently losing a whole
       // segment (the API list is complete). Add any rank the scroll didn't return, flagged
       // apiOnly so the panel can say so. We never saw the cell, so classify tag/chip
@@ -223,6 +232,7 @@
         const tgt = r.target == null ? '' : String(r.target);
         const tagLike = UNSAFE.test(src) || UNSAFE.test(tgt) || TAGRUN.test(src) || TAGRUN.test(tgt);
         segs.push({ seg: r.rank, src, tgt, chip: tagLike, tagged: tagLike, apiOnly: true, key: r.key || '', context: r.comment || '', fullSrc: r.fullSource || '', shots: r.shots || [] });
+        try { const cm = await apiComments(t); const list = (cm && cm.ok && ((r.key && cm.byKey[r.key]) || cm.byRank[rank])) || []; if (list.length) segs[segs.length - 1].comments = list.join(' | '); } catch (e) {}
         have.add(rank);
       }
       segs.sort((a, b) => (parseInt(a.seg, 10) || 0) - (parseInt(b.seg, 10) || 0));
@@ -1045,6 +1055,55 @@
       errs: ((t.errors || (r && r.errors) || []).length) || 0
     };
   }
+  // ---- Comments (GET /api/comment/GetComments — read-only) -----------------
+  // Starling requires the viewer's numeric user id as `Username`. It's read from the editor's own
+  // recent requests (performance entries), else from this task's row in My tasks (checkers /
+  // translators). Returns { ok, byKey: {key: [text…]}, byRank: {rank: [text…]} }; cached per task.
+  let __uid = '';
+  const __commentCache = new Map();
+  async function starlingUserId(tid) {
+    if (__uid) return __uid;
+    try {
+      for (const e of performance.getEntriesByType('resource')) {
+        const m = String(e.name).match(/[?&](?:Username|userId)=(\d+)/);
+        if (m && /\/api\/(comment|editor)\//.test(e.name)) { __uid = m[1]; return __uid; }
+      }
+    } catch (e) {}
+    try {
+      const j = await fetch('https://starling.bytedance.com/api/task/getMyTasks?offset=0&limit=200&translateTypeList=%5B%5D', { credentials: 'same-origin' }).then((r) => r.json());
+      const row = ((j && j.data && j.data.rows) || []).find((x) => String(x.subtaskId) === String(tid)) || ((j && j.data && j.data.rows) || [])[0];
+      const p = row && ((row.checkers || [])[0] || (row.translators || [])[0]);
+      if (p && p.id) __uid = String(p.id);
+    } catch (e) {}
+    return __uid;
+  }
+  function commentText(html) {
+    const div = document.createElement('div');
+    div.innerHTML = String(html == null ? '' : html).replace(/<span[^>]*data-user[^>]*>[\s\S]*?<\/span>/g, '');   // drop @-mention chips
+    return (div.textContent || '').replace(/[\u200b\u200e\u200f]/g, '').replace(/\s+/g, ' ').trim();
+  }
+  async function apiComments(tid) {
+    if (__commentCache.has(String(tid))) return __commentCache.get(String(tid));
+    const uid = await starlingUserId(tid);
+    if (!uid) return { ok: false, error: 'no user id' };
+    const u = 'https://starling.bytedance.com/api/comment/GetComments?TaskID=' + encodeURIComponent(tid) + '&TaskType=2&Username=' + encodeURIComponent(uid) + '&UserFrom=2';
+    const j = await fetch(u, { credentials: 'same-origin', headers: { accept: 'application/json' } }).then((r) => r.json());
+    if (!j || j.status_code !== 1000) return { ok: false, error: 'status_code ' + (j && j.status_code) };
+    const out = { ok: true, byKey: {}, byRank: {}, count: 0 };
+    const push = (map, k, v) => { if (!k || !v) return; (map[k] = map[k] || []).push(v); };
+    for (const c of ((j.data && j.data.Comments) || [])) {
+      const rm = c.ResourceMeta || {};
+      const parts = [commentText(c.CommentText)];
+      const replies = Array.isArray(c.ReplyList) ? c.ReplyList : [];
+      for (const r of replies) parts.push(commentText(r && (r.CommentText || r.Content)));
+      let txt = parts.filter(Boolean).join(' ↳ ');
+      if (!txt) continue;
+      if (c.SolveStatus === 2) txt += ' (resolved)';
+      push(out.byKey, rm.ResourceID, txt); push(out.byRank, String(rm.RankNo || ''), txt); out.count++;
+    }
+    __commentCache.set(String(tid), out);
+    return out;
+  }
   async function apiTask(taskId) {
     try {
       const u = API + 'getSourceTextListWithTargetText?limit=10000&sortType=1&offset=0&editMode=dual&taskId=' + encodeURIComponent(taskId) + '&_=' + Date.now();
@@ -1386,7 +1445,7 @@
   // reflects THIS (latest-loaded) version's functions.
   window.__wb = {
     ver: CS_VERSION, ctx: () => wbCtx(), find: (k, s) => wbFind(k, s), write: (e) => wbWrite(e || {}),
-    apiTask: (id) => apiTask(id), apiConfirm: (p) => apiConfirm(p || {}), apiTasks: (k) => apiTasks(k),
+    apiTask: (id) => apiTask(id), apiComments: (id) => apiComments(id), apiConfirm: (p) => apiConfirm(p || {}), apiTasks: (k) => apiTasks(k),
     apiConfirmAll: (p) => apiConfirmAll(p || {}), apiWriteConfirm: (e, q) => apiWriteConfirm(e || [], q), submitTask: () => domSubmit(),
     reveal: (seg) => revealSeg(seg).then((c) => !!c).catch(() => false),
     writeSeg: (e) => wbWriteBySeg(e || {}),

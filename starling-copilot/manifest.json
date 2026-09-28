@@ -3,7 +3,14 @@
   "name": "Starling Copilot (he-IL)",
   "version": "0.1.0",
   "description": "Harvest a Starling task, proofread/translate with GPT-5.4 (plural, tags preserved), review, and write back cell-by-cell.",
-  "permissions": ["storage", "unlimitedStorage", "sidePanel", "scripting", "activeTab", "tabs"],
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "sidePanel",
+    "scripting",
+    "activeTab",
+    "tabs"
+  ],
   "host_permissions": [
     "https://starling.bytedance.com/*",
     "https://*.crowdin.com/*",
@@ -12,35 +19,62 @@
     "http://gel-yicat.com/*",
     "https://gel-yicat.com/*",
     "https://api.openai.com/*",
+    "https://api.anthropic.com/*",
     "https://*.larkoffice.com/*",
     "https://*.feishu.cn/*",
     "https://*.feishu.net/*"
   ],
-  "background": { "service_worker": "background.js" },
-  "action": { "default_title": "Starling Copilot" },
-  "side_panel": { "default_path": "panel.html" },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Starling Copilot"
+  },
+  "side_panel": {
+    "default_path": "panel.html"
+  },
   "content_scripts": [
     {
-      "matches": ["https://starling.bytedance.com/*"],
-      "js": ["content.js"],
+      "matches": [
+        "https://starling.bytedance.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle",
       "all_frames": false
     },
     {
-      "matches": ["https://memoq.terratranslations.com/memoqweb/*"],
-      "js": ["memoq.js"],
+      "matches": [
+        "https://memoq.terratranslations.com/memoqweb/*"
+      ],
+      "js": [
+        "memoq.js"
+      ],
       "run_at": "document_idle",
       "all_frames": false
     },
     {
-      "matches": ["http://129.226.170.49/yizhe/yicat/*", "http://gel-yicat.com/yizhe/yicat/*", "https://gel-yicat.com/yizhe/yicat/*"],
-      "js": ["yicat.js"],
+      "matches": [
+        "http://129.226.170.49/yizhe/yicat/*",
+        "http://gel-yicat.com/yizhe/yicat/*",
+        "https://gel-yicat.com/yizhe/yicat/*"
+      ],
+      "js": [
+        "yicat.js"
+      ],
       "run_at": "document_idle",
       "all_frames": false
     },
     {
-      "matches": ["http://129.226.170.49/yizhe/yicat/*", "http://gel-yicat.com/yizhe/yicat/*", "https://gel-yicat.com/yizhe/yicat/*"],
-      "js": ["yicat-main.js"],
+      "matches": [
+        "http://129.226.170.49/yizhe/yicat/*",
+        "http://gel-yicat.com/yizhe/yicat/*",
+        "https://gel-yicat.com/yizhe/yicat/*"
+      ],
+      "js": [
+        "yicat-main.js"
+      ],
       "run_at": "document_idle",
       "world": "MAIN",
       "all_frames": false
