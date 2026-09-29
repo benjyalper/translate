@@ -329,6 +329,7 @@
       <div class="step"><span class="num">1</span> Load segments</div>
       <label class="seg-sel" title="Which segments to keep after harvesting. Blank = all. Numbers/ranges: 8 · 10-20 · 5,8,12 · 3-6,10. Or a term to match the source/target/key: Family Pairing. Mix them: 1-4, Family Pairing, 6.">Only segments <input type="text" id="seg-filter" placeholder="all — e.g. 10-20 · 5,8,12 · Family Pairing" /></label>
       <button id="harvest" class="btn">⬇ Harvest from this tab</button>
+      <button id="export-claude" class="btn sm ghost" style="margin-top:6px" title="Save the harvested task (segments, context, comments, terms, DNTs, locks, 🧾 flags) as JSON for a Claude session. Read-only — nothing is written to Starling.">⬇ Export task for Claude (.json)</button>
       <div class="or">or</div>
       <label class="btn ghost file-btn">📄 Load exported XLIFF
         <input type="file" id="xliff-file" accept=".xliff,.xml,.mqxliff,.sdlxliff,.txt" hidden />

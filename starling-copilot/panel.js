@@ -1666,6 +1666,49 @@ async function doHarvest() {
   }
 }
 
+// ⬇ EXPORT TASK FOR CLAUDE — a compact, read-only JSON of the harvested task (segments + key,
+// context, comments, term hints, DNTs, relevant locks, rulebook findings on the CURRENT target)
+// so a Claude session can translate/proofread the whole task and hand back an .xlsx for
+// ↩ Sheet → Starling. Never writes to Starling.
+async function doExportForClaude() {
+  if (!(state.segments || []).length) { info('harvest-info', 'Harvest the task first, then export.', 'err'); return; }
+  try { await tbAutoGrab(); } catch (e) { dbg('term auto-grab skipped', e && e.message); }
+  const t = await activeTab();
+  const m = String((t && t.url) || '').match(/taskid=(\d+)/i);
+  const taskId = m ? m[1] : (CUR_TASK || '');
+  const srcs = state.segments.map((s) => String(s.src || ''));
+  const locks = RB.activeLockTerms((LOCK && LOCK.terms) || []).filter((l) => l && l.en && srcs.some((x) => lockSrcHas(x, l.en)));
+  const segs = state.segments.map((s) => {
+    const o = { seg: s.seg, key: s.key || '', src: String(s.src || ''), tgt: String(s.tgt || '') };
+    if (s.context) o.context = String(s.context);
+    if (s.comments) o.comments = String(s.comments);
+    if (s.fullSrc) o.fullSource = String(s.fullSrc);
+    if (s.tagged) o.tagged = true;
+    if (s.chip) o.chip = true;
+    if (isPromptCtx(s.key)) o.machinePrompt = true;
+    const th = tbHintsFor(o.src); if (th.length) o.terms = th;
+    const f = o.tgt.trim() ? RB.checkSegment(o.src, o.tgt, { key: o.key }) : [];
+    if (f.length) o.rulebook = f;
+    return o;
+  });
+  const out = {
+    kind: 'starling-task-export', version: 1, exportedAt: new Date().toISOString(),
+    taskId, url: (t && t.url) || '', rulebook: RB.VERSION,
+    mode: (document.querySelector('input[name=mode]:checked') || {}).value || 'proofread',
+    plural: !!($('plural') && $('plural').checked),
+    locks: locks.map((l) => ({ en: l.en, he: l.he })),
+    counts: { segments: segs.length, empty: segs.filter((x) => !x.tgt.trim()).length, tagged: segs.filter((x) => x.tagged).length, flagged: segs.filter((x) => x.rulebook).length, withComments: segs.filter((x) => x.comments).length },
+    segments: segs
+  };
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 1)], { type: 'application/json' }));
+  a.download = 'starling-task-' + (taskId || 'unknown') + '-' + new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-') + '.json';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  info('harvest-info', `⬇ Exported ${segs.length} segments for Claude (${out.counts.flagged} 🧾 flagged, ${out.counts.withComments} 💬). Nothing was written to Starling.`, 'good');
+  log('export-for-claude: task ' + taskId + ', ' + segs.length + ' segments');
+}
+
 async function doGpt() {
   try { await tbAutoGrab(); } catch (e) { dbg('term auto-grab skipped', e && e.message); }
   const key = await store.get('key', '');
@@ -6653,6 +6696,7 @@ async function init() {
   if ($('lk-q')) { let lkT = null; $('lk-q').addEventListener('input', (e) => { clearTimeout(lkT); const v = e.target.value; lkT = setTimeout(() => lkSearch(v), 180); }); }   // 🔎 lookup
 
   $('harvest').addEventListener('click', doHarvest);
+  if ($('export-claude')) $('export-claude').addEventListener('click', doExportForClaude);
   $('xliff-file').addEventListener('change', (e) => onXliffFile(e.target));
   $('run-gpt').addEventListener('click', doGpt);
   $('write').addEventListener('click', doWrite);
