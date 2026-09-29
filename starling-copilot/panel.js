@@ -1837,6 +1837,42 @@ async function doGpt() {
   }
 }
 
+// 📥 IMPORT CLAUDE RESULTS — the other half of "Export task for Claude": load the result JSON a
+// Claude session produced ({kind:'starling-claude-result', taskId, edits:[{seg, text, reason}]}) as
+// ordinary review proposals against the HARVESTED segments (matched by segment number + source, so it
+// works for keyless document tasks too). The text is not rewritten (no Auto-fix/memory); only the
+// flag-only validators run. Writing still goes through the normal review → Write step.
+async function doImportClaude(file) {
+  if (!(state.segments || []).length) { info('harvest-info', 'Harvest the task first, then import the Claude results.', 'err'); return; }
+  let j;
+  try { j = JSON.parse(await file.text()); } catch (e) { info('harvest-info', 'Not a JSON file: ' + e.message, 'err'); return; }
+  if (!j || j.kind !== 'starling-claude-result' || !Array.isArray(j.edits)) { info('harvest-info', 'That file is not a Claude result (kind "starling-claude-result").', 'err'); return; }
+  const t = await activeTab();
+  const here = starlingTaskId(t && t.url);
+  if (j.taskId && here && String(j.taskId) !== here) { info('harvest-info', `These results are for task ${j.taskId}, but this tab is task ${here}. Open the right task.`, 'err'); return; }
+  const bySeg = new Map(state.segments.map((x) => [String(x.seg), x]));
+  const proposals = [], missing = [], drift = [];
+  for (const e of j.edits) {
+    const s = bySeg.get(String(e.seg));
+    if (!s) { missing.push(e.seg); continue; }
+    if (e.src != null && wbFold(e.src) !== wbFold(s.src)) { drift.push(e.seg); continue; }   // source changed since export
+    const next = String(e.text == null ? '' : e.text);
+    const tagWrapped = hasTags(next) || hasTags(s.src) || hasTags(s.tgt);
+    const manual = !!s.chip || tagWrapped;
+    proposals.push({ seg: s.seg, src: s.src, old: s.tgt, next, tagged: !!s.tagged || tagWrapped, chip: !!s.chip, tagWrapped, manual, filled: !String(s.tgt || '').trim(), flag: e.reason ? '🟣 Claude: ' + String(e.reason) : '', promptCtx: isPromptCtx(s.key), key: s.key || '', context: s.context || '', comments: s.comments || '', fullSrc: s.fullSrc || '', shots: s.shots || [], termsUsed: [], classified: [], risk: [], shotImg: null, approved: !manual && next !== String(s.tgt) });
+  }
+  lockCheck(proposals); consistCheck(proposals); tbCheck(proposals); rbCheck(proposals); btnCheck(proposals); promptGate(proposals); phCheck(proposals);
+  state.proposals = proposals;
+  state.mode = j.mode || state.mode;
+  const manualN = proposals.filter((p) => p.manual).length;
+  info('harvest-info', `📥 Imported ${proposals.length} Claude edit(s)${manualN ? ` · ✋ ${manualN} tagged (copy-by-hand)` : ''}${missing.length ? ` · ${missing.length} segment(s) not in this harvest: ${missing.slice(0, 8).join(', ')}` : ''}${drift.length ? ` · ⚠ ${drift.length} skipped, source changed since export: ${drift.slice(0, 8).join(', ')}` : ''}. Review below, then Write.`, (missing.length || drift.length) ? 'err' : 'good');
+  log('import-claude: ' + proposals.length + ' edits, ' + missing.length + ' missing, ' + drift.length + ' drift');
+  revFilter = 'changed';
+  renderReview();
+  $('review-card').hidden = false;
+  $('write-card').hidden = false;
+}
+
 let revFilter = 'changed';   // 'changed' | 'all' | 'manual' (✋ paste-by-hand) | 'memrev' (🧠 memory — review) | 'consist' (⚖ consistency)
 function renderReview() {
   const box = $('review');
@@ -6698,6 +6734,7 @@ async function init() {
 
   $('harvest').addEventListener('click', doHarvest);
   if ($('export-claude')) $('export-claude').addEventListener('click', doExportForClaude);
+  if ($('import-claude')) $('import-claude').addEventListener('change', (ev) => { const f = ev.target.files && ev.target.files[0]; ev.target.value = ''; if (f) doImportClaude(f); });
   $('xliff-file').addEventListener('change', (e) => onXliffFile(e.target));
   $('run-gpt').addEventListener('click', doGpt);
   $('write').addEventListener('click', doWrite);
