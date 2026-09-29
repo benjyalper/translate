@@ -934,12 +934,14 @@ function btnCheck(proposals) {
 // Auto-grab (2026-09-28): the term references + DNT flags are read automatically once per task
 // per panel session, before the first Run — no more forgotten manual grabs. Task-specific DNTs
 // (campaign names) are scoped to their task instead of becoming global 🔒 locks.
+// Task id from the editor URL: string tasks (#/outside/translate?taskid=N) and document tasks (#/doc/editor/N).
+function starlingTaskId(url) { const m = String(url || '').match(/taskid=(\d+)|\/doc\/editor\/(\d+)/i); return m ? (m[1] || m[2]) : ''; }
 let CUR_TASK = '';
 const TB_GRABBED = new Set();
 async function tbAutoGrab() {
   if (!TB || !TB.enabled) return;
   const t = await activeTab(); if (!t || !/starling\.bytedance\.com/.test(t.url || '')) return;
-  const m = String(t.url || '').match(/taskid=(\d+)/i); CUR_TASK = m ? m[1] : '';
+  CUR_TASK = starlingTaskId(t.url);
   if (!CUR_TASK || TB_GRABBED.has(CUR_TASK)) return;
   await tbGrab({ silent: true, taskId: CUR_TASK });
   TB_GRABBED.add(CUR_TASK);
@@ -948,7 +950,7 @@ async function tbGrab(opts) {
   const o = opts || {};
   const t = await activeTab();
   if (!t) { tbInfo('Open your Starling task tab first.', 'err'); return; }
-  const grabTask = o.taskId || ((String(t.url || '').match(/taskid=(\d+)/i) || [])[1] || '');
+  const grabTask = o.taskId || starlingTaskId(t.url);
   tbInfo('Scanning the task for term references…');
   let scraped = [];
   try {
@@ -1674,8 +1676,7 @@ async function doExportForClaude() {
   if (!(state.segments || []).length) { info('harvest-info', 'Harvest the task first, then export.', 'err'); return; }
   try { await tbAutoGrab(); } catch (e) { dbg('term auto-grab skipped', e && e.message); }
   const t = await activeTab();
-  const m = String((t && t.url) || '').match(/taskid=(\d+)/i);
-  const taskId = m ? m[1] : (CUR_TASK || '');
+  const taskId = starlingTaskId(t && t.url) || CUR_TASK || '';
   const srcs = state.segments.map((s) => String(s.src || ''));
   const locks = RB.activeLockTerms((LOCK && LOCK.terms) || []).filter((l) => l && l.en && srcs.some((x) => lockSrcHas(x, l.en)));
   const segs = state.segments.map((s) => {
