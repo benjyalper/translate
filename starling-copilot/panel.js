@@ -1697,7 +1697,8 @@ async function doExportForClaude() {
     taskId, url: (t && t.url) || '', rulebook: RB.VERSION,
     mode: (document.querySelector('input[name=mode]:checked') || {}).value || 'proofread',
     plural: !!($('plural') && $('plural').checked),
-    locks: locks.map((l) => ({ en: l.en, he: l.he })),
+    // dnt = keep exactly as-is (brand DNTs like TikTok land in 🔒 locks, not in the per-segment term hints)
+    locks: locks.map((l) => (String(l.he || '').trim() === String(l.en).trim() || RB.LATIN_ALLOW.includes(l.en) ? { en: l.en, he: l.he, dnt: true } : { en: l.en, he: l.he })),
     counts: { segments: segs.length, empty: segs.filter((x) => !x.tgt.trim()).length, tagged: segs.filter((x) => x.tagged).length, flagged: segs.filter((x) => x.rulebook).length, withComments: segs.filter((x) => x.comments).length },
     segments: segs
   };
