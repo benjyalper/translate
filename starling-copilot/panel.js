@@ -4014,7 +4014,7 @@ async function cwHarvest() {
     for (let offset = 0; ; offset += 500) {
       const d = await cwCall('GET', `/projects/${CW.ctx.projectId}/strings?fileId=${CW.ctx.fileId}&limit=500&offset=${offset}`);
       const rows = (d && d.data) || [];
-      rows.forEach((x) => { const s = x.data || x; strings.push({ id: s.id, key: s.identifier || s.context || String(s.id), src: cwPlain(s.text), context: s.context || '' }); });
+      rows.forEach((x) => { const s = x.data || x; strings.push({ id: s.id, key: s.identifier || s.context || String(s.id), src: cwPlain(s.text), srcPlural: (s.text && typeof s.text === 'object') ? s.text : null, context: s.context || '', maxLength: s.maxLength || 0 }); });
       info('cw-harvest-info', `Read ${strings.length} strings…`);
       if (rows.length < 500) break;
     }
@@ -4042,6 +4042,57 @@ async function cwHarvest() {
   } catch (e) {
     info('cw-harvest-info', e.message, 'err');
   } finally { btn.disabled = false; }
+}
+
+// ⬇ EXPORT FOR CLAUDE / 📥 IMPORT CLAUDE RESULTS — the Crowdin twin of the Starling pair.
+// Export = the harvested strings as JSON (read-only, nothing sent anywhere); a Claude session
+// translates/proofreads the whole file and returns {kind:'crowdin-claude-result', edits:[{id, src,
+// text, reason}]}, which lands on the matching cards as proposals. Entering stays the normal
+// unapproved ⤵ Enter; the tool never approves.
+function cwExportForClaude() {
+  if (!CW.ctx || !CW.cards.length) { info('cw-harvest-info', 'Harvest the file first, then export.', 'err'); return; }
+  const out = {
+    kind: 'crowdin-task-export', version: 1, exportedAt: new Date().toISOString(),
+    org: CW.ctx.org, projectId: CW.ctx.projectId, fileId: CW.ctx.fileId, source: CW.ctx.source, target: CW.ctx.target,
+    mode: $('cw-mode').value, onlyUntranslated: $('cw-only-untranslated').checked, plural: !!($('plural') && $('plural').checked),
+    counts: { strings: CW.cards.length, empty: CW.cards.filter((c) => !String(c.tgt || '').trim()).length, plural: CW.cards.filter((c) => c.srcPlural).length },
+    strings: CW.cards.map((c) => {
+      const o = { id: c.id, key: c.key, src: c.src, tgt: c.tgt || '' };
+      if (c.srcPlural) o.srcPlural = c.srcPlural;
+      if (c.context && c.context !== c.key) o.context = c.context;
+      if (c.maxLength) o.maxLength = c.maxLength;
+      return o;
+    })
+  };
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 1)], { type: 'application/json' }));
+  a.download = `crowdin-task-${CW.ctx.projectId}-${CW.ctx.fileId}-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  info('cw-harvest-info', `⬇ Exported ${out.strings.length} string(s) for Claude. Nothing was written to Crowdin.`, 'good');
+  cwLog(`[export] ${out.strings.length} strings · project ${CW.ctx.projectId} file ${CW.ctx.fileId}`);
+}
+async function cwImportClaude(file) {
+  if (!CW.ctx || !CW.cards.length) { info('cw-harvest-info', 'Harvest the file first, then import the Claude results.', 'err'); return; }
+  let j;
+  try { j = JSON.parse(await file.text()); } catch (e) { info('cw-harvest-info', 'Not a JSON file: ' + e.message, 'err'); return; }
+  if (!j || j.kind !== 'crowdin-claude-result' || !Array.isArray(j.edits)) { info('cw-harvest-info', 'That file is not a Crowdin Claude result (kind "crowdin-claude-result").', 'err'); return; }
+  if ((j.projectId && String(j.projectId) !== String(CW.ctx.projectId)) || (j.fileId && String(j.fileId) !== String(CW.ctx.fileId))) { info('cw-harvest-info', `These results are for project ${j.projectId} / file ${j.fileId}, but this tab is ${CW.ctx.projectId} / ${CW.ctx.fileId}.`, 'err'); return; }
+  const byId = new Map(CW.cards.map((c) => [String(c.id), c]));
+  let n = 0; const missing = [], drift = [];
+  for (const e of j.edits) {
+    const c = byId.get(String(e.id));
+    if (!c) { missing.push(e.id); continue; }
+    if (e.src != null && wbFold(e.src) !== wbFold(c.src)) { drift.push(e.id); continue; }   // source changed since export
+    if (c.status === 'entered') continue;
+    c.proposal = String(e.text == null ? '' : e.text); c.approved = true; c.status = 'proposed';
+    c.note = e.reason ? '🟣 Claude: ' + String(e.reason) : '🟣 Claude';
+    n++;
+  }
+  info('cw-harvest-info', `📥 Imported ${n} Claude proposal(s)${missing.length ? ` · ${missing.length} string(s) not in this harvest (untick “only untranslated” and re-harvest?)` : ''}${drift.length ? ` · ⚠ ${drift.length} skipped, source changed since export` : ''}. Review, then Enter.`, (missing.length || drift.length) ? 'err' : 'good');
+  cwLog(`[import] ${n} proposals · ${missing.length} missing · ${drift.length} drift`);
+  $('cw-review-card').hidden = !n && CW.cards.every((c) => !c.proposal);
+  cwRender();
 }
 
 // Crowdin string text can be a plain string or a plural object {one,other,…}; take a display form.
@@ -6825,6 +6876,8 @@ async function init() {
   $('mode-crowdin').addEventListener('click', () => { setMode('crowdin'); cwDetect(); });
   $('cw-detect').addEventListener('click', cwDetect);
   $('cw-harvest').addEventListener('click', cwHarvest);
+  if ($('cw-export-claude')) $('cw-export-claude').addEventListener('click', cwExportForClaude);
+  if ($('cw-import-claude')) $('cw-import-claude').addEventListener('change', (ev) => { const f = ev.target.files && ev.target.files[0]; ev.target.value = ''; if (f) cwImportClaude(f); });
   $('cw-propose').addEventListener('click', cwPropose);
   $('cw-enter-all').addEventListener('click', cwEnterAll);
 

@@ -656,6 +656,10 @@
         </select>
         <label class="ck" style="margin-top:6px"><input type="checkbox" id="cw-only-untranslated" checked /> Only strings with no Hebrew yet</label>
         <button id="cw-harvest" class="btn" style="margin-top:8px">⬇ Harvest from this file</button>
+        <button id="cw-export-claude" class="btn sm ghost" style="margin-top:6px" title="Save the harvested strings (id, key, source incl. plural forms, current Hebrew, context) as JSON for a Claude session. Read-only.">⬇ Export task for Claude (.json)</button>
+        <label class="btn sm ghost file-btn" style="margin-top:6px" title="Load the result file a Claude session made from that export. Its edits become proposals on the matching cards (by string id); you still review and Enter (unapproved).">📥 Import Claude results (.json)
+          <input type="file" id="cw-import-claude" accept=".json" hidden />
+        </label>
         <div id="cw-harvest-info" class="info"></div>
       </section>
 
