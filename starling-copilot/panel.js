@@ -4481,6 +4481,65 @@ async function ycWriteAll() {
     + ' Review each and confirm.', 'good');
 }
 
+// ⬇ EXPORT FOR CLAUDE / 📥 IMPORT CLAUDE RESULTS for memoQ + YiCAT (same pair as Starling/Crowdin).
+// Export = the harvested cards as JSON (read-only). A Claude session returns {kind:'cat-claude-result',
+// platform, edits:[{id, src, text, reason}]}; each edit lands on its card (matched by the platform's own
+// segment id, source re-checked) as an approved proposal. Writing stays the normal Write/auto-write step.
+const CAT_SYS = {
+  memoq: { name: 'memoQ', st: () => MQ, pfx: 'mq', idOf: (c) => c.rowId, seqOf: (c) => c.seg, render: () => mqRender(), log: (m) => mqLog(m),
+    // same tag rule as mqPropose: proofread keeps the existing target's tags, translate carries the source's
+    onSet: (c, mode) => { c.writeTags = mode === 'translate' ? (c.srcTags || []) : ((c.tgtTags && c.tgtTags.length) ? c.tgtTags : (c.srcTags || [])); } },
+  yicat: { name: 'YiCAT', st: () => YC, pfx: 'yc', idOf: (c) => c.segId, seqOf: (c) => c.seq, render: () => ycRender(), log: (m) => ycLog(m), onSet: () => {} }
+};
+function catExportForClaude(sys) {
+  const S = CAT_SYS[sys], X = S.st();
+  if (!X.ctx || !X.cards.length) { info(S.pfx + '-harvest-info', 'Harvest first, then export.', 'err'); return; }
+  const mode = $(S.pfx + '-mode').value;
+  const out = {
+    kind: 'cat-task-export', platform: sys, version: 1, exportedAt: new Date().toISOString(), ctx: X.ctx, mode,
+    plural: !!($('plural') && $('plural').checked),
+    counts: { segments: X.cards.length, empty: X.cards.filter((c) => !String(c.tgt || '').trim()).length, tagged: X.cards.filter((c) => c.tagged).length },
+    segments: X.cards.map((c) => {
+      const o = { id: S.idOf(c), seq: S.seqOf(c), src: String(c.src || ''), tgt: String(c.tgt || '') };
+      if (c.tagged) o.tagged = true;
+      if (c.status) o.status = c.status;
+      if (c.context) o.context = String(c.context);
+      return o;
+    })
+  };
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 1)], { type: 'application/json' }));
+  a.download = `${sys}-task-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  info(S.pfx + '-harvest-info', `⬇ Exported ${out.segments.length} segment(s) for Claude${out.counts.tagged ? ` (${out.counts.tagged} tagged — tag markers kept)` : ''}. Nothing was written to ${S.name}.`, 'good');
+  S.log(`[export] ${out.segments.length} segments`);
+}
+async function catImportClaude(sys, file) {
+  const S = CAT_SYS[sys], X = S.st();
+  if (!X.ctx || !X.cards.length) { info(S.pfx + '-harvest-info', 'Harvest first, then import the Claude results.', 'err'); return; }
+  let j;
+  try { j = JSON.parse(await file.text()); } catch (e) { info(S.pfx + '-harvest-info', 'Not a JSON file: ' + e.message, 'err'); return; }
+  if (!j || j.kind !== 'cat-claude-result' || j.platform !== sys || !Array.isArray(j.edits)) { info(S.pfx + '-harvest-info', `That file is not a ${S.name} Claude result (kind "cat-claude-result", platform "${sys}").`, 'err'); return; }
+  const mode = j.mode || $(S.pfx + '-mode').value;
+  const byId = new Map(X.cards.map((c) => [String(S.idOf(c)), c]));
+  let n = 0; const missing = [], drift = [];
+  for (const e of j.edits) {
+    const c = byId.get(String(e.id));
+    if (!c) { missing.push(e.seq != null ? e.seq : e.id); continue; }
+    if (e.src != null && wbFold(e.src) !== wbFold(c.src)) { drift.push(S.seqOf(c)); continue; }   // source changed since export
+    if (c.status_ui === 'written') continue;
+    c.proposal = String(e.text == null ? '' : e.text); S.onSet(c, mode);
+    c.approved = true; c.status_ui = 'proposed';
+    c.note = e.reason ? '🟣 Claude: ' + String(e.reason) : '🟣 Claude';
+    n++;
+  }
+  info(S.pfx + '-harvest-info', `📥 Imported ${n} Claude proposal(s)${missing.length ? ` · ${missing.length} segment(s) not in this harvest: ${missing.slice(0, 8).join(', ')}` : ''}${drift.length ? ` · ⚠ ${drift.length} skipped, source changed since export: ${drift.slice(0, 8).join(', ')}` : ''}. Review, then write.`, (missing.length || drift.length) ? 'err' : 'good');
+  S.log(`[import] ${n} proposals · ${missing.length} missing · ${drift.length} drift`);
+  $(S.pfx + '-review-card').hidden = X.cards.every((c) => !c.proposal);
+  S.render();
+}
+
 function ycRender() {
   const box = $('yc-cards'); if (!box) return;
   const shown = YC.cards.map((c, i) => ({ c, i })).filter(({ c }) =>
@@ -6886,6 +6945,8 @@ async function init() {
   $('mode-memoq').addEventListener('click', () => { setMode('memoq'); mqDetect(); });
   $('mq-detect').addEventListener('click', mqDetect);
   $('mq-harvest').addEventListener('click', mqHarvest);
+  if ($('mq-export-claude')) $('mq-export-claude').addEventListener('click', () => catExportForClaude('memoq'));
+  if ($('mq-import-claude')) $('mq-import-claude').addEventListener('change', (ev) => { const f = ev.target.files && ev.target.files[0]; ev.target.value = ''; if (f) catImportClaude('memoq', f); });
   $('mq-propose').addEventListener('click', mqPropose);
   $('mq-write-all').addEventListener('click', mqWriteAll);
 
@@ -6899,6 +6960,8 @@ async function init() {
   if ($('pc-datefield')) $('pc-datefield').addEventListener('change', (e) => { PAY.dateField = e.target.value; if (PAY.rows) pcRender(); });
   $('yc-detect').addEventListener('click', ycDetect);
   $('yc-harvest').addEventListener('click', ycHarvest);
+  if ($('yc-export-claude')) $('yc-export-claude').addEventListener('click', () => catExportForClaude('yicat'));
+  if ($('yc-import-claude')) $('yc-import-claude').addEventListener('change', (ev) => { const f = ev.target.files && ev.target.files[0]; ev.target.value = ''; if (f) catImportClaude('yicat', f); });
   $('yc-propose').addEventListener('click', ycPropose);
   $('yc-copy-all').addEventListener('click', ycCopyAll);
   $('yc-write-all').addEventListener('click', ycWriteAll);

@@ -717,6 +717,10 @@
         <label class="ck" style="margin-top:6px"><input type="checkbox" id="mq-skip-confirmed" checked /> Skip already-confirmed segments</label>
         <label class="ck"><input type="checkbox" id="mq-skip-locked" checked /> Skip locked / read-only segments</label>
         <button id="mq-harvest" class="btn" style="margin-top:8px">⬇ Harvest from this document</button>
+        <button id="mq-export-claude" class="btn sm ghost" style="margin-top:6px" title="Save the harvested segments (id, #, source, current Hebrew, tags, status) as JSON for a Claude session. Read-only.">⬇ Export task for Claude (.json)</button>
+        <label class="btn sm ghost file-btn" style="margin-top:6px" title="Load the result file a Claude session made from that export. Its edits become approved proposals on the matching cards; you still review and write — memoQ confirm stays yours.">📥 Import Claude results (.json)
+          <input type="file" id="mq-import-claude" accept=".json" hidden />
+        </label>
         <div id="mq-harvest-info" class="info"></div>
       </section>
 
@@ -775,6 +779,10 @@
         <label class="ck" style="margin-top:6px"><input type="checkbox" id="yc-skip-confirmed" checked /> Skip already-confirmed segments</label>
         <label class="ck"><input type="checkbox" id="yc-skip-locked" checked /> Skip locked segments</label>
         <button id="yc-harvest" class="btn" style="margin-top:8px">⬇ Harvest from this task</button>
+        <button id="yc-export-claude" class="btn sm ghost" style="margin-top:6px" title="Save the harvested segments (id, #, source, current Hebrew, tags, status) as JSON for a Claude session. Read-only.">⬇ Export task for Claude (.json)</button>
+        <label class="btn sm ghost file-btn" style="margin-top:6px" title="Load the result file a Claude session made from that export. Its edits become approved proposals on the matching cards; you still review and write — YiCAT confirm stays yours.">📥 Import Claude results (.json)
+          <input type="file" id="yc-import-claude" accept=".json" hidden />
+        </label>
         <div id="yc-harvest-info" class="info"></div>
       </section>
 
