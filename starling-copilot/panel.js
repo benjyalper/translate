@@ -3606,49 +3606,78 @@ function lrReadFile(input) {
   };
   rd.readAsText(f);
 }
+// Your own tasks via getMyTasks (the "All tasks" search, getAllTasks?textKeys=, answers 1002 for a
+// translator account). taskStatus 2 = Submitted; taskType 1 = document editor (its string API 1002s).
+async function lrFetchMyTasks() {
+  const t = await wbActiveTab();
+  const [r] = await chrome.scripting.executeScript({
+    target: { tabId: t.id },
+    func: async () => {
+      try {
+        const res = await fetch('/api/task/getMyTasks?offset=0&limit=5000&progress=all&translateTypeList=%5B%5D&_=' + Date.now(), { credentials: 'include', cache: 'no-store' });
+        const j = await res.json(); const d = j.data || {};
+        if (j.status_code && j.status_code !== 1000) return { ok: false, error: 'status_code ' + j.status_code };
+        return { ok: true, rows: (d.rows || []).map((x) => ({ subtaskId: String(x.subtaskId || x.subTaskId || x.id || ''), taskName: x.taskName || '', taskStatus: x.taskStatus, taskType: x.taskType, createTime: Number(x.createTime) || 0 })) };
+      } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+    }
+  });
+  const out = r && r.result;
+  if (!out || !out.ok) throw new Error((out && out.error) || 'getMyTasks failed');
+  return out.rows.filter((x) => x.subtaskId && x.subtaskId !== '0');
+}
 async function lrLocate() {
   if (!LR.judged.length) { info('lr-info', 'Load lqa-judged.json first.', 'err'); return; }
   if (!(await wbEnsureFresh(-1))) { info('lr-info', 'Make the Starling tab active (any Starling page), then retry.', 'err'); return; }
   const btn = $('lr-locate'); LR.stop = false; btn.textContent = '■ Stop';
   const keys = LQC.lookupKeys(LR.judged), keySet = new Set(keys), bad = LQC.conflicts(LR.judged);
-  // Resume: keys whose rows were all resolved without a lookup error are skipped.
-  const done = new Set(LR.judged.filter((j) => LR.res[j.n] && !LR.res[j.n].error).map((j) => j.key));
-  const todo = keys.filter((k) => !done.has(k));
-  const segCache = new Map(), statusSeen = {};
+  let mine;
+  try { mine = await lrFetchMyTasks(); } catch (e) { info('lr-info', 'Could not list your tasks: ' + e.message, 'err'); btn.textContent = '🔎 Locate in Starling (read-only)'; return; }
+  const sinceEl = $('lr-since'), since = sinceEl && sinceEl.value ? Math.floor(new Date(sinceEl.value + 'T00:00:00').getTime() / 1000) : 0;
+  if (since) mine = mine.filter((t) => t.createTime >= since);
+  // Index of tasks already read for THIS report (resume after Stop / reopen): taskId → segments with report keys.
+  const idxKey = 'lqaIdx:' + LR.sig;
+  const idx = (await store.get(idxKey, null)) || {};
+  const statusSeen = {};
   let n = 0, reads = 0, errors = 0;
-  for (const key of todo) {
+  for (const t of mine) {
+    statusSeen[String(t.taskStatus)] = (statusSeen[String(t.taskStatus)] || 0) + 1;
     if (LR.stop) break;
-    n++; info('lr-info', `Reading ${n}/${todo.length} — ${key} · ${reads} task(s) read · nothing is written`, 'good');
-    let tasks = [], err = '';
+    n++;
+    if (idx[t.subtaskId]) continue;
+    info('lr-info', `Reading your task ${n}/${mine.length} — ${t.taskName || t.subtaskId} · ${reads} read this run · nothing is written`, 'good');
     try {
-      const tl = await wbCall('API_TASKS', { key });
-      await wbSleep(150);
-      if (!tl || !tl.ok) throw new Error((tl && tl.error) || 'task lookup failed');
-      for (const t of tl.rows) {
-        if (LR.stop) break;
-        statusSeen[String(t.taskStatus)] = (statusSeen[String(t.taskStatus)] || 0) + 1;
-        if (!segCache.has(t.subtaskId)) {
-          const r = await wbCall('API_TASK', { taskId: t.subtaskId });
-          await wbSleep(150); reads++;
-          // keep only segments whose key is in this report (a task can hold thousands of rows)
-          segCache.set(t.subtaskId, r && r.ok ? r.rows.filter((s) => keySet.has(s.key)) : null);
-        }
-        const segs = segCache.get(t.subtaskId);
-        if (segs) tasks.push(Object.assign({}, t, { segs: segs.filter((s) => s.key === key) }));
-      }
-    } catch (e) { err = e.message; errors++; if (!LR.firstError) LR.firstError = key + ': ' + err; }
-    for (const j of LR.judged) {
-      if (j.key !== key) continue;
-      LR.res[j.n] = err ? { bucket: 'not-found', why: 'lookup failed: ' + err, placements: [], error: true }
-        : LQC.resolveRow(j, tasks, { conflict: bad.has(j.key + '\u0001' + LQC.norm(j.src)) });
+      const r = await wbCall('API_TASK', { taskId: t.subtaskId });
+      await wbSleep(150); reads++;
+      if (!r || !r.ok) throw new Error((r && r.error) || 'read failed');
+      idx[t.subtaskId] = { t, segs: r.rows.filter((x) => keySet.has(x.key)) };
+    } catch (e) {
+      errors++; if (!LR.firstError) LR.firstError = (t.taskName || t.subtaskId) + ': ' + e.message;
+      idx[t.subtaskId] = { t, segs: [], error: e.message + (String(t.taskType) === '1' ? ' (document-editor task)' : '') };
     }
-    if (n % 25 === 0) await lrSave();
+    if (reads % 20 === 0) await store.set({ [idxKey]: idx });
   }
-  for (const j of LR.judged) if (!LQC.needsWrite(j)) LR.res[j.n] = LQC.resolveRow(j, []);
-  LR.meta = { at: Date.now(), errors, firstError: LR.firstError || '', keys: keys.length, reads: (LR.meta.reads || 0) + reads, taskStatusSeen: Object.assign({}, LR.meta.taskStatusSeen || {}, statusSeen) };
+  await store.set({ [idxKey]: idx });
+  // Resolve every row against the tasks read so far.
+  const byKey = new Map();
+  for (const { t, segs } of Object.values(idx)) for (const sg of segs) {
+    if (!byKey.has(sg.key)) byKey.set(sg.key, new Map());
+    const m = byKey.get(sg.key);
+    if (!m.has(t.subtaskId)) m.set(t.subtaskId, Object.assign({}, t, { segs: [] }));
+    m.get(t.subtaskId).segs.push(sg);
+  }
+  const unread = Object.values(idx).filter((x) => x.error).length;
+  for (const j of LR.judged) {
+    const tasks = byKey.has(j.key) ? [...byKey.get(j.key).values()] : [];
+    const res = LQC.resolveRow(j, tasks, { conflict: bad.has(j.key + '\u0001' + LQC.norm(j.src)) });
+    if (res.bucket === 'not-found' && !tasks.length && LQC.needsWrite(j)) res.why = 'not in any of your ' + Object.keys(idx).length + ' task(s) read' + (unread ? ` (${unread} could not be read)` : '');
+    LR.res[j.n] = res;
+  }
+  LR.meta = { at: Date.now(), source: 'getMyTasks', myTasks: mine.length, tasksRead: Object.keys(idx).length, unread, errors, firstError: LR.firstError || '', keys: keys.length,
+    taskStatusSeen: statusSeen, since: sinceEl && sinceEl.value || '' };
   await lrSave();
   btn.textContent = '🔎 Locate in Starling (read-only)';
-  info('lr-info', `${LR.stop ? 'Stopped' : 'Done'} · ${n}/${todo.length} keys · ${reads} task(s) read${errors ? ` · ⚠ ${errors} lookup error(s) — run again to retry them` : ''} · nothing was written.`, errors ? 'err' : 'good');
+  info('lr-info', `${LR.stop ? 'Stopped (run again to continue)' : 'Done'} · ${Object.keys(idx).length}/${mine.length} of your tasks read (${reads} this run)` +
+    (unread ? ` · ⚠ ${unread} could not be read — ${esc(LR.firstError)}` : '') + ' · nothing was written.', unread ? 'err' : 'good');
   lrRender();
 }
 // Why rows ended up where they are, most common first (e.g. "lookup failed: HTTP 403" × 900).

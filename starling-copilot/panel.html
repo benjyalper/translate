@@ -622,12 +622,13 @@
       <!-- LQA ROUND-TRIP · PLAN (M2, read-only) -->
       <section class="card" id="lr-card">
         <div class="step"><span class="num">📋</span> LQA round-trip · plan <span class="hint">read-only</span></div>
-        <div class="hint">Load <b>lqa-judged.json</b> (from <code>starling-eval/lqa/&lt;report&gt;/</code>). <b>Locate</b> finds each row's task and segment through Starling's read API — key plus exact source, never the screen. <b>Nothing is written</b>: tick the rows or tasks you approve; writing comes later (M3).</div>
+        <div class="hint">Load <b>lqa-judged.json</b> (from <code>starling-eval/lqa/&lt;report&gt;/</code>). <b>Locate</b> reads your tasks (My tasks) once each and finds every row's task and segment — key plus exact source, never the screen. <b>Nothing is written</b>: tick the rows or tasks you approve; writing comes later (M3).</div>
         <label class="btn ghost file-btn" style="margin-top:8px">📄 Load lqa-judged.json
           <input type="file" id="lr-file" accept=".json" hidden />
         </label>
         <div class="rev-bar" style="margin-top:8px">
           <button id="lr-locate" class="btn sm" disabled>🔎 Locate in Starling (read-only)</button>
+          <label class="hint" title="Read only your tasks created on or after this day (faster); empty = all your tasks">since <input type="date" id="lr-since" style="width:auto"></label>
           <span class="spacer"></span>
           <button id="lr-export" class="btn sm ghost" hidden>⬇ Export plan</button>
         </div>
