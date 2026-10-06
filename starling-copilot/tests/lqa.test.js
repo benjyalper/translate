@@ -70,5 +70,38 @@ ok('ledger survives JSON round-trip', LQ.ledgerIsDone(JSON.parse(JSON.stringify(
 ok('dry run by default', !LQ.writeAllowed(null, 'sA') && !LQ.writeAllowed({ armed: false, session: 'sA' }, 'sA'));
 ok('arming is per session', LQ.writeAllowed({ armed: true, session: 'sA' }, 'sA') && !LQ.writeAllowed({ armed: true, session: 'sA' }, 'sB'));
 
+sec('Phase 2 — locating rows (read-only plan)');
+const J = (o) => Object.assign({ n: 1, xlRow: 2, key: 'k1', src: 'Try again.', before: 'נסה/י שוב.', final: 'נסה/נסי שוב.', verdict: 'agree', problems: [] }, o);
+const T = (id, segs, extra) => Object.assign({ subtaskId: id, taskName: 'task ' + id, taskStatus: 1, segs }, extra);
+const S = (o) => Object.assign({ key: 'k1', source: 'Try again.', target: 'נסה/י שוב.', sourceTextId: 's1', rank: 4, modifiable: true, lock: 0 }, o);
+ok('disagree needs no write', LQ.resolveRow(J({ verdict: 'disagree', final: 'נסה/י שוב.' }), []).bucket === 'no-write');
+ok('a final that failed the checks is never planned', !LQ.needsWrite(J({ problems: [{ id: 'placeholders' }] })));
+ok('no task → not-found', LQ.resolveRow(J(), []).bucket === 'not-found');
+ok('exact source + live = Before → ready (with task and segment ids)', (() => { const r = LQ.resolveRow(J(), [T('t1', [S()])]); return r.bucket === 'ready' && r.placements[0].taskId === 't1' && r.placements[0].sourceTextId === 's1'; })());
+ok('two open tasks → several (all get fixed)', LQ.resolveRow(J(), [T('t1', [S()]), T('t2', [S({ sourceTextId: 's2' })])]).bucket === 'several');
+ok('live already equals the final → already', LQ.resolveRow(J(), [T('t1', [S({ target: 'נסה/נסי שוב.' })])]).bucket === 'already');
+ok('live differs from Before and final → drifted', LQ.resolveRow(J(), [T('t1', [S({ target: 'נסו שוב.' })])]).bucket === 'drifted');
+ok('submitted task → not-editable', LQ.resolveRow(J(), [T('t1', [S()], { taskStatus: 2 })]).bucket === 'not-editable');
+ok('segment not modifiable → not-editable', LQ.resolveRow(J(), [T('t1', [S({ modifiable: false })])]).bucket === 'not-editable');
+ok('same key, other source revision → not-found (never matched by key alone)', (() => { const r = LQ.resolveRow(J(), [T('t1', [S({ source: 'Try again later.' })])]); return r.bucket === 'not-found' && /another revision/.test(r.why); })());
+ok('the report\'s Before is never used to find rows', LQ.resolveRow(J({ before: 'something else' }), [T('t1', [S()])]).placements.length === 1);
+ok('tagged source → hand-edit, not ready', LQ.resolveRow(J({ src: 'Tap <b>Save</b>.' }), [T('t1', [S({ source: 'Tap <b>Save</b>.' })])]).bucket === 'hand-edit');
+ok('ICU source → hand-edit', LQ.handEditReason({ src: '{num, plural, one {# day} other {# days}}' }) === 'ICU plural');
+ok('trailing newline alone is not a hand-edit', LQ.handEditReason({ src: 'Switch now.\r\n\r\n' }) === '');
+const dupe = [J({ n: 1 }), J({ n: 2, final: 'נסה/נסי שוב!' })];
+ok('same key+source with different finals → conflict', LQ.conflicts(dupe).size === 1);
+ok('lookupKeys dedupes and skips no-write rows', LQ.lookupKeys([J(), J({ n: 2 }), J({ n: 3, key: 'k2', verdict: 'disagree' })]).join() === 'k1');
+ok('planByTask groups by task', (() => { const j = J(); const g = LQ.planByTask([{ j, res: LQ.resolveRow(j, [T('t1', [S()]), T('t2', [S()])]) }]); return g.length === 2 && g[0].rows[0].bucket === 'ready'; })());
+ok('a segment listed twice in the report shows once, with both report rows', (() => { const j1 = J({ n: 1, xlRow: 10 }), j2 = J({ n: 2, xlRow: 11 }); const t = [T('t1', [S()])]; const g = LQ.planByTask([{ j: j1, res: LQ.resolveRow(j1, t) }, { j: j2, res: LQ.resolveRow(j2, t) }]); return g[0].rows.length === 1 && g[0].rows[0].xlRows.join() === '10,11'; })());
+ok('planSig is stable and changes with a final', LQ.planSig([J()]) === LQ.planSig([J()]) && LQ.planSig([J()]) !== LQ.planSig([J({ final: 'x' })]));
+
+sec('Phase 2 is read-only (panel source)');
+const PANEL = require('fs').readFileSync(require('path').join(__dirname, '..', 'panel.js'), 'utf8');
+const a = PANEL.indexOf('// ==== LQA round-trip (M2, read-only)'), b = PANEL.indexOf('// ==== end LQA round-trip');
+const M2 = a >= 0 && b > a ? PANEL.slice(a, b) : '';
+ok('the M2 section exists in panel.js', M2.length > 500);
+ok('M2 calls only the read APIs (API_TASKS, API_TASK)', (M2.match(/wbCall\('([A-Z_]+)'/g) || []).every((c) => /API_TASKS?'/.test(c)) && /wbCall\('API_TASKS'/.test(M2));
+ok('M2 never references a write, confirm or submit path', !/API_CONFIRM|apiWriteConfirm|WB_WRITE|WRITE_SEG|SUBMIT|domSubmit|confirmTextTaskTargetV2|apiConfirm|sendToTab\(/.test(M2));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

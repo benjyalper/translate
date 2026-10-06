@@ -191,9 +191,116 @@
   // Writes are refused unless armed in THIS session (Phase 0: dry run by default).
   function writeAllowed(arm, sessionId) { return !!(arm && arm.armed && arm.session && arm.session === sessionId); }
 
+  // ---- Phase 2: locate every judged row in Starling (READ-ONLY planning) ---------------------
+  // Input: lqa-judged.json rows {n, xlRow, key, src, before, final, verdict, reason, problems}.
+  // The panel fetches, per key, the tasks that carry it (getAllTasks?textKeys=) and each task's
+  // segments (getSourceTextListWithTargetText), then calls resolveRow. Nothing here writes.
+  const BUCKETS = ['ready', 'several', 'drifted', 'not-editable', 'already', 'not-found', 'conflict', 'hand-edit', 'no-write'];
+  // Does this judged row change Starling at all? (disagree keeps Before; a final equal to Before is a no-op;
+  // a final that failed the checks is never planned.)
+  function needsWrite(j) {
+    if (!j || !j.verdict || j.verdict === 'disagree') return false;
+    if (j.problems && j.problems.length) return false;
+    return str(j.final).trim() !== '' && str(j.final).trim() !== str(j.before).trim();
+  }
+  // Rows kept off the automatic write until a tag-safe API write is proven (plan, phase 3).
+  function handEditReason(j) {
+    const s = str(j.src);
+    if (/<\/?[A-Za-z][^<>]*>|[①-⑳]|\*\*/.test(s)) return 'tags or bold markers';
+    if (isIcu(s)) return 'ICU plural';
+    if (/\S[\r\n]+\S/.test(s)) return 'line breaks inside the source';
+    return '';
+  }
+  // Unique keys that need a lookup, in report order.
+  function lookupKeys(judged) {
+    const seen = new Set(), out = [];
+    for (const j of judged || []) if (needsWrite(j) && j.key && !seen.has(j.key)) { seen.add(j.key); out.push(j.key); }
+    return out;
+  }
+  // Same key + source judged twice with different finals → the plan cannot choose; flag both.
+  function conflicts(judged) {
+    const by = new Map(), bad = new Set();
+    for (const j of judged || []) {
+      if (!needsWrite(j)) continue;
+      const id = j.key + '\u0001' + norm(j.src);
+      if (!by.has(id)) by.set(id, norm(j.final));
+      else if (by.get(id) !== norm(j.final)) bad.add(id);
+    }
+    return bad;
+  }
+  // Is this live segment editable? A submitted task, a segment not modifiable by the user, or an
+  // editor lock all block writing. submittedStatus: the getAllTasks/getMyTasks taskStatus code(s)
+  // meaning Submitted (2 in getMyTasks; confirm on the first live run — raw values are kept).
+  function segEditable(task, seg, submittedStatus) {
+    const sub = [].concat(submittedStatus == null ? [2] : submittedStatus).map(Number);
+    if (task && sub.includes(Number(task.taskStatus))) return { ok: false, why: 'task submitted' };
+    if (seg && seg.modifiable === false) return { ok: false, why: 'not modifiable by you' };
+    if (seg && seg.lock) return { ok: false, why: 'editor lock ' + seg.lock };
+    return { ok: true, why: '' };
+  }
+  // tasks: [{subtaskId, taskName, status, taskStatus, segs: [slimRow with this key]}]
+  // Returns {bucket, why, placements:[{taskId, taskName, taskStatus, sourceTextId, rank, live, bucket, why}]}.
+  function resolveRow(j, tasks, opts) {
+    const o = opts || {};
+    if (!needsWrite(j)) return { bucket: 'no-write', why: j && j.verdict === 'disagree' ? 'disagree — nothing to write' : 'final equals Before or failed the checks', placements: [] };
+    if (o.conflict) return { bucket: 'conflict', why: 'the same key and source were judged with different finals — fix in the report', placements: [] };
+    const he = handEditReason(j);
+    const list = tasks || [];
+    if (!list.length) return { bucket: 'not-found', why: 'no en→he task carries this key', placements: [] };
+    const want = norm(j.src), fin = norm(j.final), bef = norm(j.before);
+    const placements = [];
+    let keySegs = 0;
+    for (const t of list) {
+      for (const s of t.segs || []) {
+        if (s.key !== j.key) continue;
+        keySegs++;
+        if (norm(s.source) !== want) continue;              // another revision of the string — never written
+        const live = norm(s.target), ed = segEditable(t, s, o.submittedStatus);
+        let bucket, why;
+        if (live === fin) { bucket = 'already'; why = 'live text already equals the final'; }
+        else if (!ed.ok) { bucket = 'not-editable'; why = ed.why; }
+        else if (live !== bef) { bucket = 'drifted'; why = 'live text differs from the report\'s Before and from the final — left for review'; }
+        else { bucket = 'ready'; why = 'source matches exactly; live text equals Before'; }
+        placements.push({ taskId: String(t.subtaskId), taskName: t.taskName || '', taskStatus: t.taskStatus, status: t.status,
+          sourceTextId: s.sourceTextId, rank: s.rank, live: s.target, bucket, why });
+      }
+    }
+    if (!placements.length) return { bucket: 'not-found', why: keySegs ? `key found in ${keySegs} segment(s), but none has this exact source (another revision)` : `key not present in its ${list.length} task(s)`, placements };
+    const n = (b) => placements.filter((p) => p.bucket === b).length;
+    let bucket;
+    if (n('ready')) bucket = n('ready') > 1 ? 'several' : 'ready';
+    else if (n('drifted')) bucket = 'drifted';
+    else if (n('not-editable')) bucket = 'not-editable';
+    else bucket = 'already';
+    if (he && (bucket === 'ready' || bucket === 'several')) return { bucket: 'hand-edit', why: he + ' — kept off the automatic write', placements };
+    const why = bucket === 'several' ? `ready in ${n('ready')} tasks — all get fixed` : placements.find((p) => p.bucket === (bucket === 'several' ? 'ready' : bucket)).why;
+    return { bucket, why, placements };
+  }
+  // Group a resolved plan by task for the review card. plan: [{j, res}]
+  function planByTask(plan) {
+    const by = new Map();
+    const seen = new Map();   // taskId:sourceTextId → row (a report can list the same key + source twice)
+    for (const { j, res } of plan || []) for (const p of res.placements) {
+      if (!by.has(p.taskId)) by.set(p.taskId, { taskId: p.taskId, taskName: p.taskName, taskStatus: p.taskStatus, rows: [] });
+      const id = p.taskId + ':' + p.sourceTextId;
+      if (seen.has(id)) { const r = seen.get(id); if (!r.xlRows.includes(j.xlRow)) r.xlRows.push(j.xlRow); continue; }
+      const row = { n: j.n, xlRow: j.xlRow, xlRows: [j.xlRow], key: j.key, src: j.src, before: j.before, final: j.final, verdict: j.verdict, reason: j.reason,
+        sourceTextId: p.sourceTextId, rank: p.rank, live: p.live, bucket: res.bucket === 'hand-edit' ? 'hand-edit' : p.bucket, why: p.why };
+      seen.set(id, row); by.get(p.taskId).rows.push(row);
+    }
+    return [...by.values()].sort((a, b) => b.rows.filter((r) => r.bucket === 'ready').length - a.rows.filter((r) => r.bucket === 'ready').length || a.taskId.localeCompare(b.taskId));
+  }
+  // Stable id for a judged report (storage key for the plan and your approvals).
+  function planSig(judged) {
+    let h = 5381; const s = (judged || []).map((j) => j.key + '|' + norm(j.final)).join('\n');
+    for (let i = 0; i < s.length; i++) h = (((h << 5) + h) ^ s.charCodeAt(i)) >>> 0;
+    return 'lqa#' + (judged || []).length + '#' + h.toString(36);
+  }
+
   return {
     VERDICTS, norm, mapHeader, readRows, icuBlocks, isIcu, tokens, tokenDiff, prepass, commentKey, clusters,
     postcheck, normalizeVerdict, columnI,
-    ledgerNew, ledgerMarkDone, ledgerIsDone, ledgerMarkSubmitted, ledgerIsSubmitted, writeAllowed
+    ledgerNew, ledgerMarkDone, ledgerIsDone, ledgerMarkSubmitted, ledgerIsSubmitted, writeAllowed,
+    BUCKETS, needsWrite, handEditReason, lookupKeys, conflicts, segEditable, resolveRow, planByTask, planSig
   };
 });

@@ -3576,6 +3576,138 @@ function wbExportForm() {
   }
 }
 
+// ==== LQA round-trip (M2, read-only) ======================================================
+// Load lqa-judged.json (starling-eval/lqa-judge.mjs report), find every row's task and segment
+// through Starling's READ API (getAllTasks?textKeys= + getSourceTextListWithTargetText), sort
+// rows into buckets, and let you approve the plan per row or per task. NOTHING here writes:
+// only API_TASKS / API_TASK are called (tests/lqa.test.js enforces it). Writing is M3.
+const LR = { judged: [], sig: '', res: {}, approved: {}, meta: {}, filter: '', stop: false };
+const LR_LABEL = { ready: '✅ ready', several: '✅ several tasks', drifted: '⚠ drifted', 'not-editable': '🔒 not editable', already: '✔ already correct',
+  'not-found': '? not found', conflict: '⛔ conflict', 'hand-edit': '✋ hand edit', 'no-write': '— nothing to write' };
+const lrKey = (taskId, stid) => taskId + ':' + stid;
+async function lrSave() { if (LR.sig) await store.set({ ['lqaPlan:' + LR.sig]: { res: LR.res, approved: LR.approved, meta: LR.meta } }); }
+function lrReadFile(input) {
+  const f = input.files && input.files[0]; if (!f) return;
+  const rd = new FileReader();
+  rd.onload = async () => {
+    try {
+      const j = JSON.parse(rd.result);
+      const rows = Array.isArray(j) ? j : (j && j.rows) || [];
+      if (!rows.length || !rows.every((r) => r && 'key' in r && 'src' in r && 'final' in r)) throw new Error('not an lqa-judged.json (needs key, src, final per row)');
+      LR.judged = rows; LR.sig = LQ.planSig(rows); LR.fileName = f.name;
+      const saved = await store.get('lqaPlan:' + LR.sig, null);
+      LR.res = (saved && saved.res) || {}; LR.approved = (saved && saved.approved) || {}; LR.meta = (saved && saved.meta) || {};
+      const need = LQ.lookupKeys(rows).length;
+      info('lr-info', `Loaded ${rows.length} judged rows · ${rows.filter(LQ.needsWrite).length} change Starling · ${need} keys to look up` +
+        (Object.keys(LR.res).length ? ` · restored the plan from ${LR.meta.at ? new Date(LR.meta.at).toLocaleString() : 'last time'}` : ''), 'good');
+      $('lr-locate').disabled = false; lrRender();
+    } catch (e) { info('lr-info', 'Could not read the file: ' + e.message, 'err'); }
+    input.value = '';
+  };
+  rd.readAsText(f);
+}
+async function lrLocate() {
+  if (!LR.judged.length) { info('lr-info', 'Load lqa-judged.json first.', 'err'); return; }
+  if (!(await wbEnsureFresh(-1))) { info('lr-info', 'Make the Starling tab active (any Starling page), then retry.', 'err'); return; }
+  const btn = $('lr-locate'); LR.stop = false; btn.textContent = '■ Stop';
+  const keys = LQ.lookupKeys(LR.judged), keySet = new Set(keys), bad = LQ.conflicts(LR.judged);
+  // Resume: keys whose rows were all resolved without a lookup error are skipped.
+  const done = new Set(LR.judged.filter((j) => LR.res[j.n] && !LR.res[j.n].error).map((j) => j.key));
+  const todo = keys.filter((k) => !done.has(k));
+  const segCache = new Map(), statusSeen = {};
+  let n = 0, reads = 0, errors = 0;
+  for (const key of todo) {
+    if (LR.stop) break;
+    n++; info('lr-info', `Reading ${n}/${todo.length} — ${key} · ${reads} task(s) read · nothing is written`, 'good');
+    let tasks = [], err = '';
+    try {
+      const tl = await wbCall('API_TASKS', { key });
+      await wbSleep(150);
+      if (!tl || !tl.ok) throw new Error((tl && tl.error) || 'task lookup failed');
+      for (const t of tl.rows) {
+        if (LR.stop) break;
+        statusSeen[String(t.taskStatus)] = (statusSeen[String(t.taskStatus)] || 0) + 1;
+        if (!segCache.has(t.subtaskId)) {
+          const r = await wbCall('API_TASK', { taskId: t.subtaskId });
+          await wbSleep(150); reads++;
+          // keep only segments whose key is in this report (a task can hold thousands of rows)
+          segCache.set(t.subtaskId, r && r.ok ? r.rows.filter((s) => keySet.has(s.key)) : null);
+        }
+        const segs = segCache.get(t.subtaskId);
+        if (segs) tasks.push(Object.assign({}, t, { segs: segs.filter((s) => s.key === key) }));
+      }
+    } catch (e) { err = e.message; errors++; }
+    for (const j of LR.judged) {
+      if (j.key !== key) continue;
+      LR.res[j.n] = err ? { bucket: 'not-found', why: 'lookup failed: ' + err, placements: [], error: true }
+        : LQ.resolveRow(j, tasks, { conflict: bad.has(j.key + '\u0001' + LQ.norm(j.src)) });
+    }
+    if (n % 25 === 0) await lrSave();
+  }
+  for (const j of LR.judged) if (!LQ.needsWrite(j)) LR.res[j.n] = LQ.resolveRow(j, []);
+  LR.meta = { at: Date.now(), keys: keys.length, reads: (LR.meta.reads || 0) + reads, taskStatusSeen: Object.assign({}, LR.meta.taskStatusSeen || {}, statusSeen) };
+  await lrSave();
+  btn.textContent = '🔎 Locate in Starling (read-only)';
+  info('lr-info', `${LR.stop ? 'Stopped' : 'Done'} · ${n}/${todo.length} keys · ${reads} task(s) read${errors ? ` · ⚠ ${errors} lookup error(s) — run again to retry them` : ''} · nothing was written.`, errors ? 'err' : 'good');
+  lrRender();
+}
+function lrPlan() { return LR.judged.filter((j) => LR.res[j.n]).map((j) => ({ j, res: LR.res[j.n] })); }
+function lrRender() {
+  const plan = lrPlan(), counts = {};
+  for (const { res } of plan) counts[res.bucket] = (counts[res.bucket] || 0) + 1;
+  const approvedN = Object.values(LR.approved).filter(Boolean).length;
+  $('lr-summary').innerHTML = plan.length ? LQ.BUCKETS.filter((b) => counts[b]).map((b) =>
+    `<button class="lq-chip${LR.filter === b ? ' active' : ''}" data-b="${b}">${LR_LABEL[b]} ${counts[b]}</button>`).join(' ') +
+    ` <button class="lq-chip${!LR.filter ? ' active' : ''}" data-b="">all ${plan.length}</button>` +
+    `<div class="hint" style="margin-top:6px">Approved for writing: <b>${approvedN}</b> segment(s) · ✍ Writes are disarmed (dry run) — writing comes with M3.` +
+    (LR.meta.taskStatusSeen ? ` · task status codes seen: ${esc(JSON.stringify(LR.meta.taskStatusSeen))}` : '') + '</div>' : '';
+  $('lr-summary').querySelectorAll('[data-b]').forEach((el) => el.addEventListener('click', () => { LR.filter = el.dataset.b; lrRender(); }));
+  const show = (b) => !LR.filter || LR.filter === b;
+  const html = [];
+  for (const g of LQ.planByTask(plan)) {
+    const rows = g.rows.filter((r) => show(r.bucket) || show(LR.res[r.n] && LR.res[r.n].bucket));
+    if (!rows.length) continue;
+    const ready = g.rows.filter((r) => r.bucket === 'ready');
+    const allOn = ready.length && ready.every((r) => LR.approved[lrKey(g.taskId, r.sourceTextId)]);
+    html.push(`<div class="lqc" style="margin-top:8px"><div class="row" style="gap:6px;align-items:center">` +
+      (ready.length ? `<input type="checkbox" class="lr-task" data-t="${esc(g.taskId)}"${allOn ? ' checked' : ''} title="Approve every ready row in this task">` : '') +
+      `<b>${esc(g.taskName || 'task')}</b> <span class="hint">· ${esc(g.taskId)} · status ${esc(String(g.taskStatus))} · ${ready.length} ready of ${g.rows.length}</span></div>` +
+      rows.map((r) => {
+        const id = lrKey(g.taskId, r.sourceTextId), can = r.bucket === 'ready';
+        return `<div style="margin:6px 0 0 4px;border-top:1px solid var(--border);padding-top:6px">` +
+          (can ? `<input type="checkbox" class="lr-row" data-k="${esc(id)}"${LR.approved[id] ? ' checked' : ''}> ` : '') +
+          `<span class="lq-chip">${LR_LABEL[r.bucket] || r.bucket}</span> <b>${esc(r.key)}</b> <span class="hint">seg #${esc(String(r.rank))} · report row${r.xlRows.length > 1 ? 's' : ''} ${esc(r.xlRows.join(', '))} · ${esc(r.verdict)}</span>` +
+          `<div dir="auto" class="hint">now: ${esc(r.live)}</div><div dir="auto">new: ${esc(r.final)}</div>` +
+          `<div class="hint">${esc(r.why)}${r.reason ? ' · ' + esc(r.reason) : ''}</div></div>`;
+      }).join('') + '</div>');
+  }
+  const loose = plan.filter(({ res }) => !res.placements.length && show(res.bucket));
+  if (loose.length) html.push(`<div class="lqc" style="margin-top:8px"><b>Not placed in any task</b> <span class="hint">· ${loose.length} row(s)</span>` +
+    loose.slice(0, 300).map(({ j, res }) => `<div style="margin-top:6px"><span class="lq-chip">${LR_LABEL[res.bucket]}</span> <b>${esc(j.key)}</b> <span class="hint">row ${esc(String(j.xlRow))} · ${esc(res.why)}</span></div>`).join('') +
+    (loose.length > 300 ? `<div class="hint">…and ${loose.length - 300} more</div>` : '') + '</div>');
+  $('lr-plan').innerHTML = html.join('') || (plan.length ? '<div class="hint">Nothing in this bucket.</div>' : '');
+  $('lr-plan').querySelectorAll('.lr-row').forEach((el) => el.addEventListener('change', () => { LR.approved[el.dataset.k] = el.checked; lrSave(); lrRender(); }));
+  $('lr-plan').querySelectorAll('.lr-task').forEach((el) => el.addEventListener('change', () => {
+    const g = LQ.planByTask(lrPlan()).find((x) => x.taskId === el.dataset.t);
+    for (const r of (g ? g.rows : [])) if (r.bucket === 'ready') LR.approved[lrKey(g.taskId, r.sourceTextId)] = el.checked;
+    lrSave(); lrRender();
+  }));
+  $('lr-export').hidden = !plan.length;
+}
+function lrExport() {
+  const groups = LQ.planByTask(lrPlan());
+  const approved = [];
+  for (const g of groups) for (const r of g.rows) if (r.bucket === 'ready' && LR.approved[lrKey(g.taskId, r.sourceTextId)])
+    approved.push({ taskId: g.taskId, taskName: g.taskName, sourceTextId: r.sourceTextId, rank: r.rank, key: r.key, src: r.src, live: r.live, final: r.final, xlRow: r.xlRow });
+  const out = { kind: 'lqa-write-plan', sig: LR.sig, from: LR.fileName || '', at: new Date().toISOString(), armed: false, approved,
+    buckets: lrPlan().reduce((m, { res }) => (m[res.bucket] = (m[res.bucket] || 0) + 1, m), {}), meta: LR.meta, tasks: groups };
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 1)], { type: 'application/json' }));
+  a.download = 'lqa-write-plan-' + LR.sig.replace(/[^\w-]/g, '_') + '.json'; document.body.appendChild(a); a.click(); a.remove();
+  info('lr-info', `⬇ Exported the plan · ${approved.length} approved segment(s) · nothing written.`, 'good');
+}
+// ==== end LQA round-trip ===================================================================
+
 // ---- orchestration (drive the active Starling tab across hard reloads) ----
 async function wbActiveTab() { const [t] = await chrome.tabs.query({ active: true, currentWindow: true }); return t; }
 async function wbWaitComplete(tabId, tries = 60) { for (let i = 0; i < tries; i++) { const t = await new Promise((res) => chrome.tabs.get(tabId, res)); if (t && t.status === 'complete') return true; await wbSleep(300); } return false; }
@@ -7042,6 +7174,10 @@ async function init() {
     if ($('wb-resolve-all').textContent.indexOf('Stop') >= 0) { wbStopAll = true; return; }
     wbResolveAll();
   });
+  // LQA round-trip plan (M2, read-only)
+  if ($('lr-file')) $('lr-file').addEventListener('change', (e) => lrReadFile(e.target));
+  if ($('lr-locate')) $('lr-locate').addEventListener('click', () => { if ($('lr-locate').textContent.indexOf('Stop') >= 0) { LR.stop = true; return; } lrLocate(); });
+  if ($('lr-export')) $('lr-export').addEventListener('click', lrExport);
   $('wb-filter-todo').addEventListener('click', (e) => { WB.filter = 'todo'; e.target.classList.add('active'); $('wb-filter-all').classList.remove('active'); wbRenderQueue(); });
   $('wb-filter-all').addEventListener('click', (e) => { WB.filter = 'all'; e.target.classList.add('active'); $('wb-filter-todo').classList.remove('active'); wbRenderQueue(); });
 
