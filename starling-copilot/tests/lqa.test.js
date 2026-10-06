@@ -85,6 +85,8 @@ ok('bidi isolates around a number are not a difference → already', LQ.resolveR
 ok('empty live target in an open task → untranslated, not drifted', LQ.resolveRow(J(), [T('t1', [S({ target: '' })])]).bucket === 'untranslated');
 ok('empty live target in a submitted task → not-editable', LQ.resolveRow(J(), [T('t1', [S({ target: '' })], { taskStatus: 2 })]).bucket === 'not-editable');
 ok('submitted task → not-editable', LQ.resolveRow(J(), [T('t1', [S()], { taskStatus: 2 })]).bucket === 'not-editable');
+ok('closed task (status 3) → not-editable, even when the segment is empty', (() => { const r = LQ.resolveRow(J(), [T('t1', [S({ target: '' })], { taskStatus: 3 })]); return r.bucket === 'not-editable' && r.placements[0].why === 'task closed'; })());
+ok('in-progress task (status 1) stays editable', LQ.segEditable({ taskStatus: 1 }, S()).ok);
 ok('segment not modifiable → not-editable', LQ.resolveRow(J(), [T('t1', [S({ modifiable: false })])]).bucket === 'not-editable');
 ok('same key, other source revision → not-found (never matched by key alone)', (() => { const r = LQ.resolveRow(J(), [T('t1', [S({ source: 'Try again later.' })])]); return r.bucket === 'not-found' && /another revision/.test(r.why); })());
 ok('the report\'s Before is never used to find rows', LQ.resolveRow(J({ before: 'something else' }), [T('t1', [S()])]).placements.length === 1);

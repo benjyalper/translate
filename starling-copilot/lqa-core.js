@@ -230,12 +230,13 @@
     }
     return bad;
   }
-  // Is this live segment editable? A submitted task, a segment not modifiable by the user, or an
-  // editor lock all block writing. submittedStatus: the getAllTasks/getMyTasks taskStatus code(s)
-  // meaning Submitted (2 in getMyTasks; confirm on the first live run — raw values are kept).
-  function segEditable(task, seg, submittedStatus) {
-    const sub = [].concat(submittedStatus == null ? [2] : submittedStatus).map(Number);
-    if (task && sub.includes(Number(task.taskStatus))) return { ok: false, why: 'task submitted' };
+  // Is this live segment editable? A submitted or closed task, a segment not modifiable by the user,
+  // or an editor lock all block writing. getMyTasks taskStatus (confirmed live 2026-10-06):
+  // 1 = in progress, 2 = Submitted, 3 = Closed (cancelled). blockedStatus overrides the defaults.
+  const BLOCKED_STATUS = { 2: 'task submitted', 3: 'task closed' };
+  function segEditable(task, seg, blockedStatus) {
+    const blocked = blockedStatus == null ? BLOCKED_STATUS : [].concat(blockedStatus).reduce((m, c) => (m[Number(c)] = 'task status ' + c, m), {});
+    if (task && blocked[Number(task.taskStatus)]) return { ok: false, why: blocked[Number(task.taskStatus)] };
     if (seg && seg.modifiable === false) return { ok: false, why: 'not modifiable by you' };
     if (seg && seg.lock) return { ok: false, why: 'editor lock ' + seg.lock };
     return { ok: true, why: '' };
@@ -257,7 +258,7 @@
         if (s.key !== j.key) continue;
         keySegs++;
         if (norm(s.source) !== want) continue;              // another revision of the string — never written
-        const live = norm(s.target), ed = segEditable(t, s, o.submittedStatus);
+        const live = norm(s.target), ed = segEditable(t, s, o.blockedStatus);
         let bucket, why;
         if (live === fin) { bucket = 'already'; why = 'live text already equals the final'; }
         else if (!live && bef) { bucket = ed.ok ? 'untranslated' : 'not-editable'; why = ed.ok ? 'the live segment is empty (not translated yet) — the final can fill it' : ed.why; }
