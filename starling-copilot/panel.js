@@ -3636,7 +3636,7 @@ async function lrLocate() {
         const segs = segCache.get(t.subtaskId);
         if (segs) tasks.push(Object.assign({}, t, { segs: segs.filter((s) => s.key === key) }));
       }
-    } catch (e) { err = e.message; errors++; }
+    } catch (e) { err = e.message; errors++; if (!LR.firstError) LR.firstError = key + ': ' + err; }
     for (const j of LR.judged) {
       if (j.key !== key) continue;
       LR.res[j.n] = err ? { bucket: 'not-found', why: 'lookup failed: ' + err, placements: [], error: true }
@@ -3645,11 +3645,17 @@ async function lrLocate() {
     if (n % 25 === 0) await lrSave();
   }
   for (const j of LR.judged) if (!LQC.needsWrite(j)) LR.res[j.n] = LQC.resolveRow(j, []);
-  LR.meta = { at: Date.now(), keys: keys.length, reads: (LR.meta.reads || 0) + reads, taskStatusSeen: Object.assign({}, LR.meta.taskStatusSeen || {}, statusSeen) };
+  LR.meta = { at: Date.now(), errors, firstError: LR.firstError || '', keys: keys.length, reads: (LR.meta.reads || 0) + reads, taskStatusSeen: Object.assign({}, LR.meta.taskStatusSeen || {}, statusSeen) };
   await lrSave();
   btn.textContent = '🔎 Locate in Starling (read-only)';
   info('lr-info', `${LR.stop ? 'Stopped' : 'Done'} · ${n}/${todo.length} keys · ${reads} task(s) read${errors ? ` · ⚠ ${errors} lookup error(s) — run again to retry them` : ''} · nothing was written.`, errors ? 'err' : 'good');
   lrRender();
+}
+// Why rows ended up where they are, most common first (e.g. "lookup failed: HTTP 403" × 900).
+function lrReasons() {
+  const m = {};
+  for (const { res } of lrPlan()) if (res.bucket !== 'ready' && res.bucket !== 'several') { const w = res.why || '?'; m[w] = (m[w] || 0) + 1; }
+  return Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 8);
 }
 function lrPlan() { return LR.judged.filter((j) => LR.res[j.n]).map((j) => ({ j, res: LR.res[j.n] })); }
 function lrRender() {
@@ -3660,7 +3666,8 @@ function lrRender() {
     `<button class="lq-chip${LR.filter === b ? ' active' : ''}" data-b="${b}">${LR_LABEL[b]} ${counts[b]}</button>`).join(' ') +
     ` <button class="lq-chip${!LR.filter ? ' active' : ''}" data-b="">all ${plan.length}</button>` +
     `<div class="hint" style="margin-top:6px">Approved for writing: <b>${approvedN}</b> segment(s) · ✍ Writes are disarmed (dry run) — writing comes with M3.` +
-    (LR.meta.taskStatusSeen ? ` · task status codes seen: ${esc(JSON.stringify(LR.meta.taskStatusSeen))}` : '') + '</div>' : '';
+    (LR.meta.taskStatusSeen ? ` · task status codes seen: ${esc(JSON.stringify(LR.meta.taskStatusSeen))}` : '') + '</div>' +
+    `<div class="hint" style="margin-top:4px">Top reasons: ${lrReasons().map(([w, c]) => esc(w) + ' × ' + c).join(' · ') || '—'}</div>` : '';
   $('lr-summary').querySelectorAll('[data-b]').forEach((el) => el.addEventListener('click', () => { LR.filter = el.dataset.b; lrRender(); }));
   const show = (b) => !LR.filter || LR.filter === b;
   const html = [];
@@ -3700,7 +3707,7 @@ function lrExport() {
   for (const g of groups) for (const r of g.rows) if (r.bucket === 'ready' && LR.approved[lrKey(g.taskId, r.sourceTextId)])
     approved.push({ taskId: g.taskId, taskName: g.taskName, sourceTextId: r.sourceTextId, rank: r.rank, key: r.key, src: r.src, live: r.live, final: r.final, xlRow: r.xlRow });
   const out = { kind: 'lqa-write-plan', sig: LR.sig, from: LR.fileName || '', at: new Date().toISOString(), armed: false, approved,
-    buckets: lrPlan().reduce((m, { res }) => (m[res.bucket] = (m[res.bucket] || 0) + 1, m), {}), meta: LR.meta, tasks: groups };
+    buckets: lrPlan().reduce((m, { res }) => (m[res.bucket] = (m[res.bucket] || 0) + 1, m), {}), reasons: Object.fromEntries(lrReasons()), meta: LR.meta, tasks: groups };
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 1)], { type: 'application/json' }));
   a.download = 'lqa-write-plan-' + LR.sig.replace(/[^\w-]/g, '_') + '.json'; document.body.appendChild(a); a.click(); a.remove();
