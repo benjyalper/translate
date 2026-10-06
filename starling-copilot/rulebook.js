@@ -18,7 +18,7 @@
 })(typeof self !== 'undefined' ? self : (typeof globalThis !== 'undefined' ? globalThis : this), function () {
   'use strict';
 
-  const VERSION = '2026-10-06.1';
+  const VERSION = '2026-10-06.2';
 
   // ---- The rulings (Benjy, 2026-09-28) — machine-readable index ------------------------------
   const RULINGS = [
@@ -40,7 +40,8 @@
     { id: 16, topic: 'Disputed reviewer points (precedents)', provisional: true },
     { id: 17, topic: 'Final period' },
     { id: 18, topic: 'Hashtags' },
-    { id: 19, topic: 'Slash scope' }
+    { id: 19, topic: 'Slash scope' },
+    { id: 20, topic: 'LQA pattern answers (2026-10-06): guardian slash, Congrats, nudge, "now" buttons, dialog questions, legal name, Celebrate X, _prompt keys, broken source placeholders, split-sentence period, extra LRMs' }
   ];
 
   // Global Latin allow-list (ruling 12). Starling DNT/Brand tags and context notes add task-scoped ones.
@@ -50,7 +51,10 @@
   // Mandatory terms that follow from the rulings (merged with the user's own 🔒 Locked terms by the panel).
   const RULED_TERMS = [
     { en: 'unlock', he: 'לשחרר', note: 'ruling 7 — every sense (שחרר/י, שחרור, שוחרר/ה, משוחרר); never לפתוח / לקבל' },
-    { en: 'teen', he: 'בן/בת הנוער', note: 'ruling 13a — "your teen" → בן/בת הנוער שלך; "teens" → בני נוער (no slash); never מתבגר/ת, נער/ה' }
+    { en: 'teen', he: 'בן/בת הנוער', note: 'ruling 13a — "your teen" → בן/בת הנוער שלך; "teens" → בני נוער (no slash); never מתבגר/ת, נער/ה' },
+    { en: 'Congrats', he: 'מזל טוב', note: 'ruling 20 — also "Congratulations!"; never ברכות!' },
+    { en: 'nudge', he: 'דחיפה קלה', note: 'ruling 20 — noun construction: נתת דחיפה קלה ל-…, נתן/ה לך דחיפה קלה, Nudge back → החזרת דחיפה קלה; never דחף/ה קלות, never נגיעה קלה' },
+    { en: 'legal name', he: 'שם חוקי', note: 'ruling 20 — verification documents' }
   ];
 
   // Terms from OTHER clients that must never be applied to TikTok (found in the live 🔒 Locked
@@ -63,17 +67,17 @@
     '\nTIKTOK HEBREW RULEBOOK (he-IL, v' + VERSION + ' — overrides older style notes, glossary entries and house rules below when they conflict):\n' +
     '- VOICE: inclusive, approachable, conversational, clear, casual; short and natural. REGISTER medium-low: אנחנו (not אנו), עכשיו (not כעת), על (not אודות).\n' +
     '- INTERNAL CONSISTENCY: when the same word, verb or fixed phrase recurs in this batch, render it ONE way throughout (same meaning + same UI role → same Hebrew). Never alternate synonyms arbitrarily.\n' +
-    '- GENDER SLASH — WHO GETS ONE: use the slash ONLY for a single person of unknown gender: the user (את/ה, לחץ/י, שלך) or ONE other person (הוסיף/ה, עוקב/ת חדש/ה, singular "their" → שלו/שלה). A GROUP of people takes the plain masculine plural with NO slash: יוצרים דומים, עוקבים חדשים, בני נוער, אפוטרופוסים — never יוצרים/ות, חדשים/ות, בני/בנות. This includes the two/many/other branches of ICU plurals.\n' +
+    '- GENDER SLASH — WHO GETS ONE: use the slash ONLY for a single person of unknown gender: the user (את/ה, לחץ/י, שלך) or ONE other person (הוסיף/ה, עוקב/ת חדש/ה, singular "their" → שלו/שלה) — including ONE guardian: אפוטרופוס/ית, also on role buttons (המשך כאפוטרופוס/ית). A GROUP of people takes the plain masculine plural with NO slash: יוצרים דומים, עוקבים חדשים, בני נוער, אפוטרופוסים — never יוצרים/ות, חדשים/ות, בני/בנות. This includes the two/many/other branches of ICU plurals.\n' +
     '- GENDER SLASH — HOW TO WRITE IT: the short form "masculine/י" is correct ONLY when the feminine is exactly the masculine + י (a final letter becomes its regular form): לחץ/י (לחצי), בחר/י, שתף/י (שתפי), שלח/י, התחבר/י, הישאר/י, השתמש/י. In EVERY other case write BOTH words in full: ל״ה verbs נסה/נסי, גלה/גלי, צפה/צפי, ראה/ראי, קנה/קני, פנה/פני, העלה/העלי, תיהנה/תיהני; hif\'il verbs הקש/הקישי, השלם/השלימי, הוסף/הוסיפי, הזן/הזיני, הפעל/הפעילי, הצג/הציגי, הורד/הורידי, הסר/הסירי, החזק/החזיקי, הגדר/הגדירי; holam verbs בדוק/בדקי, שמור/שמרי, כתוב/כתבי, עבור/עברי, זכור/זכרי, משוך/משכי, אסוף/אספי. NEVER נסה/י, צפה/י, גלה/י, הקש/י, השלם/י, בדוק/י. Conversely, do NOT write both in full when the short form is correct (שתף/י, not שתף/שתפי). The final letter goes BEFORE the slash (לחץ/י, never לח/יץ).\n' +
     '- UI ROLE decides the verb form (decide the role FIRST from "key", "context", then source signals):\n' +
-    '  • BUTTON / LABEL / TAB / MENU / TITLE — a key ending _btn/_button/_label/_tab/_title, or any short action label of ≤3 words ("Upgrade", "Check status", "Contact us", "Retry", "Save") → GERUND (שם פעולה): שדרוג, בדיקת סטטוס, יצירת קשר, ניסיון חוזר, שמירה. Never the infinitive on a button, never an imperative on a button. Titles have no invented period.\n' +
+    '  • BUTTON / LABEL / TAB / MENU / TITLE — a key ending _btn/_button/_label/_tab/_title, or any short action label of ≤3 words ("Upgrade", "Check status", "Contact us", "Retry", "Save") → GERUND (שם פעולה): שדרוג, בדיקת סטטוס, יצירת קשר, ניסיון חוזר, שמירה. Never the infinitive on a button, never an imperative on a button. Short "X now" buttons take the PLAIN gerund (Book now → הזמנה עכשיו, Use now → שימוש עכשיו), never ל + gerund (להזמנה עכשיו). EXCEPTION: a dialog title phrased as a yes/no question takes the infinitive question (Cancel invite? → לבטל את ההזמנה?, Delete from history? → למחוק מההיסטוריה?). Titles have no invented period.\n' +
     '  • CTA / PROMO HEADLINE with an object or benefit — typically a _cta key or marketing line ("Get funds in 3 simple steps", "Join now and win rewards") → IMPERATIVE slash: קבל/י מימון ב-3 צעדים פשוטים.\n' +
     '  • INSTRUCTION / TOOLTIP / BODY telling the user what to do → IMPERATIVE slash (הפעל/הפעילי Wi-Fi בהגדרות). Use impersonal יש ל…/נא ל… ONLY for requirements, validation rules and legal/policy text ("Bookings must be made through TikTok" → יש לבצע הזמנות דרך TikTok). Keep one choice across parallel strings.\n' +
-    '  • BANNERS may use the imperative or the infinitive (לערוך כתוביות…), not the gerund.\n' +
+    '  • BANNERS may use the imperative or the infinitive (לערוך כתוביות…), not the gerund. Campaign headlines, anchors and titles "Celebrate X" → חוגגים את X (one form everywhere).\n' +
     '  • LOADING / PROGRESS status — any short "-ing…" header or label ("Searching…", "Converting units...", "Planning the next step...", "Thinking", Tako thinking/tool headers) → ALWAYS מתבצע/מתבצעת + noun (מתבצע חיפוש תמונות…, מתבצעת המרת יחידות…, מתבצעת חשיבה), even when a bot produces it. Masculine FIRST person (אני מחפש מידע על {query}.) ONLY for a full chat-bubble sentence in which the bot talks to the user about itself — never for a short status header. Never a user slash here (never מחפש/ת, יוצר/ת). The system acts, not the user.\n' +
-    '  • MACHINE-DIRECTED AI PROMPT (item marked "machinePrompt": true) → masculine-singular imperative addressed to the model, NO slash (הפוך, השתמש, צור); keep the slash only for a verb the end user performs in the app.\n' +
+    '  • MACHINE-DIRECTED AI PROMPT (item marked "machinePrompt": true, or a key ending _prompt such as visualSearch_camera_viewfinder_prompt) → masculine-singular imperative addressed to the model, NO slash (הפוך, השתמש, צור); keep the slash only for a verb the end user performs in the app.\n' +
     '- ERROR MESSAGES: neutral and helpful; avoid "נכשל/נכשלו" and blaming wording — describe the situation (לא הצלחנו…, אי אפשר…).\n' +
-    '- PUNCTUATION: straight double quotes only (" "), never “ ” or single quotes. No "&" — use ו. Avoid semicolons. Few exclamation marks; never add one the source lacks. The sentence-final period MIRRORS the source exactly (added if the source has it, absent if not — no exceptions). Ellipsis: keep the source\'s form (… or ...).\n' +
+    '- PUNCTUATION: straight double quotes only (" "), never “ ” or single quotes. No "&" — use ו. Avoid semicolons. Few exclamation marks; never add one the source lacks. The sentence-final period MIRRORS the source exactly (added if the source has it, absent if not). SPLIT SENTENCES (a main line with a {placeholder} plus a separate bold part, keys ending _bold): mirror the period at SENTENCE level — it goes at the end of whichever Hebrew string ends the sentence. If the bold part lands mid-sentence in Hebrew, drop its period and end the main line with it (main לחיי {s_nextMilestone} הבאה. + bold אבן הדרך). Never a period mid-sentence. Ellipsis: keep the source\'s form (… or ...).\n' +
     '- UI ELEMENT NAMES inside a sentence: if the source marks the name with <b>…</b> or **…**, keep that markup around the Hebrew name and add no quotes. If the source has NO markup, translate the name and wrap it in straight double quotes, with the prefix attached directly: עבור/עברי לכרטיסייה "סדרות", מעבר ל"כולם", בלחיצה על "שליחה", אל "פרופיל" > "ההזמנות שלך". Never leave a UI element name in English.\n' +
     '- HEBREW PREFIX BEFORE A {placeholder}: decide by what the placeholder will contain, judged from its NAME. Hebrew-valued placeholders (names containing link, policy, settings, setting, page, tab, section, type, category, reason, guidelines, cg, terms, center, title, feature) → prefix attached WITHOUT hyphen: ב{s_privacyPolicy}, ל{agreementLink}, ב{s_privacySettings}. Latin- or number-valued placeholders (user, username, nickname, name, creator, author, num, count, amount, price, value, date, time, year, app, percent, id, code) → prefix WITH hyphen: ל-{s_username}, ב-{issue_date}, מ-{s_startDate}. Month, city, region and country names are localized into Hebrew at runtime → no hyphen (ב{s_month}, ב{s_city}). If unsure, use the hyphen. The same no-hyphen rule applies before a bolded or quoted HEBREW word: ב<b>פרופיל</b>, ל"כולם". A Latin word keeps the maqaf: ב-TikTok.\n' +
     '- NUMBERS: digits, never spelled-out numbers (5 שנים, not חמש שנים). {num}k / {num}m / 5k / 2M shorthand is NOT used in Hebrew: expand to {num},000 / {num},000,000 (5,000); if the value can be a decimal, use words instead ({num} אלף, {num} מיליון). Space between a number and its unit. Hebrew dual for an exact 2 written as a word (יומיים, שעתיים) — never a numeral plus a dual ("2 יומיים").\n' +
@@ -86,7 +90,8 @@
     '- PLACE, NEIGHBOURHOOD AND VENUE NAMES: transliterate proper names into Hebrew letters — never leave them in Latin and never translate them (South Ozone Park → סאות\' אוזון פארק, Lake View Terrace → לייק ויו טראס). Only a generic venue-type word that is not part of a brand is translated: Stadium/Stade/Estadio → אצטדיון, Square → כיכר. Park/Field/Arena/Dome stay transliterated when part of the name. Render the same place the same way throughout a task.\n' +
     '- RULED TERMS: unlock → לשחרר in every sense (שחרר/י, שחרור, שוחרר/ה — never לפתוח, never לקבל). teen → בן/בת הנוער ("your teen" → בן/בת הנוער שלך; "teens" → בני נוער). highlights: sports/video → רגעי שיא; the Story "Highlights" profile feature → נקודות שיא; the verb → להדגיש. subscription (the plan) → מינוי; subscriber / "Subscribed" → מנוי/ה; subscribe to notifications → הרשמה. Last updated → עודכן לאחרונה. repost → פרסום מחדש / פרסם/ה מחדש. administrative → מינהלי. cast (a video) → ללהק. disclaimer → הצהרת אחריות / הבהרה. right of withdrawal → זכות ביטול. Weighing scale → משקל. blouse → חולצה. tracking shot → צילום מעקב.\n' +
     '- GRAMMAR PRECEDENTS: keep את before a definite direct object (נהל/י את {s_settings} שלך). An ICU "one" branch stays singular (מקום, not מקומות). Never hard-code a value a placeholder carries (keep {s_month}). Keep an impersonal source impersonal (מומלץ לך, not אנחנו ממליצים). Do not add words the source lacks ("Others" → אחר, not סיבות אחרות, unless the UI makes it explicit).\n' +
-    '- BIDI: when a Latin word or a {placeholder} is directly followed by "(" or ":" inside a Hebrew sentence, put an RLM (U+200F) right after it: ל-TikTok‏ ({{ticket.id}}), {s_name}:‏ {s_volume}. Put an LRM (U+200E) before a Latin #hashtag that sits in Hebrew text. Add no other invisible marks.\n';
+    '- BIDI: when a Latin word or a {placeholder} is directly followed by "(" or ":" inside a Hebrew sentence, put an RLM (U+200F) right after it: ל-TikTok‏ ({{ticket.id}}), {s_name}:‏ {s_volume}. Put an LRM (U+200E) before a Latin #hashtag that sits in Hebrew text, before a space-separated phone number (‎600 000 016) so its digit groups keep their order, and right after punctuation that ends a Latin brand name (SpontanGO!‎) so it stays on the right side of the brand. Add no other invisible marks.\n' +
+    '- BROKEN PLACEHOLDER IN THE SOURCE (e.g. {reward_amount) or {s_username2)): mirror it in the Hebrew EXACTLY, typo included, so Starling QA matches; never repair it.\n';
 
   // The full system prompt (moved here from panel.js sysPrompt so the evaluated prompt === the shipped prompt).
   // opts: { mode: 'translate'|'proofread', plural: bool, tiktok: bool, extra: string (locked terms / context / brain, TikTok only) }
@@ -246,6 +251,14 @@
     const k = String(m.key || '');
     if (/(_btn|_button|button_|btn_|_label|_tab)(\b|_|$)/i.test(k) && s.trim().split(/\s+/).length <= 3 && new RegExp('^[' + HEB + ']+/[' + HEB + ']+').test(t.trim()))
       add('R8-button', 'warn', 'button/label → gerund (שם פעולה), not an imperative');
+    // Ruling 20 — short "X now" buttons: plain gerund, never ל + gerund.
+    if (/btn|button|_cta/i.test(k) && /\bnow\b/i.test(s) && new RegExp('^ל[' + HEB + ']+ עכשיו').test(t.trim()))
+      add('R8-now-button', 'warn', '"X now" button → plain gerund (הזמנה עכשיו), not ל + gerund');
+    // Ruling 20 — one guardian keeps the slash.
+    if (/\bguardian\b(?!s)/i.test(s) && !/\bguardians\b/i.test(s) && /אפוטרופוס(?!\/|ים|ית)/.test(t)) add('R19-guardian', 'warn', 'one guardian of unknown gender → אפוטרופוס/ית');
+    // Ruling 20 — Congrats, nudge.
+    if (/^\s*congrat/i.test(s) && /ברכות/.test(t)) add('R20-congrats', 'warn', 'Congrats! → מזל טוב!');
+    if (/\bnudg/i.test(s) && /דחף|דחפו|דחפת|נגיעה קלה/.test(t)) add('R20-nudge', 'error', 'nudge → noun construction (נתן/ה דחיפה קלה), never דחף/ה קלות / נגיעה קלה');
     // Neutral errors — no נכשל.
     if (/נכשל/.test(t)) add('R-error-tone', 'warn', 'avoid נכשל/נכשלו in user-facing messages');
     // Curly quotes.
@@ -256,9 +269,20 @@
     // R15 — RLM after Latin/placeholder before "(" or ":" (reviewer cases).
     const tNoTag = t.replace(/[OC]-\d+-\d+/g, '');   // Starling tag tokens (O-1-0/C-1-0) are not Latin text
     if (/[A-Za-z0-9}]\s\(/.test(tNoTag) && /[א-ת]/.test(t) && !/‏/.test(t)) add('R15-rlm', 'warn', 'Latin word/placeholder before "(" in Hebrew text → add RLM');
+    // Ruling 20 — LRM before a space-separated phone number, and after punctuation ending a Latin brand name.
+    if (/[א-ת]/.test(t)) {
+      for (const ph of (s.match(/(?<![\d,.])\d{2,4}(?: \d{2,4}){2,}(?![\d,.])/g) || []))
+        if (t.includes(ph) && !t.includes('\u200e' + ph)) add('R15-lrm-phone', 'warn', 'phone number ' + ph + ' in Hebrew text → LRM before it');
+      const bm = s.match(/^\s*([A-Za-z][\w]*[!?])/);
+      if (bm && t.includes(bm[1]) && !t.includes(bm[1] + '\u200e')) add('R15-lrm-brand', 'warn', bm[1] + ' → LRM after the "' + bm[1].slice(-1) + '" so it stays on the right');
+    }
     // R17 — period mirror (the pipeline enforces it; this catches raw model output).
     const endP = (x) => { const y = x.replace(/(\s|\\n|<[^>]+>)+$/, ''); return /\.$/.test(y) && !/(\.\.\.|…)$/.test(y); };   // an ellipsis is not a full stop
-    if (endP(s) !== endP(t)) add('R17-period', 'warn', 'final period must mirror the source');
+    // Split sentences (ruling 20): a _bold part may drop its period, and a main line ending in a
+    // {placeholder} may carry it — the period is mirrored at sentence level, never mid-sentence.
+    const boldPart = /_bold$/i.test(k) && endP(s) && !endP(t);
+    const splitMain = /\}\s*$/.test(s) && !endP(s) && endP(t);
+    if (endP(s) !== endP(t) && !boldPart && !splitMain) add('R17-period', 'warn', 'final period must mirror the source');
     return out;
   }
 

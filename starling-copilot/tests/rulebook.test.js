@@ -95,6 +95,35 @@ ok('added ellipsis flagged', flags(src42, 'לאחר מכן, כל שנותר הו
 ok('same "!" count not flagged', !flags(src42, 'לאחר מכן, כל שנותר הוא להזין אמצעי תשלום, והכל מוכן!', 'R-exclaim'));
 ok('source ellipsis kept not flagged', !flags('Searching...', 'מתבצע חיפוש...', 'R-ellipsis'));
 
+sec('Ruling 20 — LQA pattern answers (2026-10-06)');
+ok('"Book now" button with ל + gerund flagged', flags('Book now', 'להזמנה עכשיו', 'R8-now-button', { key: 'ttls_JPfirstBooking_promoLanding_bookBtn' }));
+ok('"Book now" plain gerund NOT flagged', !flags('Book now', 'הזמנה עכשיו', 'R8-now-button', { key: 'ttls_JPfirstBooking_promoLanding_bookBtn' }));
+ok('one guardian without slash flagged', flags('A guardian account invites you to join Family Pairing', 'חשבון של אפוטרופוס מזמין אותך להצטרף לקישור משפחה', 'R19-guardian'));
+ok('אפוטרופוס/ית NOT flagged', !flags('Ask your guardian to scan this QR code', 'בקש/י מהאפוטרופוס/ית שלך לסרוק את קוד ה-QR הזה', 'R19-guardian'));
+ok('guardians (group) NOT flagged', !flags('Guardians can customize teen safety settings.', 'אפוטרופוסים יכולים להתאים אישית את הגדרות הבטיחות של בני נוער.', 'R19-guardian'));
+ok('Congrats → ברכות flagged', flags('Congrats! ', 'ברכות! ', 'R20-congrats'));
+ok('Congrats → מזל טוב NOT flagged', !flags('Congrats! ', 'מזל טוב! ', 'R20-congrats'));
+ok('nudge as דחף/ה קלות flagged', flags('{s_nickname} nudged you', '{s_nickname} דחף/ה אותך קלות', 'R20-nudge'));
+ok('nudge as נגיעה קלה flagged', flags('You nudged them', 'נתת להם נגיעה קלה', 'R20-nudge'));
+ok('nudge as נתן/ה לך דחיפה קלה NOT flagged', !flags('{s_nickname} nudged you', '{s_nickname} נתן/ה לך דחיפה קלה', 'R20-nudge'));
+ok('locked terms carry Congrats, nudge, legal name', ['Congrats', 'nudge', 'legal name'].every((en) => RB.RULED_TERMS.some((t) => t.en === en)));
+ok('prompt has the dialog-question exception and Celebrate X', /לבטל את ההזמנה\?/.test(RB.STYLE) && /חוגגים את X/.test(RB.STYLE));
+
+sec('Ruling 15 extensions (2026-10-06) — LRM before a phone number, after brand punctuation');
+const phSrc = 'Call 016 or send a WhatsApp message to 600 000 016 to receive advice.';
+ok('phone number without LRM flagged', flags(phSrc, 'התקשרי ל-016 או שלחי הודעת WhatsApp למספר 600 000 016 כדי לקבל ייעוץ.', 'R15-lrm-phone'));
+ok('phone number with LRM NOT flagged', !flags(phSrc, 'התקשרי ל-016 או שלחי הודעת WhatsApp למספר ‎600 000 016 כדי לקבל ייעוץ.', 'R15-lrm-phone'));
+ok('10,000 is not a phone number', !flags('Join 10,000 people', 'הצטרף/י ל-10,000 אנשים', 'R15-lrm-phone'));
+ok('SpontanGO! without LRM flagged', flags('SpontanGO! Discount', 'הנחת SpontanGO!', 'R15-lrm-brand'));
+ok('SpontanGO!‎ NOT flagged', !flags('SpontanGO! Discount', 'הנחת SpontanGO!‎', 'R15-lrm-brand'));
+ok('sentence-final "on TikTok!" NOT flagged', !flags('Watch it on TikTok!', 'צפה/צפי בזה ב-TikTok!', 'R15-lrm-brand'));
+
+sec('Ruling 17 — split sentences (2026-10-06)');
+ok('_bold part that drops its period NOT flagged', !flags('milestone.', 'אבן הדרך', 'R17-period', { key: 'milestoneTemplate_template5_card_end_bold' }));
+ok('main line ending in {placeholder} that takes the period NOT flagged', !flags("Here's to the next {s_nextMilestone}", 'לחיי {s_nextMilestone} הבאה.', 'R17-period'));
+ok('ordinary string with an added period still flagged', flags('Save', 'שמירה.', 'R17-period'));
+ok('ordinary string missing its period still flagged', flags('Your post is live.', 'הפוסט שלך פורסם', 'R17-period'));
+
 sec('Stored-state audit (the 2026-09-28 backup)');
 const audit = RB.auditStoredState({
   lockedTerms: { terms: [{ en: 'button', he: 'לחצן' }, { en: '{s_num}%', he: '%{s_num}' }, { en: 'TikTok', he: 'TikTok' }] },
