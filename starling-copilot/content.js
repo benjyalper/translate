@@ -13,7 +13,7 @@
   // tab is running an older version, re-injects this file via chrome.scripting so stale tabs
   // self-heal (no page reload needed). Re-injection tears down the previous version's message
   // listener first (below) so there's never a double-listener race.
-  const CS_VERSION = 41;
+  const CS_VERSION = 42;
   if (window.__scVer === CS_VERSION) return;                         // this exact version already live here
   if (typeof window.__scCleanup === 'function') { try { window.__scCleanup(); } catch (e) {} }  // remove an older/stale one
   window.__scVer = CS_VERSION;
@@ -480,6 +480,80 @@
       }
     }
     return results;
+  }
+  // ✍ WRITE TAGGED PARTS (document editor only). A tagged target cell is a contenteditable whose
+  // children are plain TEXT nodes and IMG.cat-content__edit-tag tag elements. Retyping the whole
+  // cell destroys the tags, so this replaces ONLY the text pieces between tags that changed:
+  // select exactly that piece → execCommand('insertText') (the editor treats it like a paste and
+  // autosaves; the IMG tags are never touched). Verified live on 6 Oct 2026 (task 515492244226 #67).
+  // Every row is checked before and after; anything unexpected → no change / restored, and the row
+  // stays paste-by-hand. edit = { seg, oldPieces:[..], newPieces:[..] } (pieces = text between tags).
+  const isEditTag = (n) => n && n.nodeType === 1 && /cat-content__edit-tag/.test(String(n.className || ''));
+  // Read a cell as [pieces, tags]; null when it holds anything but text + direct-child tags.
+  function domPieces(ed) {
+    const pieces = [''], tags = [];
+    for (const n of ed.childNodes) {
+      if (n.nodeType === 3) { pieces[pieces.length - 1] += n.nodeValue; continue; }
+      if (isEditTag(n)) { tags.push(n); pieces.push(''); continue; }
+      return null;   // nested markup, newline tokens, <br>… → not handled here
+    }
+    return { pieces, tags };
+  }
+  const pieceKey = (s) => String(s == null ? '' : s).replace(/\u00a0/g, ' ').replace(/[\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF]/g, '').replace(/\s+/g, ' ').trim();
+  const pieceExact = (s) => String(s == null ? '' : s).replace(/\u00a0/g, ' ').replace(/[\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF]/g, '');
+  // Replace piece i (between tag i-1 and tag i) with text. Returns false if the editor refused.
+  function setPiece(ed, i, text) {
+    const d = domPieces(ed); if (!d) return false;
+    const r = document.createRange();
+    if (i === 0) r.setStart(ed, 0); else r.setStartAfter(d.tags[i - 1]);
+    if (i === d.tags.length) r.setEnd(ed, ed.childNodes.length); else r.setEndBefore(d.tags[i]);
+    ed.focus();
+    const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    if (document.activeElement !== ed) return false;
+    if (text) return document.execCommand('insertText', false, text);
+    return r.collapsed ? true : document.execCommand('delete', false);
+  }
+  async function writePartsOne(edit) {
+    const { seg } = edit;
+    const oldP = edit.oldPieces || [], newP = edit.newPieces || [];
+    try {
+      if (oldP.length !== newP.length || !oldP.length) return { seg, ok: false, reason: 'tag layout differs between old and new text' };
+      const cell = await scrollToSeg(seg);
+      if (!cell) return { seg, ok: false, reason: 'row not found' };
+      const ed = (cell.matches && cell.matches(CFG.editor)) ? cell : cell.querySelector(CFG.editor);
+      if (!ed) return { seg, ok: false, reason: 'no editable cell' };
+      const d = domPieces(ed);
+      if (!d) return { seg, ok: false, reason: 'cell has markup this writer does not handle' };
+      if (d.pieces.length !== oldP.length) return { seg, ok: false, reason: `cell has ${d.tags.length} tag(s), expected ${oldP.length - 1}` };
+      for (let i = 0; i < oldP.length; i++) if (pieceKey(d.pieces[i]) !== pieceKey(oldP[i])) return { seg, ok: false, reason: `part ${i + 1} no longer matches the harvested text — the cell changed since harvest` };
+      const tagCount = d.tags.length, original = d.pieces.slice();
+      const changed = []; for (let i = 0; i < newP.length; i++) if (pieceExact(newP[i]) !== pieceExact(oldP[i])) changed.push(i);
+      if (!changed.length) return { seg, ok: true, parts: 0, already: true };
+      let refused = false;
+      for (const i of changed) { if (!setPiece(ed, i, newP[i])) { refused = true; break; } await sleep(60); }
+      const after = domPieces(ed);
+      const good = !refused && after && after.tags.length === tagCount &&
+        after.pieces.every((x, i) => changed.includes(i) ? pieceExact(x) === pieceExact(newP[i]) : pieceKey(x) === pieceKey(original[i]));
+      if (!good) {
+        // Put the original text back (only the pieces we touched), then report the row as failed.
+        if (after && after.tags.length === tagCount) for (const i of changed) { setPiece(ed, i, original[i]); await sleep(40); }
+        ed.blur(); await sleep(250);
+        const back = domPieces(ed);
+        const restored = !!back && back.tags.length === tagCount && back.pieces.every((x, i) => pieceExact(x) === pieceExact(original[i]));
+        return { seg, ok: false, reason: (refused ? 'the editor refused the edit' : 'the cell did not end up as expected') + (restored ? ' — original text restored' : ' — ⚠ could NOT restore the original, check this row by hand') };
+      }
+      ed.blur();
+      await sleep(250);
+      return { seg, ok: true, parts: changed.length };
+    } catch (e) {
+      return { seg, ok: false, reason: String(e && e.message || e) };
+    }
+  }
+  async function writeParts(edits) {
+    if (!/\/doc\/editor\//.test(location.href)) return { ok: false, error: 'Write tagged parts works in the document editor only.' };
+    const results = [];
+    for (const e of edits) { results.push(await writePartsOne(e)); await sleep(150); }
+    return { ok: true, results };
   }
   // Reveal a segment for the human: scroll it into view, click to mount the editor, and
   // place the caret in it — the old Check behaviour. Writes nothing. Returns true if the
@@ -1417,6 +1491,7 @@
           case 'DIAG': sendResponse(await diag()); break;
           case 'HARVEST': sendResponse({ ok: true, segments: await harvest() }); break;
           case 'WRITE': sendResponse({ ok: true, results: await writeAll(msg.edits || []) }); break;
+          case 'WRITE_PARTS': sendResponse(await writeParts(msg.edits || [])); break;
           case 'HARVEST_PLURALS': sendResponse(await apiPlurals(msg.taskId)); break;
           case 'WRITE_PLURAL': sendResponse(await writePlural(msg.edit || {})); break;
           case 'CONFIRM_ALL': sendResponse(await confirmAll(msg.ignoreNormal !== false)); break;

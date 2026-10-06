@@ -1886,6 +1886,54 @@ async function doImportClaude(file) {
   $('write-card').hidden = false;
 }
 
+// ✍ WRITE TAGGED PARTS — document-editor tasks: write the changed text pieces of tagged (✋ paste-by-hand)
+// rows straight into the cell, between the tags, without touching the tags (content.js writeParts).
+// Only rows whose old and new text carry the SAME tag tokens in the same order qualify; a row whose
+// tags must be added/moved (e.g. the translation lost them) stays paste-by-hand.
+const TAG_SPLIT = /[OC]-\d+(?:-\d+)+/g;
+function taggedPartsEdit(p) {
+  if (!p || !p.manual || p.partsDone || sameRender(p.next, p.old)) return null;
+  const a = String(p.old || ''), b = String(p.next || '');
+  const ta = (a.match(TAG_SPLIT) || []).join('|'), tb = (b.match(TAG_SPLIT) || []).join('|');
+  if (!ta || ta !== tb) return null;                                   // no tags, or tag layout changes
+  if (/[①-⑳❶-➓⓪]/.test(a + b)) return null;                           // circled-marker form: not this writer
+  const oldPieces = a.split(TAG_SPLIT), newPieces = b.split(TAG_SPLIT);
+  const parts = oldPieces.filter((x, i) => x !== newPieces[i]).length;
+  return parts ? { seg: p.seg, oldPieces, newPieces, parts } : null;
+}
+async function doWriteTagged() {
+  const t = await activeTab();
+  if (!t || !/\/doc\/editor\//.test(t.url || '')) { info('wtp-info', 'Open the task in Starling\'s document editor first (…/doc/editor/…).', 'err'); return; }
+  const list = (state.proposals || []).map((p) => ({ p, e: taggedPartsEdit(p) })).filter((x) => x.e);
+  const left = (state.proposals || []).filter((p) => p.manual && !p.partsDone && !sameRender(p.next, p.old)).length - list.length;
+  if (!list.length) { info('wtp-info', 'No tagged rows this can write' + (left ? ` (${left} need their tags added or moved — paste those by hand)` : '') + '.', 'err'); return; }
+  const parts = list.reduce((n, x) => n + x.e.parts, 0);
+  if (!confirm(`Write ${parts} changed part(s) in ${list.length} tagged segment(s): ${list.map((x) => '#' + x.e.seg).join(', ')}?
+
+Only the text between the tags changes; the tags stay as they are. Each row is checked before and after, and put back if anything looks wrong.${left ? `
+
+${left} other tagged row(s) need tags added or moved — paste those by hand.` : ''}
+
+Keep the Starling tab visible while it runs.`)) return;
+  const btn = $('write-tagged'); btn.disabled = true;
+  info('wtp-info', `Writing ${parts} part(s) in ${list.length} segment(s)…`);
+  try {
+    const r = await send({ type: 'WRITE_PARTS', edits: list.map((x) => ({ seg: x.e.seg, oldPieces: x.e.oldPieces, newPieces: x.e.newPieces })) });
+    if (!r || !r.ok) throw new Error((r && r.error) || 'no reply from the page');
+    const bySeg = new Map((r.results || []).map((x) => [String(x.seg), x]));
+    let ok = 0; const bad = [];
+    for (const { p } of list) {
+      const x = bySeg.get(String(p.seg));
+      if (x && x.ok) { p.partsDone = true; p.partsNote = ''; ok++; }
+      else { p.partsNote = (x && x.reason) || 'no result'; bad.push('#' + p.seg); }
+    }
+    log(`write-tagged: ${ok}/${list.length} ok${bad.length ? ', failed ' + bad.join(' ') : ''}`);
+    info('wtp-info', `✍ ${ok} of ${list.length} tagged segment(s) written${bad.length ? ` · ⚠ ${bad.length} not written (${bad.join(', ')}) — see each card, paste those by hand` : ''}. Reload the Starling tab and Harvest again to confirm they saved.`, bad.length ? 'err' : 'good');
+    renderReview();
+  } catch (e) { info('wtp-info', e.message, 'err'); }
+  finally { btn.disabled = false; }
+}
+
 let revFilter = 'changed';   // 'changed' | 'all' | 'manual' (✋ paste-by-hand) | 'memrev' (🧠 memory — review) | 'consist' (⚖ consistency)
 function renderReview() {
   const box = $('review');
@@ -1967,6 +2015,7 @@ function renderReview() {
         ${boldIssue(p.src, p.next) ? `<span class="rc-warn" title="Markdown **bold** from the source (**${esc(boldIssue(p.src, p.next))}**) isn't wrapped in the target — the asterisks were dropped. Add ** around the matching term.">⚠ bold</span>` : ''}
         ${p.flag ? `<span class="rc-warn" title="${esc(p.flag)}" style="background:#7a5c0a">⚠ register</span>` : ''}
         ${p.lockMiss ? `<span class="rc-warn" style="background:#b91c1c" title="MANDATORY locked term missing from the target — must be rendered exactly (a prefix is OK): ${esc(p.lockMiss.join(' · '))}. Fix the Hebrew, then this clears.">🔒 locked term</span>` : ''}
+        ${p.partsDone ? '<span class="rc-warn" style="background:#0a7a3f" title="The changed parts were written between the tags by ✍ Write tagged parts.">✍ tags written</span>' : (p.partsNote ? `<span class="rc-warn" style="background:#b45309" title="${esc(p.partsNote)}">✍ not written — paste by hand</span>` : '')}
         ${p.comments ? `<span class="rc-warn" style="background:#1e3a8a" title="Starling comment on this string (sent to the model as authoritative context): ${esc(p.comments)}">💬 comment</span>` : ''}
         ${p.rbFind ? `<span class="rc-warn" style="background:${p.rbFind.some((f) => f.severity === 'error') ? '#9f1239' : '#6b21a8'}" title="Rulebook (rulings of 28 Sep): ${esc(p.rbFind.map((f) => f.msg).join(' · '))}">🧾 rulebook ×${p.rbFind.length}</span>` : ''}
         ${p.fixApplied ? `<span class="rc-warn" style="background:#0e7490" title="Auto-corrected by your locked 🩹 Auto-fix rules: ${esc(p.fixApplied.join(' · '))}. Edit the text to revert.">✎ auto-fixed</span>` : ''}
@@ -2878,7 +2927,7 @@ function wbBuildIndex() {
 }
 const WB_FIELDS = [['key', 'Key'], ['valid', 'Valid (Y/N)'], ['final', 'Final Translation'], ['src', 'Source (EN)'], ['tgt', 'Current target'], ['lang', 'Language'], ['updated', 'Updated on Starling']];
 const STAR_KEY_URL = 'https://starling.bytedance.com/#/all-task?pageNum=1&pageSize=10&progress=all&translateTypeList=%5B%5D&sortType=1&order=0&sourceLocales=en&targetLocales=he-IL&textKeys=';
-const CS_EXPECT = 41;   // must match content.js CS_VERSION
+const CS_EXPECT = 42;   // must match content.js CS_VERSION
 
 // Direct call surface — invokes the page's window.__wb.* via chrome.scripting.executeScript.
 // This bypasses chrome.runtime messaging entirely, so a stale/duplicate content-script
@@ -6861,6 +6910,7 @@ async function init() {
   if ($('lk-q')) { let lkT = null; $('lk-q').addEventListener('input', (e) => { clearTimeout(lkT); const v = e.target.value; lkT = setTimeout(() => lkSearch(v), 180); }); }   // 🔎 lookup
 
   $('harvest').addEventListener('click', doHarvest);
+  if ($('write-tagged')) $('write-tagged').addEventListener('click', doWriteTagged);
   if ($('export-claude')) $('export-claude').addEventListener('click', doExportForClaude);
   if ($('import-claude')) $('import-claude').addEventListener('change', (ev) => { const f = ev.target.files && ev.target.files[0]; ev.target.value = ''; if (f) doImportClaude(f); });
   $('xliff-file').addEventListener('change', (e) => onXliffFile(e.target));
