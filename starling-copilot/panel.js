@@ -299,7 +299,7 @@ function onXliffFile(input) {
       const sel = parseSegSel($('seg-filter').value);
       const segs = sel ? all.filter((s) => sel(s)) : all;
       if (sel && !segs.length) { info('harvest-info', `No segments matched "${$('seg-filter').value.trim()}" (file has ${all.length}). Clear the box for all.`, 'err'); return; }
-      state.segments = segs;
+      state.segments = segs; state.harvestTask = ''; state.harvestAt = Date.now();   // file load: task unknown, no tab guard
       const filtered = sel && segs.length !== all.length;
       const tagged = segs.filter((s) => s.tagged).length;
       info('harvest-info', `Loaded ${segs.length}${filtered ? ` of ${all.length}` : ''} segments from ${f.name}${filtered ? ' (filtered)' : ''}${tagged ? ` · ⚠ ${tagged} with tags` : ''}.`, 'good');
@@ -1655,9 +1655,17 @@ async function doHarvest() {
   info('harvest-info', 'Harvesting… (scrolling the segment list)');
   $('harvest').disabled = true;
   try {
+    const ht = await activeTab();
     const r = await send({ type: 'HARVEST' });
     if (!r || !r.ok) throw new Error(r && r.error || 'harvest failed');
     const all = r.segments || [];
+    const newTask = starlingTaskId(ht && ht.url);
+    if (state.harvestTask && newTask !== state.harvestTask && (state.proposals || []).length) {
+      // Review cards belong to the task they were made for — never let them be written into another one.
+      state.proposals = []; $('review-card').hidden = true; $('write-card').hidden = true;
+      log(`harvest: task changed ${state.harvestTask} → ${newTask || '?'} — cleared the previous task's review cards`);
+    }
+    state.harvestTask = newTask; state.harvestAt = Date.now();
     const sel = parseSegSel($('seg-filter').value);
     state.segments = sel ? all.filter((s) => sel(s)) : all;
     const filtered = sel && state.segments.length !== all.length;
@@ -1680,15 +1688,29 @@ async function doHarvest() {
   }
 }
 
+// The panel's segments/cards belong to the task they were harvested from. Export, Import and every
+// write refuse to run when the open tab is a different task (a stale harvest once produced an export
+// labelled with one task's id but holding another task's text). Returns an error message, or ''.
+async function harvestTabMismatch() {
+  if (!state.harvestTask) return '';
+  const t = await activeTab();
+  const here = starlingTaskId(t && t.url);
+  if (!here || here === state.harvestTask) return '';
+  const at = state.harvestAt ? new Date(state.harvestAt).toTimeString().slice(0, 5) : '';
+  return `This panel holds task ${state.harvestTask}${at ? ` (harvested ${at})` : ''}, but the open tab is task ${here}. Click ⬇ Harvest on this tab first.`;
+}
+
 // ⬇ EXPORT TASK FOR CLAUDE — a compact, read-only JSON of the harvested task (segments + key,
 // context, comments, term hints, DNTs, relevant locks, rulebook findings on the CURRENT target)
 // so a Claude session can translate/proofread the whole task and hand back an .xlsx for
 // ↩ Sheet → Starling. Never writes to Starling.
 async function doExportForClaude() {
   if (!(state.segments || []).length) { info('harvest-info', 'Harvest the task first, then export.', 'err'); return; }
+  const mm = await harvestTabMismatch();
+  if (mm) { info('harvest-info', mm, 'err'); return; }
   try { await tbAutoGrab(); } catch (e) { dbg('term auto-grab skipped', e && e.message); }
   const t = await activeTab();
-  const taskId = starlingTaskId(t && t.url) || CUR_TASK || '';
+  const taskId = state.harvestTask || starlingTaskId(t && t.url) || CUR_TASK || '';
   const srcs = state.segments.map((s) => String(s.src || ''));
   const locks = RB.activeLockTerms((LOCK && LOCK.terms) || []).filter((l) => l && l.en && srcs.some((x) => lockSrcHas(x, l.en)));
   const segs = state.segments.map((s) => {
@@ -1860,9 +1882,11 @@ async function doImportClaude(file) {
   let j;
   try { j = JSON.parse(await file.text()); } catch (e) { info('harvest-info', 'Not a JSON file: ' + e.message, 'err'); return; }
   if (!j || j.kind !== 'starling-claude-result' || !Array.isArray(j.edits)) { info('harvest-info', 'That file is not a Claude result (kind "starling-claude-result").', 'err'); return; }
+  const mm = await harvestTabMismatch();
+  if (mm) { info('harvest-info', mm, 'err'); return; }
   const t = await activeTab();
-  const here = starlingTaskId(t && t.url);
-  if (j.taskId && here && String(j.taskId) !== here) { info('harvest-info', `These results are for task ${j.taskId}, but this tab is task ${here}. Open the right task.`, 'err'); return; }
+  const here = state.harvestTask || starlingTaskId(t && t.url);
+  if (j.taskId && here && String(j.taskId) !== here) { info('harvest-info', `These results are for task ${j.taskId}, but the harvested task is ${here}. Open task ${j.taskId}, Harvest it, then import.`, 'err'); return; }
   const bySeg = new Map(state.segments.map((x) => [String(x.seg), x]));
   const proposals = [], missing = [], drift = [];
   for (const e of j.edits) {
@@ -1902,6 +1926,8 @@ function taggedPartsEdit(p) {
   return parts ? { seg: p.seg, oldPieces, newPieces, parts } : null;
 }
 async function doWriteTagged() {
+  const mm = await harvestTabMismatch();
+  if (mm) { info('wtp-info', mm, 'err'); return; }
   const t = await activeTab();
   if (!t || !/\/doc\/editor\//.test(t.url || '')) { info('wtp-info', 'Open the task in Starling\'s document editor first (…/doc/editor/…).', 'err'); return; }
   const list = (state.proposals || []).map((p) => ({ p, e: taggedPartsEdit(p) })).filter((x) => x.e);
@@ -2142,6 +2168,8 @@ function updateRevCount() {
 }
 
 async function doWrite() {
+  const mm = await harvestTabMismatch();
+  if (mm) { info('write-info', mm, 'err'); return; }
   // A segment is written when it's not a copy-by-hand (tagged/chip) row AND it would actually
   // change the cell: an APPROVED (visible) change, OR an EDGE-ONLY fix — a trailing space / ↵ /
   // RTL-mark correction that sameRender() treats as "unchanged" and so used to be SILENTLY
@@ -2310,6 +2338,8 @@ async function wbWaitContentReady(tabId, ms) {
 // look "written" while the immediate confirm found nothing saved yet. We then reload so the
 // editor reflects the confirmed state (which the submit dialog needs) before submitting.
 async function doWriteConfirmSubmit() {
+  const mm = await harvestTabMismatch();
+  if (mm) { info('wcs-info', mm, 'err'); return; }
   const edits = state.proposals ? state.proposals.filter((p) => p.approved && !p.manual).map((p) => ({ seg: p.seg, text: p.next })) : [];
   const manual = state.proposals ? state.proposals.filter((p) => p.manual).length : 0;
   const lines = [
