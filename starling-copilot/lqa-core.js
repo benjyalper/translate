@@ -1,7 +1,7 @@
 /* lqa-core.js — PURE logic for the LQA round-trip (build plan 2026-09-30, phases 0–1).
  *
  * No DOM, no chrome.*, no network. Loaded by Node (starling-eval/lqa-judge.mjs, tests/lqa.test.js)
- * and, from M2 on, by the panel as the global `LQ`. It never rewrites a translation: the pre-pass
+ * and, from M2 on, by the panel as the global `LQC`. It never rewrites a translation: the pre-pass
  * only reports, the judge (a model or a Claude chat) decides, and Benjy answers pattern questions.
  *
  *   readRows(header, records)   → normalized LQA rows (same column names the panel's wbAutoMap uses)
@@ -14,7 +14,7 @@
 (function (root, factory) {
   const api = factory();
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
-  else root.LQ = api;
+  else root.LQC = api;   // LQC, not LQ: panel.js already has a `const LQ` (the ⚖️ adjudicator state)
 })(typeof self !== 'undefined' ? self : (typeof globalThis !== 'undefined' ? globalThis : this), function () {
   'use strict';
 

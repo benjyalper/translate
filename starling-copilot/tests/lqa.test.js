@@ -100,6 +100,8 @@ const PANEL = require('fs').readFileSync(require('path').join(__dirname, '..', '
 const a = PANEL.indexOf('// ==== LQA round-trip (M2, read-only)'), b = PANEL.indexOf('// ==== end LQA round-trip');
 const M2 = a >= 0 && b > a ? PANEL.slice(a, b) : '';
 ok('the M2 section exists in panel.js', M2.length > 500);
+ok('M2 uses the LQC global (panel.js already owns const LQ)', !/\bLQ\./.test(M2) && /\bLQC\./.test(M2));
+ok('lqa-core exports LQC in the browser, and panel.js never redeclares it', /root\.LQC = api/.test(require('fs').readFileSync(require('path').join(__dirname, '..', 'lqa-core.js'), 'utf8')) && !/(const|let|var)\s+LQC\b/.test(PANEL));
 ok('M2 calls only the read APIs (API_TASKS, API_TASK)', (M2.match(/wbCall\('([A-Z_]+)'/g) || []).every((c) => /API_TASKS?'/.test(c)) && /wbCall\('API_TASKS'/.test(M2));
 ok('M2 never references a write, confirm or submit path', !/API_CONFIRM|apiWriteConfirm|WB_WRITE|WRITE_SEG|SUBMIT|domSubmit|confirmTextTaskTargetV2|apiConfirm|sendToTab\(/.test(M2));
 
