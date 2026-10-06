@@ -81,6 +81,9 @@ ok('exact source + live = Before → ready (with task and segment ids)', (() => 
 ok('two open tasks → several (all get fixed)', LQ.resolveRow(J(), [T('t1', [S()]), T('t2', [S({ sourceTextId: 's2' })])]).bucket === 'several');
 ok('live already equals the final → already', LQ.resolveRow(J(), [T('t1', [S({ target: 'נסה/נסי שוב.' })])]).bucket === 'already');
 ok('live differs from Before and final → drifted', LQ.resolveRow(J(), [T('t1', [S({ target: 'נסו שוב.' })])]).bucket === 'drifted');
+ok('bidi isolates around a number are not a difference → already', LQ.resolveRow(J({ final: 'עלייה של {s_num}%' }), [T('t1', [S({ target: 'עלייה של ⁦{s_num}%⁩' })])]).bucket === 'already');
+ok('empty live target in an open task → untranslated, not drifted', LQ.resolveRow(J(), [T('t1', [S({ target: '' })])]).bucket === 'untranslated');
+ok('empty live target in a submitted task → not-editable', LQ.resolveRow(J(), [T('t1', [S({ target: '' })], { taskStatus: 2 })]).bucket === 'not-editable');
 ok('submitted task → not-editable', LQ.resolveRow(J(), [T('t1', [S()], { taskStatus: 2 })]).bucket === 'not-editable');
 ok('segment not modifiable → not-editable', LQ.resolveRow(J(), [T('t1', [S({ modifiable: false })])]).bucket === 'not-editable');
 ok('same key, other source revision → not-found (never matched by key alone)', (() => { const r = LQ.resolveRow(J(), [T('t1', [S({ source: 'Try again later.' })])]); return r.bucket === 'not-found' && /another revision/.test(r.why); })());

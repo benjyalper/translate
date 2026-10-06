@@ -20,7 +20,9 @@
 
   const VERDICTS = ['agree', 'agree-modified', 'disagree'];
   const str = (v) => String(v == null ? '' : v);
-  const norm = (s) => str(s).replace(/[‎‏‪-‮]/g, '').replace(/\s+/g, ' ').trim();
+  // Invisible direction marks never count as a difference: LRM/RLM, embeddings (U+202A–202E) and the
+  // isolates Starling adds around numbers (U+2066–2069, e.g. ⁦{s_num}%⁩).
+  const norm = (s) => str(s).replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '').replace(/\s+/g, ' ').trim();
 
   // ---- reading the workbook ----------------------------------------------------------------
   // Column indexes for the TikTok LQA template (sheet "All"). The FIRST "Source" wins (col B; the
@@ -195,7 +197,7 @@
   // Input: lqa-judged.json rows {n, xlRow, key, src, before, final, verdict, reason, problems}.
   // The panel fetches, per key, the tasks that carry it (getAllTasks?textKeys=) and each task's
   // segments (getSourceTextListWithTargetText), then calls resolveRow. Nothing here writes.
-  const BUCKETS = ['ready', 'several', 'drifted', 'not-editable', 'already', 'not-found', 'conflict', 'hand-edit', 'no-write'];
+  const BUCKETS = ['ready', 'several', 'untranslated', 'drifted', 'not-editable', 'already', 'not-found', 'conflict', 'hand-edit', 'no-write'];
   // Does this judged row change Starling at all? (disagree keeps Before; a final equal to Before is a no-op;
   // a final that failed the checks is never planned.)
   function needsWrite(j) {
@@ -258,6 +260,7 @@
         const live = norm(s.target), ed = segEditable(t, s, o.submittedStatus);
         let bucket, why;
         if (live === fin) { bucket = 'already'; why = 'live text already equals the final'; }
+        else if (!live && bef) { bucket = ed.ok ? 'untranslated' : 'not-editable'; why = ed.ok ? 'the live segment is empty (not translated yet) — the final can fill it' : ed.why; }
         else if (!ed.ok) { bucket = 'not-editable'; why = ed.why; }
         else if (live !== bef) { bucket = 'drifted'; why = 'live text differs from the report\'s Before and from the final — left for review'; }
         else { bucket = 'ready'; why = 'source matches exactly; live text equals Before'; }
@@ -269,6 +272,7 @@
     const n = (b) => placements.filter((p) => p.bucket === b).length;
     let bucket;
     if (n('ready')) bucket = n('ready') > 1 ? 'several' : 'ready';
+    else if (n('untranslated')) bucket = 'untranslated';
     else if (n('drifted')) bucket = 'drifted';
     else if (n('not-editable')) bucket = 'not-editable';
     else bucket = 'already';

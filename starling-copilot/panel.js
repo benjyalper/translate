@@ -3582,7 +3582,7 @@ function wbExportForm() {
 // rows into buckets, and let you approve the plan per row or per task. NOTHING here writes:
 // only API_TASKS / API_TASK are called (tests/lqa.test.js enforces it). Writing is M3.
 const LR = { judged: [], sig: '', res: {}, approved: {}, meta: {}, filter: '', stop: false };
-const LR_LABEL = { ready: '✅ ready', several: '✅ several tasks', drifted: '⚠ drifted', 'not-editable': '🔒 not editable', already: '✔ already correct',
+const LR_LABEL = { ready: '✅ ready', several: '✅ several tasks', untranslated: '◌ untranslated', drifted: '⚠ drifted', 'not-editable': '🔒 not editable', already: '✔ already correct',
   'not-found': '? not found', conflict: '⛔ conflict', 'hand-edit': '✋ hand edit', 'no-write': '— nothing to write' };
 const lrKey = (taskId, stid) => taskId + ':' + stid;
 async function lrSave() { if (LR.sig) await store.set({ ['lqaPlan:' + LR.sig]: { res: LR.res, approved: LR.approved, meta: LR.meta } }); }
