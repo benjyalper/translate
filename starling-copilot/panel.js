@@ -1724,6 +1724,14 @@ async function doExportForClaude() {
     const th = tbHintsFor(o.src); if (th.length) o.terms = th;
     const f = o.tgt.trim() ? RB.checkSegment(o.src, o.tgt, { key: o.key }) : [];
     if (f.length) o.rulebook = f;
+    // Your earlier approved wording for this exact source (consistency memory), strongest first —
+    // exported whether or not "Apply remembered wording" is switched on, so Claude can stay consistent.
+    const mem = (TM && TM.map) ? tmLookup(o.src) : null;
+    if (mem) {
+      const vs = tmVariants(mem).slice().sort((a, b) => (b.n || 1) - (a.n || 1) || (b.ts || 0) - (a.ts || 0)).slice(0, 3)
+        .map((v) => { const m = { tgt: String(v.tgt), times: v.n || 1 }; if (v.key) m.key = String(v.key); if (v.ctx) m.context = String(v.ctx); if (v.ts) m.date = new Date(v.ts).toISOString().slice(0, 10); return m; });
+      if (vs.length) o.memory = vs;
+    }
     return o;
   });
   const out = {
@@ -1733,7 +1741,19 @@ async function doExportForClaude() {
     plural: !!($('plural') && $('plural').checked),
     // dnt = keep exactly as-is (brand DNTs like TikTok land in 🔒 locks, not in the per-segment term hints)
     locks: locks.map((l) => (String(l.he || '').trim() === String(l.en).trim() || RB.LATIN_ALLOW.includes(l.en) ? { en: l.en, he: l.he, dnt: true } : { en: l.en, he: l.he })),
-    counts: { segments: segs.length, empty: segs.filter((x) => !x.tgt.trim()).length, tagged: segs.filter((x) => x.tagged).length, flagged: segs.filter((x) => x.rulebook).length, withComments: segs.filter((x) => x.comments).length },
+    // Style-brain glossary entries whose English occurs in this task (same filter the prompt uses).
+    // Ranked like the term-base hints: multi-word, then longer English first (specific phrases before
+    // generic single words), minus entries from a foreign client's manual that the rulebook quarantines.
+    glossary: ((BRAIN && BRAIN.glossary) || [])
+      .filter((g) => g && g.en && g.he && !RB.FOREIGN_CLIENT_TERMS.includes(String(g.en).trim().toLowerCase()) && !RB.FOREIGN_CLIENT_FIXES.includes(String(g.he).trim()) && srcs.some((x) => lockSrcHas(x, g.en)))
+      .sort((a, b) => (String(b.en).trim().split(/\s+/).length - String(a.en).trim().split(/\s+/).length) || (String(b.en).length - String(a.en).length))
+      .slice(0, BRAIN_GLOSS_MAX)
+      .map((g) => (g.note ? { en: g.en, he: g.he, note: g.note } : { en: g.en, he: g.he })),
+    notes: {
+      memory: 'segments[].memory = Hebrew you approved for this exact source in earlier tasks (times = how often). Prefer it for consistency when the sense and context match; rulings and locks win on conflict.',
+      glossary: 'Approved EN→HE entries from past tasks that occur in this task. Prefer them when the sense matches; rulings, locks and the term base win on conflict.'
+    },
+    counts: { segments: segs.length, empty: segs.filter((x) => !x.tgt.trim()).length, tagged: segs.filter((x) => x.tagged).length, flagged: segs.filter((x) => x.rulebook).length, withComments: segs.filter((x) => x.comments).length, withMemory: segs.filter((x) => x.memory).length },
     segments: segs
   };
   const a = document.createElement('a');
@@ -1741,7 +1761,7 @@ async function doExportForClaude() {
   a.download = 'starling-task-' + (taskId || 'unknown') + '-' + new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-') + '.json';
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-  info('harvest-info', `⬇ Exported ${segs.length} segments for Claude (${out.counts.flagged} 🧾 flagged, ${out.counts.withComments} 💬). Nothing was written to Starling.`, 'good');
+  info('harvest-info', `⬇ Exported ${segs.length} segments for Claude (${out.counts.flagged} 🧾 flagged, ${out.counts.withComments} 💬, ${out.counts.withMemory} 🧠 with past wording, ${out.glossary.length} glossary entries). Nothing was written to Starling.`, 'good');
   log('export-for-claude: task ' + taskId + ', ' + segs.length + ' segments');
 }
 
