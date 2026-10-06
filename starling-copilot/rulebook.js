@@ -18,7 +18,7 @@
 })(typeof self !== 'undefined' ? self : (typeof globalThis !== 'undefined' ? globalThis : this), function () {
   'use strict';
 
-  const VERSION = '2026-09-28.3';
+  const VERSION = '2026-10-06.1';
 
   // ---- The rulings (Benjy, 2026-09-28) — machine-readable index ------------------------------
   const RULINGS = [
@@ -168,14 +168,15 @@
 
   // Is "masc/י" malformed? True when the feminine is NOT masc+י.
   function shortSlashWrong(masc) {
-    const cands = [masc, stem(masc)];
+    const one = masc.replace(/^[ושבכלמ]/, '');   // strip ONE prefix too — stem() eats "וה" of והפעל and loses the hif'il ה
+    const cands = [masc, stem(masc), one];
     return cands.some((m) => {
       if (m.length < 2) return false;
       if (/ה$/.test(m) && m.length >= 3) return true;                                          // ל״ה: נסה/י, צפה/י, תיהנה/י
       if (/^ה(?!ת|י|שת|סת|צט|זד)[א-ת]{2,3}$/.test(m) && !/י/.test(m.slice(1))) return true;  // hif'il: הקש/י, השלם/י, הורד/י
       if (/^[א-ת]{2}ו[א-ת]$/.test(m) && !/^ה/.test(m)) return true;                             // holam: בדוק/י, שמור/י, עבור/י
       return false;
-    }) && !/^(הישאר|היכנס|הירשם|השתמש|התחבר)$/.test(stem(masc));
+    }) && !/^(הישאר|היכנס|הירשם|השתמש|התחבר)$/.test(stem(masc)) && !/^(הישאר|היכנס|הירשם|השתמש|התחבר)$/.test(one);
   }
 
   // Placeholder name classes for ruling 6.
@@ -250,7 +251,8 @@
     // Curly quotes.
     if (/[“”„‟]/.test(t)) add('R-quotes', 'error', 'straight double quotes only');
     // R15 — RLM after Latin/placeholder before "(" or ":" (reviewer cases).
-    if (/[A-Za-z0-9}]\s\(/.test(t) && /[א-ת]/.test(t) && !/‏/.test(t)) add('R15-rlm', 'warn', 'Latin word/placeholder before "(" in Hebrew text → add RLM');
+    const tNoTag = t.replace(/[OC]-\d+-\d+/g, '');   // Starling tag tokens (O-1-0/C-1-0) are not Latin text
+    if (/[A-Za-z0-9}]\s\(/.test(tNoTag) && /[א-ת]/.test(t) && !/‏/.test(t)) add('R15-rlm', 'warn', 'Latin word/placeholder before "(" in Hebrew text → add RLM');
     // R17 — period mirror (the pipeline enforces it; this catches raw model output).
     const endP = (x) => { const y = x.replace(/(\s|\\n|<[^>]+>)+$/, ''); return /\.$/.test(y) && !/(\.\.\.|…)$/.test(y); };   // an ellipsis is not a full stop
     if (endP(s) !== endP(t)) add('R17-period', 'warn', 'final period must mirror the source');

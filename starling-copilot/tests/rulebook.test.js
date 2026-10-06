@@ -24,6 +24,13 @@ ok('שתף/י, בחר/י, שלח/י, התחבר/י, הישאר/י, השתמש/י
   !['שתף/י', 'בחר/י', 'שלח/י', 'התחבר/י', 'הישאר/י', 'השתמש/י', 'הצטרף/י', 'היכנס/י'].some((w) => flags('x', w + ' עכשיו', 'R1-slash-short')));
 ok('שתף/שתפי flagged as unnecessary long form', flags('Share', 'שתף/שתפי את זה', 'R1-slash-long'));
 ok('המשכ/י flagged (final letter)', flags('Keep going!', 'המשכ/י כך!', 'R1-final-letter'));
+ok('והפעל/י flagged (ו + hifil prefix)', flags('Run a campaign', 'בחר/י פוסט והפעל/י קמפיין', 'R1-slash-short'));
+ok('והשלם/י flagged', flags('Complete', 'היכנס/י והשלם/י', 'R1-slash-short'));
+ok('ובחר/י, והישאר/י NOT flagged', rules('x', 'ובחר/י והישאר/י').length === 0);
+
+sec('Ruling 15 — RLM check ignores Starling tag tokens');
+ok('tag token before ( NOT flagged', !flags('x', 'O-2-0יותר המרות באתרC-2-0 (נדרש Ads Manager)', 'R15-rlm'));
+ok('Latin word before ( after a tag still flagged', flags('x', 'דרך O-1-0TikTok ShopC-1-0 (חדש)', 'R15-rlm'));
 
 sec('Ruling 19 — slash only for single persons');
 ok('יוצרים/ות flagged', flags('similar creators', 'עם יוצרים/ות דומים/ות', 'R19-plural-slash'));
