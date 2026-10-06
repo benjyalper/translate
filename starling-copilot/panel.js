@@ -335,6 +335,18 @@ function tmTagSig(s) { return (String(s == null ? '' : s).match(TAG_TOK_G) || []
 // can be copied and pasted between the matching ①…① without touching the tags.
 // Returns [{id, text}] (id = the innermost open-tag number seen before the run),
 // or null when there are no O-/C- tokens.
+// Paste-by-hand: which parts to offer for copying. Only parts whose text CHANGED vs the current target
+// (you paste just those; the rest is already right in Starling). Aligned by position, and only when
+// the current target has the same part layout (count + tag ids) — otherwise every part is shown.
+function partsToCopy(next, old, nextIds, oldIds) {
+  const norm = (x) => String(x == null ? '' : x).replace(/\s+/g, ' ').trim();
+  const aligned = old.length === next.length && next.length > 0 && nextIds.every((id, i) => (id || '') === (oldIds[i] || ''));
+  if (!aligned) return { show: next.map(() => true), note: '' };
+  const show = next.map((t, i) => norm(t) !== norm(old[i]));
+  if (!show.some(Boolean)) return { show: next.map(() => true), note: '' };   // only spacing/tags moved → show all
+  const hidden = show.filter((x) => !x).length;
+  return { show, note: hidden ? `<div class="rc-phidden">${hidden} unchanged part${hidden === 1 ? '' : 's'} hidden — already correct in Starling.</div>` : '' };
+}
 function splitTagRuns(t) {
   const s = String(t == null ? '' : t);
   if (!/[OC]-\d+(?:-\d+)+/.test(s)) return null;
@@ -1900,23 +1912,28 @@ function renderReview() {
     let copyBlock = '';
     if (runParts) {
       const sruns = splitTagRuns(p.src);                        // source runs align 1:1 by tag structure
+      const keep = partsToCopy(runParts.map((r) => r.text), (splitTagRuns(p.old) || []).map((r) => r.text), runParts.map((r) => r.id), (splitTagRuns(p.old) || []).map((r) => r.id));
       copyBlock = `<div class="rc-parts" title="Each run of text between two tags — copy it and paste it BETWEEN the matching ①…① tags in Starling; the tags stay untouched.">` +
         runParts.map((r, i) => {
+          if (!keep.show[i]) return '';
           const id = r.id || String(i + 1);
           const sclean = (sruns && sruns.length === runParts.length) ? sruns[i].text : '';
           const sref = sclean ? `<div class="rc-psrc" dir="ltr">${hl(esc(sclean))}</div>` : '';
           return `<div class="rc-part"><span class="rc-pidx" title="tag ${esc(id)}">${esc(id)}</span><div class="rc-pbody">${sref}<div class="rc-ptxt" dir="rtl">${hl(esc(r.text))}</div></div><button class="rc-copy" type="button" data-copy="${esc(r.text)}">Copy</button></div>`;
-        }).join('') + `</div>`;
+        }).join('') + keep.note + `</div>`;
     } else if (bulletParts) {
       const sparts = splitParts(p.src);
+      const oparts = splitParts(p.old) || [];
+      const keep = partsToCopy(bulletParts.map((x) => stripTags(x)), oparts.map((x) => stripTags(x)), bulletParts.map((x) => tagId(x)), oparts.map((x) => tagId(x)));
       copyBlock = `<div class="rc-parts" title="Paste each part between its matching ①…① tags in Starling — the tags stay untouched.">` +
         bulletParts.map((pt, i) => {
+          if (!keep.show[i]) return '';
           const clean = stripTags(pt);                          // inner text only — no O-/C- tokens
           const id = tagId(pt) || String(i + 1);                // badge = the tag's own id when present
           const sclean = (sparts && sparts.length === bulletParts.length) ? stripTags(sparts[i]) : '';
           const sref = sclean ? `<div class="rc-psrc" dir="ltr">${hl(esc(sclean))}</div>` : '';
           return `<div class="rc-part"><span class="rc-pidx" title="tag ${esc(id)}">${esc(id)}</span><div class="rc-pbody">${sref}<div class="rc-ptxt" dir="rtl">${hl(esc(clean))}</div></div><button class="rc-copy" type="button" data-copy="${esc(clean)}">Copy</button></div>`;
-        }).join('') + `</div>`;
+        }).join('') + keep.note + `</div>`;
     }
     // Every card gets a whole-segment Copy + a ✍ Write button. Manual (tagged) rows
     // also show the paste-by-hand hint; their Write confirms first (it would replace

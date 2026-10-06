@@ -323,3 +323,4 @@ textarea { font-family: ui-monospace, Menlo, Consolas, monospace; resize: vertic
 .cost-tbl td:first-child { color: var(--ink); width: 46%; }
 .cost-tbl td:last-child { color: var(--dim); }
 .cost-tbl tr:last-child td { border-bottom: none; }
+.rc-phidden { font-size: 11px; opacity: .65; padding: 2px 4px 0; }
