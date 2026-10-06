@@ -250,6 +250,9 @@
     if (/נכשל/.test(t)) add('R-error-tone', 'warn', 'avoid נכשל/נכשלו in user-facing messages');
     // Curly quotes.
     if (/[“”„‟]/.test(t)) add('R-quotes', 'error', 'straight double quotes only');
+    // No added exclamation marks or ellipses (Benjy, 2026-10-06: task 506899204098 #42 "ו…זהו! הכל מוכן!").
+    if ((t.match(/!/g) || []).length > (s.match(/!/g) || []).length) add('R-exclaim', 'warn', 'more "!" than the source — never add an exclamation mark');
+    if (/…|\.\.\./.test(t) && !/…|\.\.\./.test(s)) add('R-ellipsis', 'warn', 'ellipsis the source does not have');
     // R15 — RLM after Latin/placeholder before "(" or ":" (reviewer cases).
     const tNoTag = t.replace(/[OC]-\d+-\d+/g, '');   // Starling tag tokens (O-1-0/C-1-0) are not Latin text
     if (/[A-Za-z0-9}]\s\(/.test(tNoTag) && /[א-ת]/.test(t) && !/‏/.test(t)) add('R15-rlm', 'warn', 'Latin word/placeholder before "(" in Hebrew text → add RLM');

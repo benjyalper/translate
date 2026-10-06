@@ -88,6 +88,13 @@ ok('prompt reads comments', /"comments"/.test(sp));
 ok('plural mode keeps plural rule', /לשון רבים/.test(RB.systemPrompt({ mode: 'translate', plural: true, tiktok: true })));
 ok('non-TikTok prompt has no TikTok rulebook', !RB.systemPrompt({ mode: 'translate' }).includes('TIKTOK HEBREW RULEBOOK'));
 
+sec('Added "!" / ellipsis (506899204098 #42)');
+const src42 = "Then, all you need to do is enter your payment method, and you're good to go!";
+ok('added "!" flagged', flags(src42, 'לאחר מכן, כל שנותר הוא להזין אמצעי תשלום ו…זהו! הכל מוכן!', 'R-exclaim'));
+ok('added ellipsis flagged', flags(src42, 'לאחר מכן, כל שנותר הוא להזין אמצעי תשלום ו…זהו! הכל מוכן!', 'R-ellipsis'));
+ok('same "!" count not flagged', !flags(src42, 'לאחר מכן, כל שנותר הוא להזין אמצעי תשלום, והכל מוכן!', 'R-exclaim'));
+ok('source ellipsis kept not flagged', !flags('Searching...', 'מתבצע חיפוש...', 'R-ellipsis'));
+
 sec('Stored-state audit (the 2026-09-28 backup)');
 const audit = RB.auditStoredState({
   lockedTerms: { terms: [{ en: 'button', he: 'לחצן' }, { en: '{s_num}%', he: '%{s_num}' }, { en: 'TikTok', he: 'TikTok' }] },
