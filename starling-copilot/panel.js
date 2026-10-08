@@ -3600,7 +3600,7 @@ function lrReadFile(input) {
       const need = LQC.lookupKeys(rows).length;
       info('lr-info', `Loaded ${rows.length} judged rows · ${rows.filter(LQC.needsWrite).length} change Starling · ${need} keys to look up` +
         (Object.keys(LR.res).length ? ` · restored the plan from ${LR.meta.at ? new Date(LR.meta.at).toLocaleString() : 'last time'}` : ''), 'good');
-      $('lr-locate').disabled = false; lrRender();
+      $('lr-locate').disabled = false; await lwLoadLedger(); lrRender();
     } catch (e) { info('lr-info', 'Could not read the file: ' + e.message, 'err'); }
     input.value = '';
   };
@@ -3694,7 +3694,7 @@ function lrRender() {
   $('lr-summary').innerHTML = plan.length ? LQC.BUCKETS.filter((b) => counts[b]).map((b) =>
     `<button class="lq-chip${LR.filter === b ? ' active' : ''}" data-b="${b}">${LR_LABEL[b]} ${counts[b]}</button>`).join(' ') +
     ` <button class="lq-chip${!LR.filter ? ' active' : ''}" data-b="">all ${plan.length}</button>` +
-    `<div class="hint" style="margin-top:6px">Approved for writing: <b>${approvedN}</b> segment(s) · ✍ Writes are disarmed (dry run) — writing comes with M3.` +
+    `<div class="hint" style="margin-top:6px">Approved for writing: <b>${approvedN}</b> segment(s) · write them in the ✍ section below.` +
     (LR.meta.taskStatusSeen ? ` · task status codes seen: ${esc(JSON.stringify(LR.meta.taskStatusSeen))}` : '') + '</div>' +
     `<div class="hint" style="margin-top:4px">Top reasons: ${lrReasons().map(([w, c]) => esc(w) + ' × ' + c).join(' · ') || '—'}</div>` : '';
   $('lr-summary').querySelectorAll('[data-b]').forEach((el) => el.addEventListener('click', () => { LR.filter = el.dataset.b; lrRender(); }));
@@ -3703,16 +3703,16 @@ function lrRender() {
   for (const g of LQC.planByTask(plan)) {
     const rows = g.rows.filter((r) => show(r.bucket) || show(LR.res[r.n] && LR.res[r.n].bucket));
     if (!rows.length) continue;
-    const ready = g.rows.filter((r) => r.bucket === 'ready');
+    const ready = g.rows.filter((r) => LQC.WRITABLE[r.bucket]);
     const allOn = ready.length && ready.every((r) => LR.approved[lrKey(g.taskId, r.sourceTextId)]);
     html.push(`<div class="lqc" style="margin-top:8px"><div class="row" style="gap:6px;align-items:center">` +
       (ready.length ? `<input type="checkbox" class="lr-task" data-t="${esc(g.taskId)}"${allOn ? ' checked' : ''} title="Approve every ready row in this task">` : '') +
-      `<b>${esc(g.taskName || 'task')}</b> <span class="hint">· ${esc(g.taskId)} · status ${esc(String(g.taskStatus))} · ${ready.length} ready of ${g.rows.length}</span></div>` +
+      `<b>${esc(g.taskName || 'task')}</b> <span class="hint">· ${esc(g.taskId)} · status ${esc(String(g.taskStatus))} · ${ready.length} writable of ${g.rows.length}</span></div>` +
       rows.map((r) => {
-        const id = lrKey(g.taskId, r.sourceTextId), can = r.bucket === 'ready';
+        const id = lrKey(g.taskId, r.sourceTextId), written = LW.ledger && LQC.ledgerIsDone(LW.ledger, g.taskId, r.sourceTextId), can = LQC.WRITABLE[r.bucket] && !written;
         return `<div style="margin:6px 0 0 4px;border-top:1px solid var(--border);padding-top:6px">` +
           (can ? `<input type="checkbox" class="lr-row" data-k="${esc(id)}"${LR.approved[id] ? ' checked' : ''}> ` : '') +
-          `<span class="lq-chip">${LR_LABEL[r.bucket] || r.bucket}</span> <b>${esc(r.key)}</b> <span class="hint">seg #${esc(String(r.rank))} · report row${r.xlRows.length > 1 ? 's' : ''} ${esc(r.xlRows.join(', '))} · ${esc(r.verdict)}</span>` +
+          `<span class="lq-chip">${written ? '✍ written' : LR_LABEL[r.bucket] || r.bucket}</span> <b>${esc(r.key)}</b> <span class="hint">seg #${esc(String(r.rank))} · report row${r.xlRows.length > 1 ? 's' : ''} ${esc(r.xlRows.join(', '))} · ${esc(r.verdict)}</span>` +
           `<div dir="auto" class="hint">now: ${esc(r.live)}</div><div dir="auto">new: ${esc(r.final)}</div>` +
           `<div class="hint">${esc(r.why)}${r.reason ? ' · ' + esc(r.reason) : ''}</div></div>`;
       }).join('') + '</div>');
@@ -3725,10 +3725,11 @@ function lrRender() {
   $('lr-plan').querySelectorAll('.lr-row').forEach((el) => el.addEventListener('change', () => { LR.approved[el.dataset.k] = el.checked; lrSave(); lrRender(); }));
   $('lr-plan').querySelectorAll('.lr-task').forEach((el) => el.addEventListener('change', () => {
     const g = LQC.planByTask(lrPlan()).find((x) => x.taskId === el.dataset.t);
-    for (const r of (g ? g.rows : [])) if (r.bucket === 'ready') LR.approved[lrKey(g.taskId, r.sourceTextId)] = el.checked;
+    for (const r of (g ? g.rows : [])) if (LQC.WRITABLE[r.bucket]) LR.approved[lrKey(g.taskId, r.sourceTextId)] = el.checked;
     lrSave(); lrRender();
   }));
   $('lr-export').hidden = !plan.length;
+  if (typeof lwRefresh === 'function') lwRefresh();
 }
 function lrExport() {
   const groups = LQC.planByTask(lrPlan());
@@ -3743,6 +3744,100 @@ function lrExport() {
   info('lr-info', `⬇ Exported the plan · ${approved.length} approved segment(s) · nothing written.`, 'good');
 }
 // ==== end LQA round-trip ===================================================================
+
+// ==== LQA round-trip (M3, write + confirm) =================================================
+// Writes ONLY the rows you approved in the plan, and only while writes are armed for THIS panel
+// session (the switch resets every time the panel opens). Per task: one fresh read, a pre-write
+// check per segment (still the segment Locate planned for, live text unchanged), one
+// confirmTextTaskTargetV2 call per segment (writes + proofread-confirms; IgnoreQa optional),
+// then a read-back of the whole task. Only read-back-verified segments enter the ledger, so a
+// rerun skips them. Stops on the first unexpected error. Never submits a task: a submitted
+// task stays Submitted with nothing left to re-submit (verified live 2026-10-08).
+const LW = { session: Math.random().toString(36).slice(2) + Date.now().toString(36), arm: null, ledger: null, running: false, stop: false };
+const lwLedgerKey = () => 'lqaLedger:' + LR.sig;
+async function lwLoadLedger() { LW.ledger = (await store.get(lwLedgerKey(), null)) || LQC.ledgerNew(); return LW.ledger; }
+function lwQueue() { return LQC.writeQueue(LQC.planByTask(lrPlan()), LR.approved, LW.ledger); }
+function lwArm(on) {
+  LW.arm = on ? { armed: true, session: LW.session } : null;
+  lwRefresh();
+}
+function lwRefresh() {
+  const q = LW.ledger ? lwQueue() : [], armed = LQC.writeAllowed(LW.arm, LW.session);
+  const btn = $('lw-write'); if (!btn) return;
+  btn.disabled = LW.running ? false : !(armed && q.length);
+  btn.textContent = LW.running ? '■ Stop after this segment' : `✍ Write + confirm ${q.length} approved`;
+  $('lw-arm').checked = armed;
+  const done = LW.ledger ? Object.keys(LW.ledger.done).length : 0;
+  $('lw-state').textContent = (armed ? '🔓 Armed for this session' : '🔒 Disarmed — tick to allow writing') + ` · ${done} segment(s) already written for this report`;
+}
+// Starling editor tabs showing a task we write to don't see API writes until reloaded.
+async function lwEditorTabs(taskIds) {
+  const tabs = await chrome.tabs.query({ url: 'https://starling.bytedance.com/*' });
+  return tabs.filter((t) => taskIds.some((id) => (t.url || '').toLowerCase().includes('taskid=' + id)));
+}
+async function lwWrite() {
+  if (LW.running) { LW.stop = true; return; }
+  if (!LQC.writeAllowed(LW.arm, LW.session)) { info('lw-info', 'Writes are disarmed. Tick "Arm writes" first.', 'err'); return; }
+  await lwLoadLedger();
+  const q = lwQueue();
+  if (!q.length) { info('lw-info', 'Nothing approved to write (or all of it is already written).', 'good'); lwRefresh(); return; }
+  if (!(await wbEnsureFresh(-1))) { info('lw-info', 'Make a Starling tab active (any Starling page), then retry.', 'err'); return; }
+  const tasks = [...new Set(q.map((x) => x.taskId))];
+  const editors = await lwEditorTabs(tasks);
+  if (!confirm(`Write and confirm ${q.length} segment(s) in ${tasks.length} task(s)?\n\nTasks are NOT submitted.` +
+    (editors.length ? `\n\n${editors.length} open editor tab(s) show one of these tasks; they will be reloaded afterwards.` : ''))) return;
+  const ignoreQa = !!($('lw-ignoreqa') && $('lw-ignoreqa').checked);
+  LW.running = true; LW.stop = false; lwRefresh();
+  const log = { written: 0, already: 0, skipped: [], failed: null };
+  try {
+    for (const taskId of tasks) {
+      if (LW.stop) break;
+      const items = q.filter((x) => x.taskId === taskId);
+      const read = async () => { const r = await wbCall('API_TASK', { taskId }); if (!r || !r.ok) throw new Error('could not read task ' + taskId + ': ' + ((r && r.error) || '?')); return r.rows; };
+      const task = { taskStatus: (lrPlan().flatMap(({ res }) => res.placements).find((p) => p.taskId === taskId) || {}).taskStatus };
+      let rows = await read();
+      const sent = [];
+      let refused = '';
+      for (const it of items) {
+        if (LW.stop) break;
+        if (!LQC.writeAllowed(LW.arm, LW.session)) throw new Error('writes were disarmed');
+        const seg = rows.find((s) => String(s.sourceTextId) === String(it.sourceTextId));
+        const chk = LQC.preWriteCheck(seg, it, task);
+        if (!chk.ok) {
+          if (chk.skip === 'already') { LQC.ledgerMarkDone(LW.ledger, taskId, it.sourceTextId); log.already++; }
+          else log.skipped.push(`${it.key} (${it.taskName || taskId}): ${chk.why}`);
+          continue;
+        }
+        const text = LQC.writeText(it.final, seg.source);
+        info('lw-info', `Writing ${log.written + sent.length + 1}/${q.length} · ${it.key} · ${it.taskName || taskId}`, 'good');
+        const r = await wbCall('API_CONFIRM', { taskId, key: seg.key, sourceTextId: seg.sourceTextId, flowSequence: seg.flowSequence, ignoreQa, text });
+        if (!r || !r.ok) { refused = `${it.key}: Starling refused the write — ${(r && (r.msg || r.error || ('status_code ' + r.status_code))) || 'no answer'}` + (ignoreQa ? '' : ' (QA? try with "Ignore QA warnings")'); break; }
+        sent.push({ it, text });
+        await wbSleep(120);
+      }
+      // Read back whatever was sent, even when a refusal stopped this task early.
+      if (sent.length) {
+        rows = await read();
+        for (const { it, text } of sent) {
+          const v = LQC.verifyWrite(rows.find((s) => String(s.sourceTextId) === String(it.sourceTextId)), text);
+          if (!v.ok) throw new Error(`${it.key}: ${v.why}`);
+          LQC.ledgerMarkDone(LW.ledger, taskId, it.sourceTextId); log.written++;
+        }
+        await store.set({ [lwLedgerKey()]: LW.ledger });
+      }
+      if (refused) throw new Error(refused);
+    }
+  } catch (e) { log.failed = e.message; }
+  await store.set({ [lwLedgerKey()]: LW.ledger });
+  for (const t of editors) { try { await chrome.tabs.reload(t.id); } catch (e) {} }
+  LW.running = false;
+  info('lw-info', (log.failed ? `⛔ Stopped: ${log.failed}. ` : LW.stop ? '■ Stopped. ' : '✔ Done. ') +
+    `${log.written} written and verified · ${log.already} were already correct · ${log.skipped.length} skipped` +
+    (log.skipped.length ? ` — ${log.skipped.slice(0, 5).map(esc).join(' · ')}${log.skipped.length > 5 ? ' …' : ''}` : '') +
+    ' · no task was submitted. Run Locate again to refresh the plan.', log.failed ? 'err' : 'good');
+  lwRefresh(); lrRender();
+}
+// ==== end LQA round-trip write =============================================================
 
 // ---- orchestration (drive the active Starling tab across hard reloads) ----
 async function wbActiveTab() { const [t] = await chrome.tabs.query({ active: true, currentWindow: true }); return t; }
@@ -7214,6 +7309,8 @@ async function init() {
   if ($('lr-file')) $('lr-file').addEventListener('change', (e) => lrReadFile(e.target));
   if ($('lr-locate')) $('lr-locate').addEventListener('click', () => { if ($('lr-locate').textContent.indexOf('Stop') >= 0) { LR.stop = true; return; } lrLocate(); });
   if ($('lr-export')) $('lr-export').addEventListener('click', lrExport);
+  if ($('lw-arm')) $('lw-arm').addEventListener('change', (e) => lwArm(e.target.checked));
+  if ($('lw-write')) $('lw-write').addEventListener('click', lwWrite);
   $('wb-filter-todo').addEventListener('click', (e) => { WB.filter = 'todo'; e.target.classList.add('active'); $('wb-filter-all').classList.remove('active'); wbRenderQueue(); });
   $('wb-filter-all').addEventListener('click', (e) => { WB.filter = 'all'; e.target.classList.add('active'); $('wb-filter-todo').classList.remove('active'); wbRenderQueue(); });
 

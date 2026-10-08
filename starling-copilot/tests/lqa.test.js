@@ -101,6 +101,36 @@ ok('planByTask groups by task', (() => { const j = J(); const g = LQ.planByTask(
 ok('a segment listed twice in the report shows once, with both report rows', (() => { const j1 = J({ n: 1, xlRow: 10 }), j2 = J({ n: 2, xlRow: 11 }); const t = [T('t1', [S()])]; const g = LQ.planByTask([{ j: j1, res: LQ.resolveRow(j1, t) }, { j: j2, res: LQ.resolveRow(j2, t) }]); return g[0].rows.length === 1 && g[0].rows[0].xlRows.join() === '10,11'; })());
 ok('planSig is stable and changes with a final', LQ.planSig([J()]) === LQ.planSig([J()]) && LQ.planSig([J()]) !== LQ.planSig([J({ final: 'x' })]));
 
+sec('Phase 4 (M3): write queue, exact text, pre-write and read-back checks');
+{
+  const j = J(), res = LQ.resolveRow(j, [T('t1', [S()]), T('t2', [S({ target: '' })])]);
+  const groups = LQ.planByTask([{ j, res }]);
+  const sid = groups[0].rows[0].sourceTextId;
+  ok('nothing approved → empty queue', LQ.writeQueue(groups, {}, LQ.ledgerNew()).length === 0);
+  const all = {}; for (const g of groups) for (const r of g.rows) all[g.taskId + ':' + r.sourceTextId] = true;
+  const q = LQ.writeQueue(groups, all, LQ.ledgerNew());
+  ok('approved ready + untranslated rows are queued', q.length === 2 && q.some((x) => x.bucket === 'untranslated'));
+  const L = LQ.ledgerMarkDone(LQ.ledgerNew(), 't1', sid);
+  ok('a segment already in the ledger is not queued again', LQ.writeQueue(groups, all, L).every((x) => x.taskId !== 't1'));
+  const dr = LQ.resolveRow(j, [T('t3', [S({ target: 'something else' })])]);
+  ok('a drifted row is never queued, even if approved', LQ.writeQueue(LQ.planByTask([{ j, res: dr }]), { ['t3:' + sid]: true }, LQ.ledgerNew()).length === 0);
+}
+ok('writeText takes the trailing whitespace from the live source', LQ.writeText('טקסט', 'Text. \n ') === 'טקסט \n ');
+ok('writeText strips a trailing tail the source lacks', LQ.writeText('טקסט \n', 'Text.') === 'טקסט');
+ok('writeText keeps inner line breaks', LQ.writeText('א\nב', 'a\nb') === 'א\nב');
+{
+  const it = { key: 'k1', src: S().source, live: S().target, final: J().final };
+  ok('pre-write: unchanged segment → ok', LQ.preWriteCheck(S(), it, { taskStatus: 2 }).ok);
+  ok('pre-write: live text changed since Locate → refused', !LQ.preWriteCheck(S({ target: 'מישהו שינה' }), it, { taskStatus: 1 }).ok);
+  ok('pre-write: source changed → refused', /source changed/.test(LQ.preWriteCheck(S({ source: 'New source' }), it, {}).why));
+  ok('pre-write: already final → skipped as already', LQ.preWriteCheck(S({ target: J().final }), it, {}).skip === 'already');
+  ok('pre-write: closed task → refused', !LQ.preWriteCheck(S(), it, { taskStatus: 3 }).ok);
+  ok('pre-write: missing segment → refused', !LQ.preWriteCheck(undefined, it, {}).ok);
+}
+ok('read-back: exact text + status 3 → verified', LQ.verifyWrite({ target: 'x \n', status: 3 }, 'x \n').ok);
+ok('read-back: whitespace differs → not verified', !LQ.verifyWrite({ target: 'x', status: 3 }, 'x \n').ok);
+ok('read-back: unconfirmed → not verified', !LQ.verifyWrite({ target: 'x', status: 1 }, 'x').ok);
+
 sec('Phase 2 is read-only (panel source)');
 const PANEL = require('fs').readFileSync(require('path').join(__dirname, '..', 'panel.js'), 'utf8');
 const a = PANEL.indexOf('// ==== LQA round-trip (M2, read-only)'), b = PANEL.indexOf('// ==== end LQA round-trip');
@@ -111,6 +141,17 @@ ok('lqa-core exports LQC in the browser, and panel.js never redeclares it', /roo
 ok('M2 reads tasks only through API_TASK (getSourceTextListWithTargetText)', (M2.match(/wbCall\('([A-Z_]+)'/g) || []).every((c) => /API_TASKS?'/.test(c)) && /wbCall\('API_TASK'/.test(M2));
 ok('M2\'s only direct request is the getMyTasks list (a GET)', (M2.match(/fetch\('([^'?]+)/g) || []).every((f) => /getMyTasks$/.test(f)) && !/method:\s*'POST'/i.test(M2));
 ok('M2 never references a write, confirm or submit path', !/API_CONFIRM|apiWriteConfirm|WB_WRITE|WRITE_SEG|SUBMIT|domSubmit|confirmTextTaskTargetV2|apiConfirm|sendToTab\(/.test(M2));
+
+sec('Phase 4 (M3) write section is gated (panel source)');
+const c = PANEL.indexOf('// ==== LQA round-trip (M3, write + confirm)'), d = PANEL.indexOf('// ==== end LQA round-trip write');
+const M3 = c >= 0 && d > c ? PANEL.slice(c, d) : '';
+ok('the M3 section exists in panel.js', M3.length > 500);
+ok('M3 calls only API_TASK (read) and API_CONFIRM (write + confirm)', (M3.match(/wbCall\('([A-Z_]+)'/g) || []).every((x) => /'API_TASK'|'API_CONFIRM'/.test(x)) && /wbCall\('API_CONFIRM'/.test(M3));
+ok('M3 never submits a task', !/SUBMIT|domSubmit|submitTask|WB_WRITE|WRITE_SEG|apiConfirmAll/.test(M3));
+ok('every write is preceded by the session arm check', (() => { const w = M3.indexOf("wbCall('API_CONFIRM'"); const guard = M3.lastIndexOf('LQC.writeAllowed(LW.arm, LW.session)', w); return w > 0 && guard > 0 && guard < w && M3.slice(guard, w).includes('preWriteCheck'); })());
+ok('the ledger records a segment only after its read-back is verified', (() => { const v = M3.indexOf('LQC.verifyWrite('), m = M3.indexOf('LQC.ledgerMarkDone(LW.ledger, taskId, it.sourceTextId); log.written++'); return v > 0 && m > v; })());
+ok('the arm switch is in memory only (never stored), so it resets each session', !/store\.set\(\{[^}]*arm/i.test(M3) && /LW\.arm = on \?/.test(M3));
+ok('M3 asks before writing', /confirm\(`Write and confirm/.test(M3));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

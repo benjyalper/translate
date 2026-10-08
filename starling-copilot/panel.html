@@ -621,8 +621,8 @@
 
       <!-- LQA ROUND-TRIP · PLAN (M2, read-only) -->
       <section class="card" id="lr-card">
-        <div class="step"><span class="num">📋</span> LQA round-trip · plan <span class="hint">read-only</span></div>
-        <div class="hint">Load <b>lqa-judged.json</b> (from <code>starling-eval/lqa/&lt;report&gt;/</code>). <b>Locate</b> reads your tasks (My tasks) once each and finds every row's task and segment — key plus exact source, never the screen. <b>Nothing is written</b>: tick the rows or tasks you approve; writing comes later (M3).</div>
+        <div class="step"><span class="num">📋</span> LQA round-trip · plan &amp; write</div>
+        <div class="hint">Load <b>lqa-judged.json</b> (from <code>starling-eval/lqa/&lt;report&gt;/</code>). <b>Locate</b> reads your tasks (My tasks) once each and finds every row's task and segment — key plus exact source, never the screen. Locate writes nothing: tick the rows or tasks you approve, then write them below.</div>
         <label class="btn ghost file-btn" style="margin-top:8px">📄 Load lqa-judged.json
           <input type="file" id="lr-file" accept=".json" hidden />
         </label>
@@ -635,6 +635,16 @@
         <div id="lr-info" class="info"></div>
         <div id="lr-summary" style="margin-top:6px"></div>
         <div id="lr-plan" class="review"></div>
+        <div class="step" style="margin-top:12px"><span class="num">✍</span> Write + confirm the approved rows <span class="hint">M3 · never submits</span></div>
+        <div class="hint">Writes only the rows ticked above, one segment at a time, then reads each task back. Only verified segments are recorded, so running again skips them. A row whose live text changed since Locate is skipped. Open editor tabs for these tasks are reloaded at the end.</div>
+        <div class="rev-bar" style="margin-top:8px">
+          <label class="hint" title="Resets every time the panel opens"><input type="checkbox" id="lw-arm"> Arm writes (this session)</label>
+          <label class="hint" title="Same as Starling's &quot;ignore normal QA errors&quot; — needed for mirrored source typos like {reward_amount)"><input type="checkbox" id="lw-ignoreqa" checked> Ignore QA warnings</label>
+          <span class="spacer"></span>
+          <button id="lw-write" class="btn sm" disabled>✍ Write + confirm 0 approved</button>
+        </div>
+        <div id="lw-state" class="hint" style="margin-top:4px"></div>
+        <div id="lw-info" class="info"></div>
       </section>
 
       <div id="wb-log" class="log"></div>

@@ -297,6 +297,45 @@
     }
     return [...by.values()].sort((a, b) => b.rows.filter((r) => r.bucket === 'ready').length - a.rows.filter((r) => r.bucket === 'ready').length || a.taskId.localeCompare(b.taskId));
   }
+  // ---- Phase 4 (M3): write + confirm the approved rows -------------------------------------------
+  // Only rows you approved, in a bucket that can be written (ready, or untranslated = empty live),
+  // and not already in the ledger. approved: {"<taskId>:<sourceTextId>": true}. groups: planByTask().
+  const WRITABLE = { ready: 1, untranslated: 1 };
+  function writeQueue(groups, approved, ledger) {
+    const out = [];
+    for (const g of groups || []) for (const r of g.rows) {
+      if (!WRITABLE[r.bucket] || !(approved && approved[g.taskId + ':' + r.sourceTextId])) continue;
+      if (ledgerIsDone(ledger, g.taskId, r.sourceTextId)) continue;
+      out.push({ taskId: g.taskId, taskName: g.taskName, sourceTextId: r.sourceTextId, rank: r.rank, key: r.key, src: r.src,
+        live: r.live, final: r.final, bucket: r.bucket, xlRows: r.xlRows });
+    }
+    return out;
+  }
+  // The exact text to write: the final with its trailing spaces/newlines replaced by the live
+  // source's (spreadsheets drop or mangle them; Starling QA compares them with the source).
+  function writeText(final, liveSource) {
+    const tail = (str(liveSource).match(/[ \t\r\n ]*$/) || [''])[0];
+    return str(final).replace(/[ \t\r\n ]+$/, '') + tail;
+  }
+  // Fresh read of the task just before writing: is it still the segment Locate planned for?
+  // seg = slimRow found by sourceTextId (or undefined). Returns {ok, skip, why}.
+  function preWriteCheck(seg, item, task) {
+    if (!seg) return { ok: false, why: 'segment no longer in the task' };
+    if (seg.key !== item.key || norm(seg.source) !== norm(item.src)) return { ok: false, why: 'the source changed since Locate' };
+    if (norm(seg.target) === norm(item.final)) return { ok: false, skip: 'already', why: 'live text already equals the final' };
+    if (norm(seg.target) !== norm(item.live)) return { ok: false, why: 'the live text changed since Locate — run Locate again' };
+    const ed = segEditable(task, seg);
+    if (!ed.ok) return { ok: false, why: ed.why };
+    return { ok: true, why: '' };
+  }
+  // Read-back after the write: exact text, proofread-confirmed (status 3).
+  function verifyWrite(seg, text) {
+    if (!seg) return { ok: false, why: 'segment missing on read-back' };
+    if (str(seg.target) !== str(text)) return { ok: false, why: 'read-back text differs' };
+    if (Number(seg.status) !== 3) return { ok: false, why: 'written but not confirmed (status ' + seg.status + ')' };
+    return { ok: true, why: '' };
+  }
+
   // Stable id for a judged report (storage key for the plan and your approvals).
   function planSig(judged) {
     let h = 5381; const s = (judged || []).map((j) => j.key + '|' + norm(j.final)).join('\n');
@@ -308,6 +347,7 @@
     VERDICTS, norm, mapHeader, readRows, icuBlocks, isIcu, tokens, tokenDiff, prepass, commentKey, clusters,
     postcheck, normalizeVerdict, columnI,
     ledgerNew, ledgerMarkDone, ledgerIsDone, ledgerMarkSubmitted, ledgerIsSubmitted, writeAllowed,
-    BUCKETS, needsWrite, handEditReason, lookupKeys, conflicts, segEditable, resolveRow, planByTask, planSig
+    BUCKETS, needsWrite, handEditReason, lookupKeys, conflicts, segEditable, resolveRow, planByTask, planSig,
+    WRITABLE, writeQueue, writeText, preWriteCheck, verifyWrite
   };
 });
