@@ -83,8 +83,9 @@ ok('live already equals the final → already', LQ.resolveRow(J(), [T('t1', [S({
 ok('live differs from Before and final → drifted', LQ.resolveRow(J(), [T('t1', [S({ target: 'נסו שוב.' })])]).bucket === 'drifted');
 ok('bidi isolates around a number are not a difference → already', LQ.resolveRow(J({ final: 'עלייה של {s_num}%' }), [T('t1', [S({ target: 'עלייה של ⁦{s_num}%⁩' })])]).bucket === 'already');
 ok('empty live target in an open task → untranslated, not drifted', LQ.resolveRow(J(), [T('t1', [S({ target: '' })])]).bucket === 'untranslated');
-ok('empty live target in a submitted task → not-editable', LQ.resolveRow(J(), [T('t1', [S({ target: '' })], { taskStatus: 2 })]).bucket === 'not-editable');
-ok('submitted task → not-editable', LQ.resolveRow(J(), [T('t1', [S()], { taskStatus: 2 })]).bucket === 'not-editable');
+ok('empty live target in a submitted task → untranslated (still writable)', LQ.resolveRow(J(), [T('t1', [S({ target: '' })], { taskStatus: 2 })]).bucket === 'untranslated');
+ok('submitted task (status 2) stays editable → ready', LQ.resolveRow(J(), [T('t1', [S()], { taskStatus: 2 })]).bucket === 'ready');
+ok('blockedStatus option can still block Submitted', LQ.resolveRow(J(), [T('t1', [S()], { taskStatus: 2 })], { blockedStatus: [2, 3] }).bucket === 'not-editable');
 ok('closed task (status 3) → not-editable, even when the segment is empty', (() => { const r = LQ.resolveRow(J(), [T('t1', [S({ target: '' })], { taskStatus: 3 })]); return r.bucket === 'not-editable' && r.placements[0].why === 'task closed'; })());
 ok('in-progress task (status 1) stays editable', LQ.segEditable({ taskStatus: 1 }, S()).ok);
 ok('segment not modifiable → not-editable', LQ.resolveRow(J(), [T('t1', [S({ modifiable: false })])]).bucket === 'not-editable');

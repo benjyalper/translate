@@ -230,10 +230,12 @@
     }
     return bad;
   }
-  // Is this live segment editable? A submitted or closed task, a segment not modifiable by the user,
-  // or an editor lock all block writing. getMyTasks taskStatus (confirmed live 2026-10-06):
-  // 1 = in progress, 2 = Submitted, 3 = Closed (cancelled). blockedStatus overrides the defaults.
-  const BLOCKED_STATUS = { 2: 'task submitted', 3: 'task closed' };
+  // Is this live segment editable? A closed task, a segment not modifiable by the user, or an editor
+  // lock all block writing. getMyTasks taskStatus (confirmed live 2026-10-06): 1 = in progress,
+  // 2 = Submitted, 3 = Closed (cancelled). Submitted stays editable: confirmTextTaskTargetV2 writes
+  // and confirms a segment in a submitted task, which stays Submitted with nothing left to re-submit
+  // (verified live 2026-10-08 on 12 tasks). blockedStatus overrides the defaults.
+  const BLOCKED_STATUS = { 3: 'task closed' };
   function segEditable(task, seg, blockedStatus) {
     const blocked = blockedStatus == null ? BLOCKED_STATUS : [].concat(blockedStatus).reduce((m, c) => (m[Number(c)] = 'task status ' + c, m), {});
     if (task && blocked[Number(task.taskStatus)]) return { ok: false, why: blocked[Number(task.taskStatus)] };
