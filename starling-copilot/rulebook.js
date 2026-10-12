@@ -18,7 +18,7 @@
 })(typeof self !== 'undefined' ? self : (typeof globalThis !== 'undefined' ? globalThis : this), function () {
   'use strict';
 
-  const VERSION = '2026-10-12.1';
+  const VERSION = '2026-10-12.2';
 
   // ---- The rulings (Benjy, 2026-09-28) — machine-readable index ------------------------------
   const RULINGS = [
@@ -41,7 +41,8 @@
     { id: 17, topic: 'Final period' },
     { id: 18, topic: 'Hashtags' },
     { id: 19, topic: 'Slash scope' },
-    { id: 20, topic: 'LQA pattern answers (2026-10-06): guardian slash, Congrats, nudge, "now" buttons, dialog questions, legal name, Celebrate X, _prompt keys, broken source placeholders, split-sentence period, extra LRMs' }
+    { id: 20, topic: 'LQA pattern answers (2026-10-06): guardian slash, Congrats, nudge, "now" buttons, dialog questions, legal name, Celebrate X, _prompt keys, broken source placeholders, split-sentence period, extra LRMs' },
+    { id: 21, topic: 'Names of people and their works (2026-10-12): creators, artists, bands, albums, @handles stay in Latin exactly as in the source' }
   ];
 
   // Global Latin allow-list (ruling 12). Starling DNT/Brand tags and context notes add task-scoped ones.
@@ -88,6 +89,7 @@
     '- PERCENT: the % sign stays AFTER the number/placeholder exactly as in the source: ({s_percent}%), 50%. Never %{s_num}.\n' +
     '- HASHTAGS: keep every hashtag EXACTLY as in the source (Latin letters, same casing, # on the left) — they are working campaign links. Translate a hashtag only when a context note or approved term says so.\n' +
     '- LATIN vs HEBREW NAMES: keep in Latin ONLY (a) terms Starling marks DNT/Brand name or a context note says are DNT, and (b) this global list: ' + LATIN_ALLOW.slice(0, 12).join(', ') + ', and third-party brand names (PayPal, Google Play, Wi-Fi). Everything else is translated — feature names, tab/menu/button names (Reposts → פרסומים מחדש, Promote → קידום, Beans → עדשים, Everyone → כולם, Top {num} → מקום {num}). Keep a DNT exactly as given, including its casing (e.g. lowercase "giftee"). A Hebrew prefix attaches to a Latin name with a maqaf (ב-TikTok).\n' +
+    '- NAMES OF PEOPLE AND THEIR WORKS (ruling 21): creator, artist, band and celebrity names, album/song/show titles and @handles stay in Latin EXACTLY as in the source — never transliterate or translate them (היוצרת Hina, של Hina, @hina, את THIS & THAT של Stray Kids, חוגגים את Wild). An @handle keeps its @ and exact spelling and casing. A Hebrew prefix attaches with a maqaf (ב-Stray Kids, ל-Hina); "של" before the name needs none. Only the Hebrew around the name is decided: gender agreement for a single known person follows the source or the person (Hina → היוצרת, שלה). This differs from place names, which are transliterated (next rule).\n' +
     '- PLACE, NEIGHBOURHOOD AND VENUE NAMES: transliterate proper names into Hebrew letters — never leave them in Latin and never translate them (South Ozone Park → סאות\' אוזון פארק, Lake View Terrace → לייק ויו טראס). Only a generic venue-type word that is not part of a brand is translated: Stadium/Stade/Estadio → אצטדיון, Square → כיכר. Park/Field/Arena/Dome stay transliterated when part of the name. Render the same place the same way throughout a task.\n' +
     '- RULED TERMS: unlock → לשחרר in every sense (שחרר/י, שחרור, שוחרר/ה — never לפתוח, never לקבל). teen → בן/בת הנוער ("your teen" → בן/בת הנוער שלך; "teens" → בני נוער). highlights: sports/video → רגעי שיא; the Story "Highlights" profile feature → נקודות שיא; the verb → להדגיש. subscription (the plan) → מינוי; subscriber / "Subscribed" → מנוי/ה; subscribe to notifications → הרשמה. Last updated → עודכן לאחרונה. repost → פרסום מחדש / פרסם/ה מחדש. administrative → מינהלי. cast (a video) → ללהק. disclaimer → הצהרת אחריות / הבהרה. limit → מגבלה (\"time limit\" → הגבלת זמן; set a limit → להגדיר מגבלה) — never מסגרת (LQA, ×3). right of withdrawal → זכות ביטול. Weighing scale → משקל. blouse → חולצה. tracking shot → צילום מעקב.\n' +
     '- GRAMMAR PRECEDENTS: keep את before a definite direct object (נהל/י את {s_settings} שלך). An ICU "one" branch stays singular (מקום, not מקומות). Never hard-code a value a placeholder carries (keep {s_month}). Keep an impersonal source impersonal (מומלץ לך, not אנחנו ממליצים). Do not add words the source lacks ("Others" → אחר, not סיבות אחרות, unless the UI makes it explicit).\n' +
@@ -259,6 +261,8 @@
     if (/\bguardian\b(?!s)/i.test(s) && !/\bguardians\b/i.test(s) && /אפוטרופוס(?!\/|ים|ית)/.test(t)) add('R19-guardian', 'warn', 'one guardian of unknown gender → אפוטרופוס/ית');
     // Ruling 20 — Congrats, nudge.
     if (/^\s*congrat/i.test(s) && /ברכות/.test(t)) add('R20-congrats', 'warn', 'Congrats! → מזל טוב!');
+    // Ruling 21: every literal @handle in the source must appear unchanged in the target (placeholders like @{s_petName} excluded).
+    for (const h of (s.match(/@[A-Za-z0-9_.]*[A-Za-z0-9_]/g) || [])) if (!t.includes(h)) add('R21-handle', 'error', h + ' must stay exactly as in the source (Latin, same spelling)');
     if (/\blimit/i.test(s) && /מסגרת/.test(t)) add('R-limit', 'error', 'limit → מגבלה / הגבלה, never מסגרת (LQA ×3)');
     if (/\bnudg/i.test(s) && /דחף|דחפו|דחפת|נגיעה קלה/.test(t)) add('R20-nudge', 'error', 'nudge → noun construction (נתן/ה דחיפה קלה), never דחף/ה קלות / נגיעה קלה');
     // Neutral errors — no נכשל.

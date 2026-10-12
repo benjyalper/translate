@@ -103,6 +103,11 @@ ok('אפוטרופוס/ית NOT flagged', !flags('Ask your guardian to scan this
 ok('guardians (group) NOT flagged', !flags('Guardians can customize teen safety settings.', 'אפוטרופוסים יכולים להתאים אישית את הגדרות הבטיחות של בני נוער.', 'R19-guardian'));
 ok('Congrats → ברכות flagged', flags('Congrats! ', 'ברכות! ', 'R20-congrats'));
 ok('Congrats → מזל טוב NOT flagged', !flags('Congrats! ', 'מזל טוב! ', 'R20-congrats'));
+ok('@handle kept exactly → NOT flagged', !flags('Meet O-1-0@hinaC-1-0 ', 'הכר/הכירי אתO-1-0@hinaC-1-0', 'R21-handle'));
+ok('@handle transliterated → flagged', flags('Meet @hina', 'הכר/הכירי את @הינה', 'R21-handle'));
+ok('@handle with dots/underscores kept → NOT flagged', !flags('Follow @hidden.movie_details now', 'עקוב/עקבי אחרי @hidden.movie_details עכשיו', 'R21-handle'));
+ok('@{placeholder} is not a handle (no R21 hit)', !flags('Mention @{s_petName} to chat.', 'אזכר/י את {s_petName}@ כדי לשוחח.', 'R21-handle'));
+ok('the names ruling is in the prompt', RB.STYLE.includes('NAMES OF PEOPLE AND THEIR WORKS') && RB.RULINGS.some((r) => r.id === 21));
 ok('limit as מסגרת flagged', flags("You've reached today's limit.", 'הגעת למסגרת היומית.', 'R-limit'));
 ok('limit as מגבלה NOT flagged', !flags("You've reached today's limit.", 'הגעת למגבלה היומית.', 'R-limit'));
 ok('time limit as הגבלת זמן NOT flagged', !flags('switch the time limit off', 'לכבות את הגבלת הזמן', 'R-limit'));
