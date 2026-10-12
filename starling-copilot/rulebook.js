@@ -182,7 +182,7 @@
       if (m.length < 2) return false;
       if (/ה$/.test(m) && m.length >= 3) return true;                                          // ל״ה: נסה/י, צפה/י, תיהנה/י
       if (/^ה(?!ת|י|שת|סת|צט|זד)[א-ת]{2,3}$/.test(m) && !/י/.test(m.slice(1))) return true;  // hif'il: הקש/י, השלם/י, הורד/י
-      if (/^[א-ת]{2}ו[א-ת]$/.test(m) && !/^ה/.test(m)) return true;                             // holam: בדוק/י, שמור/י, עבור/י
+      if (/^[א-ת]{2}ו[א-ת]$/.test(m) && !/^ה/.test(m) && !/^[א-ת]וו/.test(m)) return true;     // holam: בדוק/י, שמור/י, עבור/י — not pi'el double vav: דווח/י
       return false;
     }) && !/^(הישאר|היכנס|הירשם|השתמש|התחבר)$/.test(stem(masc)) && !/^(הישאר|היכנס|הירשם|השתמש|התחבר)$/.test(one);
   }

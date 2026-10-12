@@ -18,7 +18,9 @@ ok('תיהנה/י flagged', flags('Enjoy', 'תיהנה/י מ-0 דמי העברה
 ok('השלם/י flagged (hif\'il)', flags('Complete missions', 'השלם/י משימות', 'R1-slash-short'));
 ok('הקש/י flagged', flags('Tap', 'הקש/י כאן', 'R1-slash-short'));
 ok('בדוק/י flagged (holam)', flags('Check', 'בדוק/י את הסטטוס', 'R1-slash-short'));
-ok('נסה/נסי NOT flagged', !flags('Try again', 'נסה/נסי שוב', 'R1-slash-short'));
+ok('דווח/י NOT flagged (pi\'el double vav, fem = masc + י)', !flags('Report it', 'דווח/י על כך', 'R1-slash-short'));
+ok('דווח/דווחי flagged as long', flags('Report it', 'דווח/דווחי על כך', 'R1-slash-long'));
+ok('נסה/נסי NOT flagged',!flags('Try again', 'נסה/נסי שוב', 'R1-slash-short'));
 ok('לחץ/י NOT flagged', rules('Tap', 'לחץ/י והחזק/החזיקי').length === 0);
 ok('שתף/י, בחר/י, שלח/י, התחבר/י, הישאר/י, השתמש/י NOT flagged',
   !['שתף/י', 'בחר/י', 'שלח/י', 'התחבר/י', 'הישאר/י', 'השתמש/י', 'הצטרף/י', 'היכנס/י'].some((w) => flags('x', w + ' עכשיו', 'R1-slash-short')));
