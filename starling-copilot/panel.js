@@ -2020,9 +2020,76 @@ function renderTagCheck() {
   const segs = state.segments || [];
   const rows = segs.map((s) => ({ s, c: tagCheck(s.src, s.tgt) })).filter((x) => x.c);
   state.tagIssues = rows.map((x) => Object.assign({ seg: x.s.seg }, x.c));
+  if ($('place-tags')) $('place-tags').hidden = !rows.some((x) => tagList(x.s.src).length);   // nothing to place when the source has no tags
   if (!rows.length) { info('tag-info', segs.some((s) => tagList(s.src).length) ? '🏷 Tags: every target mirrors its source tags.' : '', 'good'); return; }
-  info('tag-info', `🏷 ${rows.length} row(s) whose tags don't mirror the source: ${rows.slice(0, 25).map((x) => `#${x.s.seg} (${x.c.note})`).join(' · ')}${rows.length > 25 ? ' …' : ''}. Rows with a Claude edit can be rebuilt with 🏷 Write tags in step 4; fix the others by hand.`, 'err');
+  info('tag-info', `🏷 ${rows.length} row(s) whose tags don't mirror the source: ${rows.slice(0, 25).map((x) => `#${x.s.seg} (${x.c.note})`).join(' · ')}${rows.length > 25 ? ' …' : ''}. Use 🏷 Place tags to have the tags placed for review, then 🏷 Write tags in step 4.`, 'err');
   log(`tag-check: ${rows.length} row(s) — ${rows.map((x) => '#' + x.s.seg).join(' ')}`);
+}
+// 🏷 PLACE TAGS WITH CLAUDE — for flagged rows that have no Claude edit: ask the model ONLY where the
+// source's tags go in the existing Hebrew. A reply is accepted only when its tags mirror the source
+// (tagCheck) AND its words are unchanged (tagTextOnly: typed tag markers like "<6|…|6>" may go, nothing
+// else). Accepted rows become ✋ review cards; 🏷 Write tags writes them. Nothing is written here.
+const TAG_TYPED_G = /<\d+\||\|\d+>/g;
+function tagTextOnly(s) { return String(s == null ? '' : s).replace(TAG_SPLIT, '').replace(TAG_TYPED_G, '').replace(/\s+/g, ' ').trim(); }
+function tagPlaceOk(src, oldTgt, newTgt) { return !tagCheck(src, newTgt) && tagTextOnly(newTgt) === tagTextOnly(oldTgt); }
+const TAG_PLACE_SYS =
+  'You place inline formatting tags in Hebrew (he-IL) translations of TikTok help-center text. Tags are text tokens: O-<n>-0 opens tag n and C-<n>-0 closes it, e.g. "Open O-1-0Help CenterC-1-0 now". ' +
+  'Each item has the English "src" with its tags and the Hebrew "tgt" whose tags are missing, misplaced, extra, or typed as plain text (e.g. "<6|…|6>"). ' +
+  'Return the Hebrew with EXACTLY the tags of "src": every O-/C- token of src once, each closing token after its opening token, placed around the Hebrew words that translate the words the tag wraps in src. If the tag wraps the whole src, wrap the whole Hebrew. Remove any tag not in src and any typed tag marker (such as "<6|" and "|6>"). ' +
+  'Change NOTHING else: keep every Hebrew word, number, space and punctuation mark exactly as given, in the same order — do not correct, improve or re-translate anything, even if it looks wrong. You may only insert tags, remove typed markers, and adjust a space next to a tag. ' +
+  'Return ONLY JSON: {"out":[{"i":<number>,"text":"<hebrew with tags>"}]}, one entry per item, same "i".';
+async function tagPlaceLLM(items, key, model) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (key) headers.Authorization = 'Bearer ' + key;
+  const r = await llmFetch({ method: 'POST', headers, body: JSON.stringify({ model, temperature: 0, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: TAG_PLACE_SYS }, { role: 'user', content: 'Place the tags in these items:\n' + JSON.stringify({ items }) }] }) });
+  const data = await r.json();
+  if (!r.ok) throw new Error((data.error && data.error.message) || ('LLM error ' + r.status));
+  const parsed = JSON.parse(data.choices?.[0]?.message?.content || '{}');
+  return parsed.out || [];
+}
+async function doPlaceTags() {
+  const have = new Set((state.proposals || []).map((p) => String(p.seg)));
+  const bySeg = new Map((state.segments || []).map((s) => [String(s.seg), s]));
+  const rows = (state.tagIssues || []).map((x) => bySeg.get(String(x.seg))).filter((s) => s && !have.has(String(s.seg)) && tagList(s.src).length);
+  if (!rows.length) { info('tag-info', 'No flagged rows left to place — every flagged row already has a review card (e.g. from a Claude import).', 'err'); return; }
+  const model = $('model').value;
+  const key = await store.get('key', '');
+  if (!/^claude-/i.test(model) && !key) { info('tag-info', 'Add your OpenAI key in ⚙️ Settings, or pick a Claude model.', 'err'); return; }
+  const chars = rows.reduce((n, s) => n + String(s.src).length + String(s.tgt).length, 0);
+  const est = llmCost(model, { in: Math.ceil(TAG_PLACE_SYS.length / 3.5) + Math.ceil(chars / 2.5), out: Math.ceil(rows.reduce((n, s) => n + String(s.tgt).length, 0) / 2) + 300 });
+  if (!confirm(`Ask ${model} where the tags go in ${rows.length} row(s): ${rows.map((s) => '#' + s.seg).join(', ')}?
+
+It only places the source's tags — the Hebrew wording stays exactly as it is (any reply that changes a word is rejected). The results become ✋ review cards; nothing is written to Starling until you use 🏷 Write tags.
+
+Estimated cost: about $${est.toFixed(est < 0.1 ? 3 : 2)}.`)) return;
+  const btn = $('place-tags'); btn.disabled = true;
+  info('tag-info', `Asking ${model} to place tags in ${rows.length} row(s)…`);
+  try {
+    const out = [];
+    for (let k = 0; k < rows.length; k += 40) {
+      const chunk = rows.slice(k, k + 40);
+      out.push(...await tagPlaceLLM(chunk.map((s, i) => ({ i: k + i, src: String(s.src), tgt: String(s.tgt) })), key, model));
+    }
+    const got = new Map(out.map((o) => [Number(o.i), String(o.text == null ? '' : o.text)]));
+    const added = [], rejected = [];
+    rows.forEach((s, i) => {
+      const next = got.get(i);
+      if (next == null || !tagPlaceOk(s.src, s.tgt, next)) { rejected.push('#' + s.seg); return; }
+      added.push({ seg: s.seg, src: s.src, old: s.tgt, next, tagged: true, chip: !!s.chip, tagWrapped: true, manual: true, filled: false, tagPlaced: true,
+        flag: '🏷 Tags placed by ' + model + ' — wording unchanged; check that each tag wraps the right words.',
+        promptCtx: isPromptCtx(s.key), key: s.key || '', context: s.context || '', comments: s.comments || '', fullSrc: s.fullSrc || '', shots: s.shots || [],
+        termsUsed: [], classified: [], risk: [], shotImg: null, approved: false });
+    });
+    state.proposals = (state.proposals || []).concat(added);
+    log(`place-tags: ${added.length}/${rows.length} placed${rejected.length ? ', rejected ' + rejected.join(' ') : ''}`);
+    info('tag-info', `🏷 ${added.length} of ${rows.length} row(s) got their tags placed — review them below (✋ Paste by hand view), then 🏷 Write tags in step 4.${rejected.length ? ` ⚠ ${rejected.length} rejected (${rejected.join(', ')}): the reply changed the wording or the tags still didn't match — fix those by hand.` : ''}`, rejected.length ? 'err' : 'good');
+    if (added.length) {
+      revFilter = 'manual';
+      renderReview();
+      $('review-card').hidden = false; $('write-card').hidden = false;
+    }
+  } catch (e) { info('tag-info', 'Placing tags failed: ' + (e.message || e), 'err'); }
+  finally { btn.disabled = false; }
 }
 async function doWriteTags() {
   const mm = await harvestTabMismatch();
@@ -7301,6 +7368,7 @@ async function init() {
   $('harvest').addEventListener('click', doHarvest);
   if ($('write-tagged')) $('write-tagged').addEventListener('click', doWriteTagged);
   if ($('write-tags')) $('write-tags').addEventListener('click', doWriteTags);
+  if ($('place-tags')) $('place-tags').addEventListener('click', doPlaceTags);
   if ($('export-claude')) $('export-claude').addEventListener('click', doExportForClaude);
   if ($('import-claude')) $('import-claude').addEventListener('change', (ev) => { const f = ev.target.files && ev.target.files[0]; ev.target.value = ''; if (f) doImportClaude(f); });
   $('xliff-file').addEventListener('change', (e) => onXliffFile(e.target));

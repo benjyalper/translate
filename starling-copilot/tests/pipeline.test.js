@@ -75,6 +75,55 @@ sec('🏷 Tag check and Write tags (rows whose tags must be added or moved)');
   ok('harvest runs the tag check', /runCoverage\(\);[^\n]*\n\s*renderTagCheck\(\);/.test(PANEL));
 }
 
+sec('🏷 Place tags (the model only places tags; wording must not change)');
+(async () => {
+  const grab = (re) => PANEL.match(re)[0];
+  const body = grab(/const TAG_SPLIT = [^\n]+\n/) + grab(/function taggedPartsEdit[\s\S]*?\n}\n/) + grab(/const TAG_TYPED = [^\n]+\n/) + grab(/function tagList[^\n]+\n/) +
+    grab(/function tagCheck[\s\S]*?\n}\n/) + grab(/function tagFixEdit[\s\S]*?\n}\n/) + grab(/const TAG_TYPED_G = [^\n]+\n/) + grab(/function tagTextOnly[^\n]+\n/) +
+    grab(/function tagPlaceOk[^\n]+\n/) + grab(/const TAG_PLACE_SYS =[\s\S]*?;\n/) + grab(/async function tagPlaceLLM[\s\S]*?\n}\n/) + grab(/async function doPlaceTags[\s\S]*?\n}\n/);
+  const env = { infos: [], sent: null, confirmMsg: '' };
+  const make = new Function('env', 'state', 'const sameRender = (a, b) => a === b; let revFilter = "changed";' +
+    'const $ = (id) => (env.els[id] = env.els[id] || { hidden: true, disabled: false, value: id === "model" ? "claude-opus-5" : "" });' +
+    'const info = (id, msg, cls) => env.infos.push([id, msg, cls]); const log = () => {}; const renderReview = () => { env.rendered = revFilter; };' +
+    'const store = { get: async (k, d) => d }; const llmCost = () => 0.004; const isPromptCtx = () => false; const confirm = (m) => { env.confirmMsg = m; return true; };' +
+    'const llmFetch = async (o) => { env.sent = JSON.parse(o.body); return { ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify({ out: env.reply }) } }] }) }; };' +
+    body + ';return { tagPlaceOk, tagTextOnly, doPlaceTags, tagFixEdit };');
+  env.els = {};
+  const t31 = 'למידע נוסף, עיין/י במאמר <6|קביעת התצורה של הגדרות ב-LIVE Studio.|6>';
+  const s31 = 'For more information, check out O-1-0Configure LIVE settings in LIVE StudioC-1-0';
+  const lib = make(env, {});
+  ok('typed markers may go and tags may be added — words unchanged', lib.tagPlaceOk(s31, t31, 'למידע נוסף, עיין/י במאמר O-1-0קביעת התצורה של הגדרות ב-LIVE Studio.C-1-0'));
+  ok('a reply that changes a word is rejected', !lib.tagPlaceOk(s31, t31, 'למידע נוסף, עיין/י במאמר O-1-0קביעת התצורה של ההגדרות ב-LIVE StudioC-1-0'));
+  ok('a reply whose tags still do not mirror the source is rejected', !lib.tagPlaceOk(s31, t31, 'למידע נוסף, עיין/י במאמר O-1-0קביעת התצורה של הגדרות ב-LIVE Studio.'));
+  const state = {
+    proposals: [{ seg: '9', manual: true }],   // #9 already has a card (e.g. from an import) → not sent
+    segments: [
+      { seg: '31', src: s31, tgt: t31, key: '' },
+      { seg: '9', src: 'aO-1-0bC-1-0', tgt: 'אב', key: '' },
+      { seg: '12', src: 'Tap O-1-0SaveC-1-0.', tgt: 'הקש/הקישי על שמירה.', key: '' },
+      { seg: '20', src: 'Go to O-1-0SettingsC-1-0.', tgt: 'עבור/עברי אל הגדרות.', key: '' }
+    ],
+    tagIssues: [{ seg: '31' }, { seg: '9' }, { seg: '12' }, { seg: '20' }]
+  };
+  const lib2 = make(env, state);
+  env.reply = [
+    { i: 0, text: 'למידע נוסף, עיין/י במאמר O-1-0קביעת התצורה של הגדרות ב-LIVE Studio.C-1-0' },
+    { i: 1, text: 'הקש/הקישי על O-1-0"שמירה"C-1-0.' },                  // added quotes → rejected
+    { i: 2, text: 'עבור/עברי אל O-1-0הגדרות.' }                         // closing tag missing → rejected
+  ];
+  await lib2.doPlaceTags();
+  ok('rows that already have a card are not sent to the model', env.sent && JSON.parse(env.sent.messages[1].content.replace(/^[^{]*/, '')).items.map((x) => x.i).join(',') === '0,1,2');
+  ok('the prompt forbids changing the wording', /Change NOTHING else/.test(env.sent.messages[0].content) && env.sent.temperature === 0);
+  ok('the cost is shown before the call', /Estimated cost: about \$0\.004/.test(env.confirmMsg));
+  const placed = state.proposals.filter((p) => p.tagPlaced);
+  ok('only the faithful reply becomes a review card (#31)', placed.length === 1 && placed[0].seg === '31' && placed[0].manual && placed[0].old === t31);
+  ok('…and 🏷 Write tags will take it', !!lib2.tagFixEdit(placed[0]));
+  ok('the rejected rows are named', env.infos.some(([id, m]) => id === 'tag-info' && /2 rejected \(#12, #20\)/.test(m)));
+  ok('the review opens on the ✋ view', env.rendered === 'manual');
+  const HTML = fs.readFileSync(path.join(__dirname, '..', 'panel.html'), 'utf8');
+  ok('panel has the 🏷 Place tags button (hidden until rows are flagged)', /<button id="place-tags"[^>]*hidden/.test(HTML) && /\$\('place-tags'\)\.hidden = /.test(PANEL));
+})().then(() => {
+
 sec('Prompt guarantees (Tests A/B/C live in the model prompt)');
 ok('term hints include the definition field', /if\s*\(t\.def\)\s*h\.definition/.test(SRC));
 ok('prompt sends {en,he,pos,definition} shape', /"en","he","pos","definition"/.test(SRC));
@@ -155,3 +204,4 @@ ok('panel.html loads pipeline-core before panel.js', (() => {
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
+}).catch((e) => { console.log('  ✗ test crashed: ' + (e && e.stack || e)); process.exit(1); });
