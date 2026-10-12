@@ -25,6 +25,25 @@ sec('Term matching sees through Starling tag tokens');
   ok('word boundaries still hold (Profiles is not Profile)', !has('Profiles here', 'Profile'));
 }
 
+sec('Tag tokens end at their last digit (a number right after a tag is text)');
+{
+  const grab = (re) => PANEL.match(re)[0];
+  const edit = new Function('const sameRender = (a, b) => a === b;' + grab(/const TAG_SPLIT = [^\n]+\n/) + grab(/function taggedPartsEdit[\s\S]*?\n}\n/) + ';return taggedPartsEdit;')();
+  const runs = new Function(grab(/function stripTags[\s\S]*?\n}\n/) + grab(/function splitTagRuns[\s\S]*?\n}\n/) + ';return splitTagRuns;')();
+  // Task 530532593922 #14: "O-1-040%" was read as token O-1-040 + "%", so ✍ skipped the row.
+  const old = "באפשרותך לאסוף עד O-1-040% מפרסי השידור החי שלך, C-1-0אשר יוצגו תחת 'פרסים זמינים'.";
+  const next = 'באפשרותך לאסוף עד O-1-040% מפרסי השידור החי שלך, C-1-0אשר יוצגו תחת "פרסים זמינים".';
+  const e = edit({ manual: true, seg: '14', old, next });
+  ok('✍ writes a row whose tag is followed by a number (O-1-040%)', !!e && e.parts === 1 && e.oldPieces[1] === '40% מפרסי השידור החי שלך, ');
+  ok('the tag itself is O-1-0, not O-1-040', (old.match(/[OC]-\d+-\d/g) || []).join('|') === 'O-1-0|C-1-0');
+  ok('splitTagRuns keeps the number in the run', JSON.stringify(runs('עד O-1-013%* נוספיםC-1-0')) === JSON.stringify([{ id: null, text: 'עד' }, { id: '1', text: '13%* נוספים' }]));
+  ok('two-digit tag ids still work (O-12-0)', (edit({ manual: true, seg: 'x', old: 'aO-12-0bC-12-0', next: 'aO-12-0cC-12-0' }) || {}).parts === 1);
+  const files = ['panel.js', 'content.js', 'rulebook.js', 'tools/proofread/formats.mjs', 'tools/proofread/build-proofread-log.cjs'];
+  ok('no greedy tag-token pattern ((?:-\\d+)+) left in the sources', files.every((f) => !/\[OC\]-[^/\n]*\(\?:-\\d\+\)\+/.test(fs.readFileSync(path.join(__dirname, '..', f), 'utf8'))));
+  const csv = (fs.readFileSync(path.join(__dirname, '..', 'content.js'), 'utf8').match(/const CS_VERSION = (\d+)/) || [])[1];
+  ok('panel CS_EXPECT matches content.js CS_VERSION', !!csv && PANEL.includes('const CS_EXPECT = ' + csv + ';'));
+}
+
 sec('Prompt guarantees (Tests A/B/C live in the model prompt)');
 ok('term hints include the definition field', /if\s*\(t\.def\)\s*h\.definition/.test(SRC));
 ok('prompt sends {en,he,pos,definition} shape', /"en","he","pos","definition"/.test(SRC));

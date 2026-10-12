@@ -86,7 +86,7 @@ function hl(escaped) {
     .replace(/(\{\{[^}]+\}\})/g, '<span class="tok tok-var">$1</span>')
     .replace(/(?<!\{)(\{[^{}]+\})(?!\})/g, '<span class="tok tok-var">$1</span>')
     .replace(/(&lt;\/?[a-zA-Z][^&]*?&gt;)/g, '<span class="tok tok-tag">$1</span>')
-    .replace(/([OC]-\d+(?:-\d+)+)/g, '<span class="tok tok-tag">$1</span>')
+    .replace(/([OC]-\d+-\d)/g, '<span class="tok tok-tag">$1</span>')
     .replace(/(%\d?\$?[sd])/g, '<span class="tok tok-pct">$1</span>');
 }
 // Starling encodes tags as text tokens O-<id>/C-<id> ("O-1-0<text>C-1-0"), and
@@ -95,7 +95,7 @@ function hl(escaped) {
 function stripTags(s) {
   return String(s == null ? '' : s)
     .replace(/<\/?(?:g|x|bpt|ept|ph|it|mrk|sub)\b[^>]*>/gi, '') // XLIFF inline tag elements
-    .replace(/[OC]-\d+(?:-\d+)+/g, '')                          // Starling O-/C- text tokens
+    .replace(/[OC]-\d+-\d/g, '')                          // Starling O-/C- text tokens
     .replace(/[①-⑳❶-➓⓪]/g, '')                                  // circled markers
     .replace(/\s{2,}/g, ' ').trim();
 }
@@ -103,7 +103,7 @@ function tagId(s) { const m = String(s == null ? '' : s).match(/O-(\d+)/); retur
 
 // Trailing tokens (tags / placeholders / entities / whitespace) that may sit after the
 // last real character — ignored when deciding whether a string "ends with a full stop".
-const TRAIL_TOK = /(?:\s+|\\n|<[^>]+>|\{\{[^{}]*\}\}|\{[^{}]*\}|%\d?\$?[sd]|&[a-zA-Z#0-9]+;|[OC]-\d+(?:-\d+)+|[①-⑳❶-➓⓪])+$/;  // \\n = a trailing LITERAL "\n" escape, so a sentence period before it isn't hidden from the full-stop mirror
+const TRAIL_TOK = /(?:\s+|\\n|<[^>]+>|\{\{[^{}]*\}\}|\{[^{}]*\}|%\d?\$?[sd]|&[a-zA-Z#0-9]+;|[OC]-\d+-\d|[①-⑳❶-➓⓪])+$/;  // \\n = a trailing LITERAL "\n" escape, so a sentence period before it isn't hidden from the full-stop mirror
 function coreEnd(x) { return String(x == null ? '' : x).replace(TRAIL_TOK, ''); }
 function endsPeriod(x) { return /\.$/.test(x) && !/\.\.$/.test(x) && !/…$/.test(x); }  // single ASCII full stop, not ellipsis
 function endsEllipsis(x) { return /\.\.$/.test(x) || /…$/.test(x); }
@@ -273,7 +273,7 @@ function renderNorm(s) {
 function sameRender(a, b) { return renderNorm(a) === renderNorm(b); }
 
 // ---- optional XLIFF source (alternative to DOM harvest) --------------------
-const XLIFF_TAGGED = /<\/?(?:g|x|bpt|ept|ph|it|mrk|sub)\b|[OC]-\d+(?:-\d+)+|[①-⑳❶-➓⓪]/;
+const XLIFF_TAGGED = /<\/?(?:g|x|bpt|ept|ph|it|mrk|sub)\b|[OC]-\d+-\d|[①-⑳❶-➓⓪]/;
 function xliffUnescape(s) { return String(s).replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&'); }
 function parseXliff(text) {
   const segs = [];
@@ -324,12 +324,12 @@ function splitParts(t) {
 // O-<id>/C-<id> (and may render as ①②③). Typing them back writes the literal
 // "O-1-0" text and DESTROYS the real tag chips — so any segment carrying them is
 // copy-by-hand, exactly like a DOM chip. (Not caught by the {x}/%s/<g> detector.)
-const TAG_TOK = /[OC]-\d+(?:-\d+)+|[①-⑳❶-➓⓪]/;              // NO /g — used with .test()
+const TAG_TOK = /[OC]-\d+-\d|[①-⑳❶-➓⓪]/;              // NO /g — used with .test()
 function hasTags(s) { return TAG_TOK.test(String(s == null ? '' : s)); }
 // Ordered signature of a string's copy-by-hand tag tokens (①…① / O-/C- pairs). Used to guard
 // applying Consistency memory to tagged segments: only substitute the stored target when it carries
 // the SAME tag tokens in the same order as the source, so the per-part Copy splitter still lines up.
-const TAG_TOK_G = /[OC]-\d+(?:-\d+)+|[①-⑳❶-➓⓪]/g;
+const TAG_TOK_G = /[OC]-\d+-\d|[①-⑳❶-➓⓪]/g;
 function tmTagSig(s) { return (String(s == null ? '' : s).match(TAG_TOK_G) || []).join('|'); }
 // Split a target into the text runs that sit BETWEEN its tag tokens, so each run
 // can be copied and pasted between the matching ①…① without touching the tags.
@@ -349,8 +349,8 @@ function partsToCopy(next, old, nextIds, oldIds) {
 }
 function splitTagRuns(t) {
   const s = String(t == null ? '' : t);
-  if (!/[OC]-\d+(?:-\d+)+/.test(s)) return null;
-  const re = /([OC])-(\d+)(?:-\d+)+/g;
+  if (!/[OC]-\d+-\d/.test(s)) return null;
+  const re = /([OC])-(\d+)-\d/g;
   const runs = [];
   let last = 0, m, openId = null;
   while ((m = re.exec(s))) {
@@ -1937,7 +1937,7 @@ async function doImportClaude(file) {
 // rows straight into the cell, between the tags, without touching the tags (content.js writeParts).
 // Only rows whose old and new text carry the SAME tag tokens in the same order qualify; a row whose
 // tags must be added/moved (e.g. the translation lost them) stays paste-by-hand.
-const TAG_SPLIT = /[OC]-\d+(?:-\d+)+/g;
+const TAG_SPLIT = /[OC]-\d+-\d/g;
 function taggedPartsEdit(p) {
   if (!p || !p.manual || p.partsDone || sameRender(p.next, p.old)) return null;
   const a = String(p.old || ''), b = String(p.next || '');
@@ -2980,7 +2980,7 @@ function wbBuildIndex() {
 }
 const WB_FIELDS = [['key', 'Key'], ['valid', 'Valid (Y/N)'], ['final', 'Final Translation'], ['src', 'Source (EN)'], ['tgt', 'Current target'], ['lang', 'Language'], ['updated', 'Updated on Starling']];
 const STAR_KEY_URL = 'https://starling.bytedance.com/#/all-task?pageNum=1&pageSize=10&progress=all&translateTypeList=%5B%5D&sortType=1&order=0&sourceLocales=en&targetLocales=he-IL&textKeys=';
-const CS_EXPECT = 42;   // must match content.js CS_VERSION
+const CS_EXPECT = 43;   // must match content.js CS_VERSION
 
 // Direct call surface — invokes the page's window.__wb.* via chrome.scripting.executeScript.
 // This bypasses chrome.runtime messaging entirely, so a stale/duplicate content-script

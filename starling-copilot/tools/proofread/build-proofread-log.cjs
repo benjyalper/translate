@@ -26,7 +26,7 @@ const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 
 const longDate = (iso) => { const [y, m, d] = iso.split('-').map(Number); return `${d} ${MONTHS[m - 1]} ${y}`; };
 
 // Starling tag tokens → circled numbers (①…①), as the editor shows them; O-/C- codes scramble inside RTL text.
-const tagify = (x) => String(x == null ? '' : x).replace(/[OC]-(\d+)(?:-\d+)+/g, (m, n) => String.fromCharCode(0x2460 + (+n - 1)));
+const tagify = (x) => String(x == null ? '' : x).replace(/[OC]-(\d+)-\d/g, (m, n) => String.fromCharCode(0x2460 + (+n - 1)));
 const TAGGED = /[\u2460-\u2473]/;
 
 // Word-level diff (LCS) → [{t, op:'eq'|'del'|'ins'}]

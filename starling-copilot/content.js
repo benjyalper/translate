@@ -13,7 +13,7 @@
   // tab is running an older version, re-injects this file via chrome.scripting so stale tabs
   // self-heal (no page reload needed). Re-injection tears down the previous version's message
   // listener first (below) so there's never a double-listener race.
-  const CS_VERSION = 42;
+  const CS_VERSION = 43;
   if (window.__scVer === CS_VERSION) return;                         // this exact version already live here
   if (typeof window.__scCleanup === 'function') { try { window.__scCleanup(); } catch (e) {} }  // remove an older/stale one
   window.__scVer = CS_VERSION;
@@ -224,7 +224,7 @@
       // conservatively from the text — anything tag-like stays copy-by-hand so a real inline
       // tag can't be clobbered by an auto-write.
       const have = new Set(segs.map((s) => String(s.seg)));
-      const TAGRUN = /[OC]-\d+(?:-\d+)+/;
+      const TAGRUN = /[OC]-\d+-\d/;
       for (const r of res.rows) {
         const rank = String(r.rank == null ? '' : r.rank);
         if (!rank || have.has(rank)) continue;

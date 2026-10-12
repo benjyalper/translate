@@ -269,7 +269,7 @@
     if ((t.match(/!/g) || []).length > (s.match(/!/g) || []).length) add('R-exclaim', 'warn', 'more "!" than the source — never add an exclamation mark');
     if (/…|\.\.\./.test(t) && !/…|\.\.\./.test(s)) add('R-ellipsis', 'warn', 'ellipsis the source does not have');
     // R15 — RLM after Latin/placeholder before "(" or ":" (reviewer cases).
-    const tNoTag = t.replace(/[OC]-\d+-\d+/g, '');   // Starling tag tokens (O-1-0/C-1-0) are not Latin text
+    const tNoTag = t.replace(/[OC]-\d+-\d/g, '');   // Starling tag tokens (O-1-0/C-1-0) are not Latin text
     if (/[A-Za-z0-9}]\s\(/.test(tNoTag) && /[א-ת]/.test(t) && !/‏/.test(t)) add('R15-rlm', 'warn', 'Latin word/placeholder before "(" in Hebrew text → add RLM');
     // Ruling 20 — LRM before a space-separated phone number, and after punctuation ending a Latin brand name.
     if (/[א-ת]/.test(t)) {

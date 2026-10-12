@@ -24,7 +24,7 @@ export function loadExport(j) {
 // Every tag / placeholder token as a sorted multiset string, so source and target can be compared:
 // Starling O-/C- tag tokens, circled markers (memoQ/YiCAT tags), private-use tag characters,
 // {x} / {{x}} placeholders, printf (%s, %1$s, %d) and markup tags (<b>, </g1>, <x2/>).
-const TOKEN = /[OC]-\d+(?:-\d+)+|[①-⑳㉑-㉟-]|\{\{[^}]*\}\}|\{[^{}]*\}|%(?:\d+\$)?[sdif@]|<\/?[A-Za-z][^>]*>/g;
+const TOKEN = /[OC]-\d+-\d|[①-⑳㉑-㉟-]|\{\{[^}]*\}\}|\{[^{}]*\}|%(?:\d+\$)?[sdif@]|<\/?[A-Za-z][^>]*>/g;
 export const tokens = (s) => (String(s == null ? '' : s).match(TOKEN) || []).sort().join(' ');
 
 export function buildResult(j, ex, edits) {
