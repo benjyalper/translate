@@ -19,13 +19,7 @@ const idx = (re) => { const m = SRC.match(re); return m ? m.index : -1; };
 sec('Term matching sees through Starling tag tokens');
 {
   const grab = (re) => PANEL.match(re)[0];
-  const has = new Function(grab(/const TAG_TOK_G = [^
-]+
-/) + grab(/function lockEsc[\s\S]*?
-}
-/) + grab(/function lockSrcHas[\s\S]*?
-}
-/) + ';return lockSrcHas;')();
+  const has = new Function(grab(/const TAG_TOK_G = [^\n]+\n/) + grab(/function lockEsc[\s\S]*?\n}\n/) + grab(/function lockSrcHas[\s\S]*?\n}\n/) + ';return lockSrcHas;')();
   ok('a term wrapped in tag tokens is found (O-1-0Family PairingC-1-0)', has('Daily screen time is also available in O-1-0Family PairingC-1-0.', 'Family Pairing'));
   ok('a term glued to a closing token is found (TapO-1-0 ProfileC-1-0)', has('1. TapO-1-0 ProfileC-1-0 at the bottom.', 'Profile'));
   ok('word boundaries still hold (Profiles is not Profile)', !has('Profiles here', 'Profile'));
