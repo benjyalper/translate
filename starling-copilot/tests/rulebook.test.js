@@ -103,6 +103,10 @@ ok('אפוטרופוס/ית NOT flagged', !flags('Ask your guardian to scan this
 ok('guardians (group) NOT flagged', !flags('Guardians can customize teen safety settings.', 'אפוטרופוסים יכולים להתאים אישית את הגדרות הבטיחות של בני נוער.', 'R19-guardian'));
 ok('Congrats → ברכות flagged', flags('Congrats! ', 'ברכות! ', 'R20-congrats'));
 ok('Congrats → מזל טוב NOT flagged', !flags('Congrats! ', 'מזל טוב! ', 'R20-congrats'));
+ok('limit as מסגרת flagged', flags("You've reached today's limit.", 'הגעת למסגרת היומית.', 'R-limit'));
+ok('limit as מגבלה NOT flagged', !flags("You've reached today's limit.", 'הגעת למגבלה היומית.', 'R-limit'));
+ok('time limit as הגבלת זמן NOT flagged', !flags('switch the time limit off', 'לכבות את הגבלת הזמן', 'R-limit'));
+ok('a stored lock limit → מסגרת is quarantined, the ruled מגבלה wins', (() => { const a = RB.activeLockTerms([{ en: 'limit', he: 'מסגרת' }]); return a.filter((t) => t.en.toLowerCase() === 'limit').length === 1 && a.find((t) => t.en.toLowerCase() === 'limit').he === 'מגבלה' && RB.auditStoredState({ lockedTerms: { terms: [{ en: 'limit', he: 'מסגרת' }] } }).length === 1; })());
 ok('nudge as דחף/ה קלות flagged', flags('{s_nickname} nudged you', '{s_nickname} דחף/ה אותך קלות', 'R20-nudge'));
 ok('nudge as נגיעה קלה flagged', flags('You nudged them', 'נתת להם נגיעה קלה', 'R20-nudge'));
 ok('nudge as נתן/ה לך דחיפה קלה NOT flagged', !flags('{s_nickname} nudged you', '{s_nickname} נתן/ה לך דחיפה קלה', 'R20-nudge'));

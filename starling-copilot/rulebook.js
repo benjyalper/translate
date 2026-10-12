@@ -18,7 +18,7 @@
 })(typeof self !== 'undefined' ? self : (typeof globalThis !== 'undefined' ? globalThis : this), function () {
   'use strict';
 
-  const VERSION = '2026-10-06.2';
+  const VERSION = '2026-10-12.1';
 
   // ---- The rulings (Benjy, 2026-09-28) — machine-readable index ------------------------------
   const RULINGS = [
@@ -54,7 +54,8 @@
     { en: 'teen', he: 'בן/בת הנוער', note: 'ruling 13a — "your teen" → בן/בת הנוער שלך; "teens" → בני נוער (no slash); never מתבגר/ת, נער/ה' },
     { en: 'Congrats', he: 'מזל טוב', note: 'ruling 20 — also "Congratulations!"; never ברכות!' },
     { en: 'nudge', he: 'דחיפה קלה', note: 'ruling 20 — noun construction: נתת דחיפה קלה ל-…, נתן/ה לך דחיפה קלה, Nudge back → החזרת דחיפה קלה; never דחף/ה קלות, never נגיעה קלה' },
-    { en: 'legal name', he: 'שם חוקי', note: 'ruling 20 — verification documents' }
+    { en: 'legal name', he: 'שם חוקי', note: 'ruling 20 — verification documents' },
+    { en: 'limit', he: 'מגבלה', note: 'LQA 41732 (×3, accepted) — מגבלה / הגבלה ("time limit" → הגבלת זמן); never מסגרת' }
   ];
 
   // Terms from OTHER clients that must never be applied to TikTok (found in the live 🔒 Locked
@@ -88,7 +89,7 @@
     '- HASHTAGS: keep every hashtag EXACTLY as in the source (Latin letters, same casing, # on the left) — they are working campaign links. Translate a hashtag only when a context note or approved term says so.\n' +
     '- LATIN vs HEBREW NAMES: keep in Latin ONLY (a) terms Starling marks DNT/Brand name or a context note says are DNT, and (b) this global list: ' + LATIN_ALLOW.slice(0, 12).join(', ') + ', and third-party brand names (PayPal, Google Play, Wi-Fi). Everything else is translated — feature names, tab/menu/button names (Reposts → פרסומים מחדש, Promote → קידום, Beans → עדשים, Everyone → כולם, Top {num} → מקום {num}). Keep a DNT exactly as given, including its casing (e.g. lowercase "giftee"). A Hebrew prefix attaches to a Latin name with a maqaf (ב-TikTok).\n' +
     '- PLACE, NEIGHBOURHOOD AND VENUE NAMES: transliterate proper names into Hebrew letters — never leave them in Latin and never translate them (South Ozone Park → סאות\' אוזון פארק, Lake View Terrace → לייק ויו טראס). Only a generic venue-type word that is not part of a brand is translated: Stadium/Stade/Estadio → אצטדיון, Square → כיכר. Park/Field/Arena/Dome stay transliterated when part of the name. Render the same place the same way throughout a task.\n' +
-    '- RULED TERMS: unlock → לשחרר in every sense (שחרר/י, שחרור, שוחרר/ה — never לפתוח, never לקבל). teen → בן/בת הנוער ("your teen" → בן/בת הנוער שלך; "teens" → בני נוער). highlights: sports/video → רגעי שיא; the Story "Highlights" profile feature → נקודות שיא; the verb → להדגיש. subscription (the plan) → מינוי; subscriber / "Subscribed" → מנוי/ה; subscribe to notifications → הרשמה. Last updated → עודכן לאחרונה. repost → פרסום מחדש / פרסם/ה מחדש. administrative → מינהלי. cast (a video) → ללהק. disclaimer → הצהרת אחריות / הבהרה. right of withdrawal → זכות ביטול. Weighing scale → משקל. blouse → חולצה. tracking shot → צילום מעקב.\n' +
+    '- RULED TERMS: unlock → לשחרר in every sense (שחרר/י, שחרור, שוחרר/ה — never לפתוח, never לקבל). teen → בן/בת הנוער ("your teen" → בן/בת הנוער שלך; "teens" → בני נוער). highlights: sports/video → רגעי שיא; the Story "Highlights" profile feature → נקודות שיא; the verb → להדגיש. subscription (the plan) → מינוי; subscriber / "Subscribed" → מנוי/ה; subscribe to notifications → הרשמה. Last updated → עודכן לאחרונה. repost → פרסום מחדש / פרסם/ה מחדש. administrative → מינהלי. cast (a video) → ללהק. disclaimer → הצהרת אחריות / הבהרה. limit → מגבלה (\"time limit\" → הגבלת זמן; set a limit → להגדיר מגבלה) — never מסגרת (LQA, ×3). right of withdrawal → זכות ביטול. Weighing scale → משקל. blouse → חולצה. tracking shot → צילום מעקב.\n' +
     '- GRAMMAR PRECEDENTS: keep את before a definite direct object (נהל/י את {s_settings} שלך). An ICU "one" branch stays singular (מקום, not מקומות). Never hard-code a value a placeholder carries (keep {s_month}). Keep an impersonal source impersonal (מומלץ לך, not אנחנו ממליצים). Do not add words the source lacks ("Others" → אחר, not סיבות אחרות, unless the UI makes it explicit).\n' +
     '- BIDI: when a Latin word or a {placeholder} is directly followed by "(" or ":" inside a Hebrew sentence, put an RLM (U+200F) right after it: ל-TikTok‏ ({{ticket.id}}), {s_name}:‏ {s_volume}. Put an LRM (U+200E) before a Latin #hashtag that sits in Hebrew text, before a space-separated phone number (‎600 000 016) so its digit groups keep their order, and right after punctuation that ends a Latin brand name (SpontanGO!‎) so it stays on the right side of the brand. Add no other invisible marks.\n' +
     '- BROKEN PLACEHOLDER IN THE SOURCE (e.g. {reward_amount) or {s_username2)): mirror it in the Hebrew EXACTLY, typo included, so Starling QA matches; never repair it.\n';
@@ -136,7 +137,7 @@
     const seen = new Set(), terms = [];
     for (const t of [...RULED_TERMS, ...(userTerms || [])]) {
       const en = String(t.en || '').trim(), k = en.toLowerCase();
-      if (!en || seen.has(k) || bad.has(k)) continue;
+      if (!en || seen.has(k) || (bad.has(k) && !RULED_TERMS.includes(t))) continue;   // ruled terms are never quarantined
       seen.add(k); terms.push(t);
     }
     return terms;
@@ -258,6 +259,7 @@
     if (/\bguardian\b(?!s)/i.test(s) && !/\bguardians\b/i.test(s) && /אפוטרופוס(?!\/|ים|ית)/.test(t)) add('R19-guardian', 'warn', 'one guardian of unknown gender → אפוטרופוס/ית');
     // Ruling 20 — Congrats, nudge.
     if (/^\s*congrat/i.test(s) && /ברכות/.test(t)) add('R20-congrats', 'warn', 'Congrats! → מזל טוב!');
+    if (/\blimit/i.test(s) && /מסגרת/.test(t)) add('R-limit', 'error', 'limit → מגבלה / הגבלה, never מסגרת (LQA ×3)');
     if (/\bnudg/i.test(s) && /דחף|דחפו|דחפת|נגיעה קלה/.test(t)) add('R20-nudge', 'error', 'nudge → noun construction (נתן/ה דחיפה קלה), never דחף/ה קלות / נגיעה קלה');
     // Neutral errors — no נכשל.
     if (/נכשל/.test(t)) add('R-error-tone', 'warn', 'avoid נכשל/נכשלו in user-facing messages');
@@ -292,6 +294,7 @@
     for (const t of ((st.lockedTerms || {}).terms || [])) {
       if (FOREIGN_CLIENT_TERMS.includes(String(t.en || '').toLowerCase())) issues.push({ kind: 'locked', en: t.en, he: t.he, why: 'another client\'s glossary (crane manual) — must not apply to TikTok' });
       if (/%\{|%\d/.test(t.he || '') && !/%\{|%\d/.test(t.en || '')) issues.push({ kind: 'locked', en: t.en, he: t.he, why: 'forces % before the number — contradicts LQA (×19)' });
+      if (/^limits?$/i.test(t.en || '') && /מסגרת/.test(t.he || '')) issues.push({ kind: 'locked', en: t.en, he: t.he, why: 'contradicts LQA 41732 (limit → מגבלה, accepted ×3)' });
       if (/^highlights$/i.test(t.en || '') && t.he === 'רגעי שיא') issues.push({ kind: 'locked', en: t.en, he: t.he, why: 'ruling 13b splits by sense (Story feature → נקודות שיא)' });
     }
     for (const r of ((st.autoFix || {}).rules || [])) {
