@@ -678,8 +678,11 @@ function lockText() { return RB.lockBlock((LOCK && LOCK.terms) || []); }   // + 
 // Is the locked EN term present in the source (boundary-aware, case-insensitive)?
 function lockSrcHas(src, en) {
   const e = String(en == null ? '' : en).trim(); if (!e) return false;
-  try { return new RegExp('(?<![A-Za-z0-9])' + lockEsc(e) + '(?![A-Za-z0-9])', 'i').test(String(src == null ? '' : src)); }
-  catch (_) { return String(src == null ? '' : src).toLowerCase().includes(e.toLowerCase()); }
+  // Tag tokens sit glued to the words they wrap ("O-1-0Family PairingC-1-0") — turn them into
+  // spaces first, or the word-boundary check misses every term inside a tag.
+  const s = String(src == null ? '' : src).replace(TAG_TOK_G, ' ');
+  try { return new RegExp('(?<![A-Za-z0-9])' + lockEsc(e) + '(?![A-Za-z0-9])', 'i').test(s); }
+  catch (_) { return s.toLowerCase().includes(e.toLowerCase()); }
 }
 // Does the target contain the required HE? Allow a fused prefix (the term still appears
 // verbatim after ב/ל/מ/ו/ש/כ) and the definite-ה dropping after a prefix (ההגדרות→בהגדרות).
