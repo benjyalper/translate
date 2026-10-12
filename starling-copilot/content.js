@@ -13,7 +13,7 @@
   // tab is running an older version, re-injects this file via chrome.scripting so stale tabs
   // self-heal (no page reload needed). Re-injection tears down the previous version's message
   // listener first (below) so there's never a double-listener race.
-  const CS_VERSION = 44;
+  const CS_VERSION = 45;
   if (window.__scVer === CS_VERSION) return;                         // this exact version already live here
   if (typeof window.__scCleanup === 'function') { try { window.__scCleanup(); } catch (e) {} }  // remove an older/stale one
   window.__scVer = CS_VERSION;
@@ -500,7 +500,9 @@
     return { pieces, tags };
   }
   const pieceKey = (s) => String(s == null ? '' : s).replace(/\u00a0/g, ' ').replace(/[\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF]/g, '').replace(/\s+/g, ' ').trim();
-  const pieceExact = (s) => String(s == null ? '' : s).replace(/\u00a0/g, ' ').replace(/[\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF]/g, '');
+  // pieceKey (has the cell changed since harvest?) ignores invisible marks; pieceExact (what to write, did it land?)
+  // keeps them \u2014 an RLM-only edit (ruling 15) is a real change (silently skipped on task 538298015746 #47).
+  const pieceExact = (s) => String(s == null ? '' : s).replace(/\u00a0/g, ' ');
   // Replace piece i (between tag i-1 and tag i) with text. Returns false if the editor refused.
   function setPiece(ed, i, text) {
     const d = domPieces(ed); if (!d) return false;

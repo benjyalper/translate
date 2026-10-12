@@ -28,7 +28,7 @@ sec('Term matching sees through Starling tag tokens');
 sec('Tag tokens end at their last digit (a number right after a tag is text)');
 {
   const grab = (re) => PANEL.match(re)[0];
-  const edit = new Function('const sameRender = (a, b) => a === b;' + grab(/const TAG_SPLIT = [^\n]+\n/) + grab(/function taggedPartsEdit[\s\S]*?\n}\n/) + ';return taggedPartsEdit;')();
+  const edit = new Function('const sameRender = (a, b) => a === b; const sameText = sameRender;' + grab(/const TAG_SPLIT = [^\n]+\n/) + grab(/function taggedPartsEdit[\s\S]*?\n}\n/) + ';return taggedPartsEdit;')();
   const runs = new Function(grab(/function stripTags[\s\S]*?\n}\n/) + grab(/function splitTagRuns[\s\S]*?\n}\n/) + ';return splitTagRuns;')();
   // Task 530532593922 #14: "O-1-040%" was read as token O-1-040 + "%", so ✍ skipped the row.
   const old = "באפשרותך לאסוף עד O-1-040% מפרסי השידור החי שלך, C-1-0אשר יוצגו תחת 'פרסים זמינים'.";
@@ -47,7 +47,7 @@ sec('Tag tokens end at their last digit (a number right after a tag is text)');
 sec('🏷 Tag check and Write tags (rows whose tags must be added or moved)');
 {
   const grab = (re) => PANEL.match(re)[0];
-  const lib = new Function('const sameRender = (a, b) => a === b;' + grab(/const TAG_SPLIT = [^\n]+\n/) + grab(/function taggedPartsEdit[\s\S]*?\n}\n/) +
+  const lib = new Function('const sameRender = (a, b) => a === b; const sameText = sameRender;' + grab(/const TAG_SPLIT = [^\n]+\n/) + grab(/function taggedPartsEdit[\s\S]*?\n}\n/) +
     grab(/const TAG_TYPED = [^\n]+\n/) + grab(/function tagList[^\n]+\n/) + grab(/function tagCheck[\s\S]*?\n}\n/) + grab(/function tagFixEdit[\s\S]*?\n}\n/) +
     ';return { tagCheck, tagFixEdit };')();
   const src = 'Check out O-1-0Configure LIVE settings in LIVE StudioC-1-0';
@@ -75,6 +75,25 @@ sec('🏷 Tag check and Write tags (rows whose tags must be added or moved)');
   ok('harvest runs the tag check', /runCoverage\(\);[^\n]*\n\s*renderTagCheck\(\);/.test(PANEL));
 }
 
+sec('Invisible-mark-only edits are written (task 538298015746 #47: RLM after "STEM")');
+{
+  const grab = (re) => PANEL.match(re)[0];
+  const sameRender = new Function(grab(/function renderNorm[\s\S]*?\n}\n/) + grab(/function sameRender[^\n]+\n/) + ';return sameRender;')();
+  const lib = new Function('const sameRender = arguments[0];' + grab(/const TAG_SPLIT = [^\n]+\n/) + grab(/const sameText = [^\n]+\n/) + grab(/function taggedPartsEdit[\s\S]*?\n}\n/) +
+    grab(/const TAG_TYPED = [^\n]+\n/) + grab(/function tagList[^\n]+\n/) + grab(/function tagCheck[\s\S]*?\n}\n/) + grab(/function tagFixEdit[\s\S]*?\n}\n/) +
+    ';return { taggedPartsEdit, tagFixEdit };')(sameRender);
+  const old = 'קבע/י אם בן/בת הנוער שלך יוכל/תוכל לצפות בO-1-0פיד STEM (מדעים, טכנולוגיה, הנדסה ומתמטיקה)C-1-0.';
+  const next = 'קבע/י אם בן/בת הנוער שלך יוכל/תוכל לצפות בO-1-0פיד STEM‏ (מדעים, טכנולוגיה, הנדסה ומתמטיקה)C-1-0.';
+  ok('the two texts render the same (why it slipped through)', sameRender(old, next));
+  const e = lib.taggedPartsEdit({ manual: true, seg: '47', old, next });
+  ok('✍ now offers the RLM-only row', !!e && e.parts === 1 && e.newPieces[1].includes('‏'));
+  ok('…and an unchanged row is still skipped', lib.taggedPartsEdit({ manual: true, seg: '1', old, next: old }) === null);
+  const CONTENT = fs.readFileSync(path.join(__dirname, '..', 'content.js'), 'utf8');
+  const pk = new Function(CONTENT.match(/  const pieceKey = [^\n]+\n/)[0] + CONTENT.match(/  const pieceExact = [^\n]+\n/)[0] + ';return { pieceKey, pieceExact };')();
+  ok('content.js pieceExact keeps the RLM (so the write happens and is verified)', pk.pieceExact('STEM‏ (') !== pk.pieceExact('STEM ('));
+  ok('…while pieceKey (the since-harvest check) still ignores it', pk.pieceKey('STEM‏ (') === pk.pieceKey('STEM ('));
+}
+
 sec('🏷 Place tags (the model only places tags; wording must not change)');
 (async () => {
   const grab = (re) => PANEL.match(re)[0];
@@ -82,7 +101,7 @@ sec('🏷 Place tags (the model only places tags; wording must not change)');
     grab(/function tagCheck[\s\S]*?\n}\n/) + grab(/function tagFixEdit[\s\S]*?\n}\n/) + grab(/const TAG_TYPED_G = [^\n]+\n/) + grab(/function tagTextOnly[^\n]+\n/) +
     grab(/function tagPlaceOk[^\n]+\n/) + grab(/const TAG_PLACE_SYS =[\s\S]*?;\n/) + grab(/async function tagPlaceLLM[\s\S]*?\n}\n/) + grab(/async function doPlaceTags[\s\S]*?\n}\n/);
   const env = { infos: [], sent: null, confirmMsg: '' };
-  const make = new Function('env', 'state', 'const sameRender = (a, b) => a === b; let revFilter = "changed";' +
+  const make = new Function('env', 'state', 'const sameRender = (a, b) => a === b; const sameText = sameRender; let revFilter = "changed";' +
     'const $ = (id) => (env.els[id] = env.els[id] || { hidden: true, disabled: false, value: id === "model" ? "claude-opus-5" : "" });' +
     'const info = (id, msg, cls) => env.infos.push([id, msg, cls]); const log = () => {}; const renderReview = () => { env.rendered = revFilter; };' +
     'const store = { get: async (k, d) => d }; const llmCost = () => 0.004; const isPromptCtx = () => false; const confirm = (m) => { env.confirmMsg = m; return true; };' +

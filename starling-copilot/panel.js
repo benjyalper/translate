@@ -1939,8 +1939,11 @@ async function doImportClaude(file) {
 // Only rows whose old and new text carry the SAME tag tokens in the same order qualify; a row whose
 // tags must be added/moved (e.g. the translation lost them) stays paste-by-hand.
 const TAG_SPLIT = /[OC]-\d+-\d/g;
+// Write paths compare EXACTLY: an invisible-mark-only edit (an RLM for ruling 15) is a real change. sameRender
+// ignores those marks, and task 538298015746 #47 (RLM after "STEM") was silently skipped because of it.
+const sameText = (a, b) => String(a == null ? '' : a) === String(b == null ? '' : b);
 function taggedPartsEdit(p) {
-  if (!p || !p.manual || p.partsDone || sameRender(p.next, p.old)) return null;
+  if (!p || !p.manual || p.partsDone || sameText(p.next, p.old)) return null;
   const a = String(p.old || ''), b = String(p.next || '');
   const ta = (a.match(TAG_SPLIT) || []).join('|'), tb = (b.match(TAG_SPLIT) || []).join('|');
   if (!ta || ta !== tb) return null;                                   // no tags, or tag layout changes
@@ -1955,7 +1958,7 @@ async function doWriteTagged() {
   const t = await activeTab();
   if (!t || !/\/doc\/editor\//.test(t.url || '')) { info('wtp-info', 'Open the task in Starling\'s document editor first (…/doc/editor/…).', 'err'); return; }
   const list = (state.proposals || []).map((p) => ({ p, e: taggedPartsEdit(p) })).filter((x) => x.e);
-  const left = (state.proposals || []).filter((p) => p.manual && !p.partsDone && !sameRender(p.next, p.old)).length - list.length;
+  const left = (state.proposals || []).filter((p) => p.manual && !p.partsDone && !sameText(p.next, p.old)).length - list.length;
   if (!list.length) { info('wtp-info', 'No tagged rows this can write' + (left ? ` (${left} need their tags added or moved — use 🏷 Write tags below, or paste those by hand)` : '') + '.', 'err'); return; }
   const parts = list.reduce((n, x) => n + x.e.parts, 0);
   if (!confirm(`Write ${parts} changed part(s) in ${list.length} tagged segment(s): ${list.map((x) => '#' + x.e.seg).join(', ')}?
@@ -2009,7 +2012,7 @@ function tagCheck(src, tgt) {
   return { missing, extra, broken, typed, note };
 }
 function tagFixEdit(p) {
-  if (!p || !p.manual || p.tagsDone || p.partsDone || sameRender(p.next, p.old)) return null;
+  if (!p || !p.manual || p.tagsDone || p.partsDone || sameText(p.next, p.old)) return null;
   if (taggedPartsEdit(p)) return null;                                 // same tag layout → ✍ writes it
   const a = String(p.old || ''), b = String(p.next || '');
   if (/[①-⑳❶-➓⓪]/.test(a + b)) return null;                           // circled-marker form: not this writer
@@ -3120,7 +3123,7 @@ function wbBuildIndex() {
 }
 const WB_FIELDS = [['key', 'Key'], ['valid', 'Valid (Y/N)'], ['final', 'Final Translation'], ['src', 'Source (EN)'], ['tgt', 'Current target'], ['lang', 'Language'], ['updated', 'Updated on Starling']];
 const STAR_KEY_URL = 'https://starling.bytedance.com/#/all-task?pageNum=1&pageSize=10&progress=all&translateTypeList=%5B%5D&sortType=1&order=0&sourceLocales=en&targetLocales=he-IL&textKeys=';
-const CS_EXPECT = 44;   // must match content.js CS_VERSION
+const CS_EXPECT = 45;   // must match content.js CS_VERSION
 
 // Direct call surface — invokes the page's window.__wb.* via chrome.scripting.executeScript.
 // This bypasses chrome.runtime messaging entirely, so a stale/duplicate content-script
