@@ -1683,6 +1683,7 @@ async function doHarvest() {
     log(`harvest: ${state.segments.length}/${all.length} segments${sel ? ' (filtered)' : ''}, ${tagged} tagged, ${chips} chips${recovered ? `, ${recovered} api-recovered` : ''}`);
     $('gpt-card').hidden = state.segments.length === 0;
     runCoverage();   // preview which stored terms will guide the run
+    renderTagCheck();   // 🏷 rows whose target tags don't mirror the source (read-only)
     if (!all.length) info('harvest-info', 'No segments found — run Diagnostics in Settings to recalibrate selectors.', 'err');
   } catch (e) {
     info('harvest-info', e.message, 'err');
@@ -1955,7 +1956,7 @@ async function doWriteTagged() {
   if (!t || !/\/doc\/editor\//.test(t.url || '')) { info('wtp-info', 'Open the task in Starling\'s document editor first (…/doc/editor/…).', 'err'); return; }
   const list = (state.proposals || []).map((p) => ({ p, e: taggedPartsEdit(p) })).filter((x) => x.e);
   const left = (state.proposals || []).filter((p) => p.manual && !p.partsDone && !sameRender(p.next, p.old)).length - list.length;
-  if (!list.length) { info('wtp-info', 'No tagged rows this can write' + (left ? ` (${left} need their tags added or moved — paste those by hand)` : '') + '.', 'err'); return; }
+  if (!list.length) { info('wtp-info', 'No tagged rows this can write' + (left ? ` (${left} need their tags added or moved — use 🏷 Write tags below, or paste those by hand)` : '') + '.', 'err'); return; }
   const parts = list.reduce((n, x) => n + x.e.parts, 0);
   if (!confirm(`Write ${parts} changed part(s) in ${list.length} tagged segment(s): ${list.map((x) => '#' + x.e.seg).join(', ')}?
 
@@ -1980,6 +1981,77 @@ Keep the Starling tab visible while it runs.`)) return;
     info('wtp-info', `✍ ${ok} of ${list.length} tagged segment(s) written${bad.length ? ` · ⚠ ${bad.length} not written (${bad.join(', ')}) — see each card, paste those by hand` : ''}. Reload the Starling tab and Harvest again to confirm they saved.`, bad.length ? 'err' : 'good');
     renderReview();
   } catch (e) { info('wtp-info', e.message, 'err'); }
+  finally { btn.disabled = false; }
+}
+
+// 🏷 TAG CHECK + WRITE TAGS (document tasks). tagCheck compares a target's O-/C- tag tokens with its
+// source's: missing, extra, a closing tag before its opening one, or a tag typed as text ("<6|…|6>").
+// Order between different tag pairs may differ — Hebrew word order moves them. tagFixEdit picks the
+// rows ✍ can't write (tags must be ADDED or MOVED) whose new text mirrors the source's tags;
+// content.js writeTags rebuilds those cells left to right, inserting each tag by clicking the
+// matching source tag (Starling's own insert; verified live 12 Oct, task 515492506370 #31).
+const TAG_TYPED = /<\d+\||\|\d+>/;
+function tagList(s) { return String(s == null ? '' : s).match(TAG_SPLIT) || []; }
+function tagCheck(src, tgt) {
+  const s = tagList(src), t = tagList(tgt);
+  const typed = TAG_TYPED.test(String(tgt == null ? '' : tgt)) && !TAG_TYPED.test(String(src == null ? '' : src));
+  if (!s.length && !t.length) return null;
+  const extra = t.slice(), missing = [];
+  for (const x of s) { const i = extra.indexOf(x); if (i >= 0) extra.splice(i, 1); else missing.push(x); }
+  const broken = t.filter((x, i) => x[0] === 'C' && !(t.indexOf('O' + x.slice(1)) >= 0 && t.indexOf('O' + x.slice(1)) < i));
+  if (!missing.length && !extra.length && !broken.length && !typed) return null;
+  const note = [
+    missing.length ? `has ${t.length - extra.length} of ${s.length} tags` : '',
+    extra.length ? `extra ${extra.join(' ')}` : '',
+    broken.length ? `${broken.join(' ')} before its opening tag` : '',
+    typed ? 'tag typed as text' : ''
+  ].filter(Boolean).join(', ');
+  return { missing, extra, broken, typed, note };
+}
+function tagFixEdit(p) {
+  if (!p || !p.manual || p.tagsDone || p.partsDone || sameRender(p.next, p.old)) return null;
+  if (taggedPartsEdit(p)) return null;                                 // same tag layout → ✍ writes it
+  const a = String(p.old || ''), b = String(p.next || '');
+  if (/[①-⑳❶-➓⓪]/.test(a + b)) return null;                           // circled-marker form: not this writer
+  if (!tagList(p.src).length || tagCheck(p.src, b)) return null;       // the new text must mirror the source's tags
+  return { seg: p.seg, oldText: a, newText: b };
+}
+function renderTagCheck() {
+  const segs = state.segments || [];
+  const rows = segs.map((s) => ({ s, c: tagCheck(s.src, s.tgt) })).filter((x) => x.c);
+  state.tagIssues = rows.map((x) => Object.assign({ seg: x.s.seg }, x.c));
+  if (!rows.length) { info('tag-info', segs.some((s) => tagList(s.src).length) ? '🏷 Tags: every target mirrors its source tags.' : '', 'good'); return; }
+  info('tag-info', `🏷 ${rows.length} row(s) whose tags don't mirror the source: ${rows.slice(0, 25).map((x) => `#${x.s.seg} (${x.c.note})`).join(' · ')}${rows.length > 25 ? ' …' : ''}. Rows with a Claude edit can be rebuilt with 🏷 Write tags in step 4; fix the others by hand.`, 'err');
+  log(`tag-check: ${rows.length} row(s) — ${rows.map((x) => '#' + x.s.seg).join(' ')}`);
+}
+async function doWriteTags() {
+  const mm = await harvestTabMismatch();
+  if (mm) { info('wtg-info', mm, 'err'); return; }
+  const t = await activeTab();
+  if (!t || !/\/doc\/editor\//.test(t.url || '')) { info('wtg-info', 'Open the task in Starling\'s document editor first (…/doc/editor/…).', 'err'); return; }
+  const list = (state.proposals || []).map((p) => ({ p, e: tagFixEdit(p) })).filter((x) => x.e);
+  if (!list.length) { info('wtg-info', 'No rows need their tags added or moved (or their new text doesn\'t carry the source\'s tags — those stay paste-by-hand).', 'err'); return; }
+  if (!confirm(`Rebuild ${list.length} tagged segment(s) with their tags: ${list.map((x) => '#' + x.e.seg).join(', ')}?
+
+Each cell is cleared and rebuilt from left to right: the text is entered and every tag is inserted by clicking the matching source tag, as you would by hand. The result is compared with the approved text; if it doesn't match, the old text is put back and the row stays paste-by-hand.
+
+Keep the Starling tab visible while it runs.`)) return;
+  const btn = $('write-tags'); btn.disabled = true;
+  info('wtg-info', `Rebuilding ${list.length} segment(s)…`);
+  try {
+    const r = await send({ type: 'WRITE_TAGS', edits: list.map((x) => x.e) });
+    if (!r || !r.ok) throw new Error((r && r.error) || 'no reply from the page');
+    const bySeg = new Map((r.results || []).map((x) => [String(x.seg), x]));
+    let ok = 0; const bad = [];
+    for (const { p } of list) {
+      const x = bySeg.get(String(p.seg));
+      if (x && x.ok) { p.tagsDone = true; p.tagsNote = ''; ok++; }
+      else { p.tagsNote = (x && x.reason) || 'no result'; bad.push('#' + p.seg); }
+    }
+    log(`write-tags: ${ok}/${list.length} ok${bad.length ? ', failed ' + bad.join(' ') : ''}`);
+    info('wtg-info', `🏷 ${ok} of ${list.length} segment(s) rebuilt with their tags${bad.length ? ` · ⚠ ${bad.length} not written (${bad.join(', ')}) — see each card, paste those by hand` : ''}. Reload the Starling tab and Harvest again to confirm they saved.`, bad.length ? 'err' : 'good');
+    renderReview();
+  } catch (e) { info('wtg-info', e.message, 'err'); }
   finally { btn.disabled = false; }
 }
 
@@ -2065,6 +2137,7 @@ function renderReview() {
         ${p.flag ? `<span class="rc-warn" title="${esc(p.flag)}" style="background:#7a5c0a">⚠ register</span>` : ''}
         ${p.lockMiss ? `<span class="rc-warn" style="background:#b91c1c" title="MANDATORY locked term missing from the target — must be rendered exactly (a prefix is OK): ${esc(p.lockMiss.join(' · '))}. Fix the Hebrew, then this clears.">🔒 locked term</span>` : ''}
         ${p.partsDone ? '<span class="rc-warn" style="background:#0a7a3f" title="The changed parts were written between the tags by ✍ Write tagged parts.">✍ tags written</span>' : (p.partsNote ? `<span class="rc-warn" style="background:#b45309" title="${esc(p.partsNote)}">✍ not written — paste by hand</span>` : '')}
+        ${p.tagsDone ? '<span class="rc-warn" style="background:#0a7a3f" title="The cell was rebuilt with its tags by 🏷 Write tags.">🏷 tags rebuilt</span>' : (p.tagsNote ? `<span class="rc-warn" style="background:#b45309" title="${esc(p.tagsNote)}">🏷 not rebuilt — paste by hand</span>` : '')}
         ${p.comments ? `<span class="rc-warn" style="background:#1e3a8a" title="Starling comment on this string (sent to the model as authoritative context): ${esc(p.comments)}">💬 comment</span>` : ''}
         ${p.rbFind ? `<span class="rc-warn" style="background:${p.rbFind.some((f) => f.severity === 'error') ? '#9f1239' : '#6b21a8'}" title="Rulebook (rulings of 28 Sep): ${esc(p.rbFind.map((f) => f.msg).join(' · '))}">🧾 rulebook ×${p.rbFind.length}</span>` : ''}
         ${p.fixApplied ? `<span class="rc-warn" style="background:#0e7490" title="Auto-corrected by your locked 🩹 Auto-fix rules: ${esc(p.fixApplied.join(' · '))}. Edit the text to revert.">✎ auto-fixed</span>` : ''}
@@ -2980,7 +3053,7 @@ function wbBuildIndex() {
 }
 const WB_FIELDS = [['key', 'Key'], ['valid', 'Valid (Y/N)'], ['final', 'Final Translation'], ['src', 'Source (EN)'], ['tgt', 'Current target'], ['lang', 'Language'], ['updated', 'Updated on Starling']];
 const STAR_KEY_URL = 'https://starling.bytedance.com/#/all-task?pageNum=1&pageSize=10&progress=all&translateTypeList=%5B%5D&sortType=1&order=0&sourceLocales=en&targetLocales=he-IL&textKeys=';
-const CS_EXPECT = 43;   // must match content.js CS_VERSION
+const CS_EXPECT = 44;   // must match content.js CS_VERSION
 
 // Direct call surface — invokes the page's window.__wb.* via chrome.scripting.executeScript.
 // This bypasses chrome.runtime messaging entirely, so a stale/duplicate content-script
@@ -7227,6 +7300,7 @@ async function init() {
 
   $('harvest').addEventListener('click', doHarvest);
   if ($('write-tagged')) $('write-tagged').addEventListener('click', doWriteTagged);
+  if ($('write-tags')) $('write-tags').addEventListener('click', doWriteTags);
   if ($('export-claude')) $('export-claude').addEventListener('click', doExportForClaude);
   if ($('import-claude')) $('import-claude').addEventListener('change', (ev) => { const f = ev.target.files && ev.target.files[0]; ev.target.value = ''; if (f) doImportClaude(f); });
   $('xliff-file').addEventListener('change', (e) => onXliffFile(e.target));

@@ -13,7 +13,7 @@
   // tab is running an older version, re-injects this file via chrome.scripting so stale tabs
   // self-heal (no page reload needed). Re-injection tears down the previous version's message
   // listener first (below) so there's never a double-listener race.
-  const CS_VERSION = 43;
+  const CS_VERSION = 44;
   if (window.__scVer === CS_VERSION) return;                         // this exact version already live here
   if (typeof window.__scCleanup === 'function') { try { window.__scCleanup(); } catch (e) {} }  // remove an older/stale one
   window.__scVer = CS_VERSION;
@@ -553,6 +553,113 @@
     if (!/\/doc\/editor\//.test(location.href)) return { ok: false, error: 'Write tagged parts works in the document editor only.' };
     const results = [];
     for (const e of edits) { results.push(await writePartsOne(e)); await sleep(150); }
+    return { ok: true, results };
+  }
+  // 🏷 WRITE TAGS (document editor only) — rebuild a cell whose tags must be ADDED or MOVED, which
+  // ✍ can't do. Starling inserts a tag at the caret when you click that tag in the SOURCE cell, but it
+  // only knows where the caret is once the target has seen selectionchange + mouseup/keyup/click
+  // (without them the tag lands at position 0). Verified live 12 Oct 2026 (task 515492506370 #31).
+  // The cell re-renders after every change, so it is re-queried before each step.
+  // edit = { seg, oldText, newText } — text with O-/C- tokens.
+  const TAG_PART = /([OC]-\d+-\d)/;
+  // Cell as text + tag tokens; null when it holds other markup (a trailing <br> placeholder is ignored).
+  function cellText(ed) {
+    let s = '';
+    for (const n of ed.childNodes) {
+      if (n.nodeType === 3) s += n.nodeValue;
+      else if (isEditTag(n)) s += n.getAttribute('data-tag') || '';
+      else if (n.nodeName === 'BR' && n === ed.lastChild) continue;
+      else return null;
+    }
+    return s;
+  }
+  function edForSeg(seg) {
+    const cell = cellForSeg(seg);
+    if (!cell) return null;
+    return (cell.matches && cell.matches(CFG.editor)) ? cell : cell.querySelector(CFG.editor);
+  }
+  function srcTagFor(seg, tok) {
+    const cell = cellForSeg(seg), row = cell && rowFor(cell);
+    const src = row && row.querySelector(CFG.sourceCell);
+    return src ? [...src.querySelectorAll('img')].find((i) => isEditTag(i) && i.getAttribute('data-tag') === tok) || null : null;
+  }
+  const fire = (el, type) => el.dispatchEvent(type === 'keyup' ? new KeyboardEvent('keyup', { bubbles: true, key: 'End' }) : new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+  // Put the caret at the end of the cell and make Starling register it. Starling picks the caret up
+  // asynchronously: without the wait, a tag click right after still uses its PREVIOUS selection (after
+  // the clear, that was select-all — the tag replaced the whole cell; found live 12 Oct).
+  async function caretToEnd(ed) {
+    ed.focus();
+    const r = document.createRange();
+    if (ed.lastChild && ed.lastChild.nodeName === 'BR') r.setStartBefore(ed.lastChild); else { r.selectNodeContents(ed); r.collapse(false); }
+    r.collapse(true);
+    const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    document.dispatchEvent(new Event('selectionchange'));
+    for (const t of ['mouseup', 'keyup', 'click']) fire(ed, t);
+    await sleep(150);
+    return document.activeElement === ed;
+  }
+  // Clear the cell, then enter `text` left to right: text pieces via insertText, tags by clicking the
+  // matching source tag. Returns '' on success, else the reason it stopped.
+  async function fillCell(seg, text) {
+    let ed = edForSeg(seg);
+    if (!ed) return 'the cell disappeared';
+    ed.focus();
+    const r = document.createRange(); r.selectNodeContents(ed);
+    const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    if (document.activeElement !== ed) return 'could not focus the cell';
+    if (ed.childNodes.length && !document.execCommand('delete', false)) return 'the editor refused to clear the cell';
+    await sleep(120);
+    for (const part of String(text).split(TAG_PART)) {
+      if (!part) continue;
+      ed = edForSeg(seg);
+      if (!ed) return 'the cell disappeared';
+      if (!(await caretToEnd(ed))) return 'the cell lost focus';
+      if (TAG_PART.test(part)) {
+        const img = srcTagFor(seg, part);
+        if (!img) return `source tag ${part} not found`;
+        for (const t of ['mousedown', 'mouseup', 'click']) fire(img, t);
+        await sleep(150);
+        const now = cellText(edForSeg(seg) || ed);
+        if (now == null || !now.endsWith(part)) return `tag ${part} did not land at the cursor`;
+      } else {
+        if (!document.execCommand('insertText', false, part)) return 'the editor refused the text';
+        await sleep(80);
+      }
+    }
+    return '';
+  }
+  async function writeTagsOne(edit) {
+    const { seg } = edit;
+    const oldT = String(edit.oldText == null ? '' : edit.oldText), newT = String(edit.newText == null ? '' : edit.newText);
+    try {
+      const cell = await scrollToSeg(seg);
+      if (!cell) return { seg, ok: false, reason: 'row not found' };
+      let ed = edForSeg(seg);
+      if (!ed) return { seg, ok: false, reason: 'no editable cell' };
+      const cur = cellText(ed);
+      if (cur == null) return { seg, ok: false, reason: 'cell has markup this writer does not handle' };
+      if (pieceKey(cur) !== pieceKey(oldT)) return { seg, ok: false, reason: 'the cell changed since harvest' };
+      if (pieceExact(cur) === pieceExact(newT)) return { seg, ok: true, already: true };
+      for (const tok of newT.match(/[OC]-\d+-\d/g) || []) if (!srcTagFor(seg, tok)) return { seg, ok: false, reason: `the source has no tag ${tok}` };
+      const restorable = (cur.match(/[OC]-\d+-\d/g) || []).every((tok) => srcTagFor(seg, tok));
+      const err = await fillCell(seg, newT);
+      ed = edForSeg(seg);
+      const after = ed ? cellText(ed) : null;
+      if (!err && after != null && pieceExact(after) === pieceExact(newT)) { ed.blur(); await sleep(250); return { seg, ok: true }; }
+      // Put the original back (same method), then report the row as failed.
+      let restored = false;
+      if (restorable) { await fillCell(seg, cur); const back = edForSeg(seg); restored = !!back && pieceExact(cellText(back) || '') === pieceExact(cur); }
+      const b = edForSeg(seg); if (b) b.blur();
+      await sleep(250);
+      return { seg, ok: false, reason: (err || 'the cell did not end up as expected') + (restored ? ' — original text restored' : ' — ⚠ could NOT restore the original, check this row by hand') };
+    } catch (e) {
+      return { seg, ok: false, reason: String(e && e.message || e) };
+    }
+  }
+  async function writeTags(edits) {
+    if (!/\/doc\/editor\//.test(location.href)) return { ok: false, error: 'Write tags works in the document editor only.' };
+    const results = [];
+    for (const e of edits) { results.push(await writeTagsOne(e)); await sleep(150); }
     return { ok: true, results };
   }
   // Reveal a segment for the human: scroll it into view, click to mount the editor, and
@@ -1492,6 +1599,7 @@
           case 'HARVEST': sendResponse({ ok: true, segments: await harvest() }); break;
           case 'WRITE': sendResponse({ ok: true, results: await writeAll(msg.edits || []) }); break;
           case 'WRITE_PARTS': sendResponse(await writeParts(msg.edits || [])); break;
+          case 'WRITE_TAGS': sendResponse(await writeTags(msg.edits || [])); break;
           case 'HARVEST_PLURALS': sendResponse(await apiPlurals(msg.taskId)); break;
           case 'WRITE_PLURAL': sendResponse(await writePlural(msg.edit || {})); break;
           case 'CONFIRM_ALL': sendResponse(await confirmAll(msg.ignoreNormal !== false)); break;

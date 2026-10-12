@@ -44,6 +44,37 @@ sec('Tag tokens end at their last digit (a number right after a tag is text)');
   ok('panel CS_EXPECT matches content.js CS_VERSION', !!csv && PANEL.includes('const CS_EXPECT = ' + csv + ';'));
 }
 
+sec('🏷 Tag check and Write tags (rows whose tags must be added or moved)');
+{
+  const grab = (re) => PANEL.match(re)[0];
+  const lib = new Function('const sameRender = (a, b) => a === b;' + grab(/const TAG_SPLIT = [^\n]+\n/) + grab(/function taggedPartsEdit[\s\S]*?\n}\n/) +
+    grab(/const TAG_TYPED = [^\n]+\n/) + grab(/function tagList[^\n]+\n/) + grab(/function tagCheck[\s\S]*?\n}\n/) + grab(/function tagFixEdit[\s\S]*?\n}\n/) +
+    ';return { tagCheck, tagFixEdit };')();
+  const src = 'Check out O-1-0Configure LIVE settings in LIVE StudioC-1-0';
+  ok('a target that mirrors the source tags passes', lib.tagCheck(src, 'עיין/י במאמר O-1-0קביעת התצורה של הגדרות ב-LIVE StudioC-1-0') === null);
+  const typed = lib.tagCheck(src, 'עיין/י במאמר <6|קביעת התצורה של הגדרות ב-LIVE Studio.|6>');
+  ok('task 515492506370 #31: tags typed as text, none real', !!typed && typed.typed && typed.missing.length === 2 && /0 of 2 tags/.test(typed.note) && /typed as text/.test(typed.note));
+  ok('an extra tag the source lacks is reported', (lib.tagCheck('aO-1-0bC-1-0', 'aO-1-0bC-1-0O-2-0cC-2-0') || {}).extra.join(' ') === 'O-2-0 C-2-0');
+  ok('a closing tag before its opening tag is reported', (lib.tagCheck('O-1-0aC-1-0', 'C-1-0aO-1-0') || {}).broken.join(' ') === 'C-1-0');
+  ok('tag pairs in a different order are fine (Hebrew word order)', lib.tagCheck('O-1-0aC-1-0 O-2-0bC-2-0', 'O-2-0בC-2-0 O-1-0אC-1-0') === null);
+  ok('untagged rows are not checked', lib.tagCheck('plain', 'פשוט') === null);
+  const p5 = { manual: true, seg: '5', src: 'introduce O-1-0Scaled LIVE rewards C-1-0—O-2-0 C-2-0an opportunity', old: 'להציג "פרסי שידור חי מותאמים" — הזדמנות', next: 'להציג O-1-0פרסי שידור חי מותאמים C-1-0—O-2-0 C-2-0הזדמנות' };
+  const e5 = lib.tagFixEdit(p5);
+  ok('task 530532593922 #5 (tags lost) qualifies for 🏷', !!e5 && e5.oldText === p5.old && e5.newText === p5.next);
+  ok('a same-layout row is left to ✍ Write tagged parts', lib.tagFixEdit({ manual: true, seg: '14', src: 'aO-1-0bC-1-0', old: "אO-1-0בC-1-0 'x'", next: 'אO-1-0בC-1-0 "x"' }) === null);
+  ok('new text that does not mirror the source tags is refused', lib.tagFixEdit({ manual: true, seg: '1', src: 'aO-1-0bC-1-0', old: 'אב', next: 'אO-1-0ב' }) === null);
+  ok('a row already rebuilt is not offered again', lib.tagFixEdit(Object.assign({}, p5, { tagsDone: true })) === null);
+  const CONTENT = fs.readFileSync(path.join(__dirname, '..', 'content.js'), 'utf8');
+  ok('content.js answers WRITE_TAGS', /case 'WRITE_TAGS': sendResponse\(await writeTags\(/.test(CONTENT));
+  ok('the writer registers the caret before clicking a source tag', /function caretToEnd[\s\S]*?selectionchange[\s\S]*?'mouseup', 'keyup', 'click'/.test(CONTENT));
+  // Live 12 Oct: without a pause Starling still used the select-all from the clear, and the tag replaced the cell.
+  ok('…and waits for Starling to pick the caret up before the click', /async function caretToEnd[\s\S]*?'mouseup', 'keyup', 'click'[^\n]*\n\s*await sleep\(\d+\);/.test(CONTENT) && /if \(!\(await caretToEnd\(ed\)\)\)/.test(CONTENT));
+  ok('the writer restores the original cell on failure', /if \(restorable\) \{ await fillCell\(seg, cur\)/.test(CONTENT));
+  const HTML = fs.readFileSync(path.join(__dirname, '..', 'panel.html'), 'utf8');
+  ok('panel has the 🏷 Write tags button and the tag-check line', /id="write-tags"/.test(HTML) && /id="wtg-info"/.test(HTML) && /id="tag-info"/.test(HTML));
+  ok('harvest runs the tag check', /runCoverage\(\);[^\n]*\n\s*renderTagCheck\(\);/.test(PANEL));
+}
+
 sec('Prompt guarantees (Tests A/B/C live in the model prompt)');
 ok('term hints include the definition field', /if\s*\(t\.def\)\s*h\.definition/.test(SRC));
 ok('prompt sends {en,he,pos,definition} shape', /"en","he","pos","definition"/.test(SRC));

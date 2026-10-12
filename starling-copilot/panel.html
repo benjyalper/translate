@@ -339,6 +339,7 @@
       </label>
       <div class="hint" style="margin-top:6px">XLIFF gives a reliable read of every segment (no scroll-scraping). Write-back still uses the live tab.</div>
       <div id="harvest-info" class="info"></div>
+      <div id="tag-info" class="info"></div>
     </section>
 
     <!-- STEP 2 · GPT -->
@@ -392,6 +393,8 @@
       <div class="prog"><i id="write-bar"></i></div>
       <button id="write-tagged" class="btn sm ghost" style="margin-top:8px" title="Document-editor tasks: writes the changed text of ✋ paste-by-hand rows between their tags, leaving the tags untouched. Checks each row before and after; anything unexpected is put back and stays paste-by-hand.">✍ Write tagged parts (document tasks)</button>
       <div id="wtp-info" class="info"></div>
+      <button id="write-tags" class="btn sm ghost" style="margin-top:8px" title="Document-editor tasks: for ✋ rows whose tags must be ADDED or MOVED (the target lost them, or has them typed as text), rebuilds the cell from left to right — text entered, each tag inserted by clicking the matching source tag, as you would by hand. Only rows whose new text carries exactly the source's tags. Checked afterwards; on any mismatch the old text is put back.">🏷 Write tags (rows that need tags added or moved)</button>
+      <div id="wtg-info" class="info"></div>
       <hr class="sep" />
       <div class="hint">One click to finish: writes approved segments, confirms all (ignoring normal QA), then <b>submits</b> the task. Submit delivers it to the requester and can't be undone — it asks once before doing anything.</div>
       <button id="write-confirm-submit" class="btn">⚡ Write · Confirm · Submit</button>
