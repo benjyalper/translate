@@ -58,6 +58,13 @@ ok('{a} – {b} flagged', flags('{s_time1} – {s_time2}', 'בין השעות {s
 ok('$20-$30 NOT flagged', !flags('$20 – $30', '$20-$30', 'R3-range'));
 ok('clause dash NOT flagged as range', !flags('Special offer – don\'t miss it', 'הצעה מיוחדת – לא כדאי לפספס', 'R3-range'));
 ok('מעל ל- flagged', flags('$100+', 'מעל ל-100$', 'R4-threshold'));
+ok('digit 5 spelled out → flagged', flags('Valid for 5 years', 'בתוקף לחמש שנים', 'R14-digits'));
+ok('digit 1 as סרטון אחד → flagged', flags('Post 1 highlight video', 'פרסם/י סרטון נקודת שיא אחד', 'R14-digits'));
+ok('digit kept → NOT flagged', !flags('Valid for 5 years', 'בתוקף ל-5 שנים', 'R14-digits'));
+ok('dual for 2 is allowed → NOT flagged', !flags('2 days left', 'נותרו יומיים', 'R14-digits'));
+ok('spelled-out English number → NOT flagged (open question)', !flags('three tips', 'שלושה טיפים', 'R14-digits'));
+ok('number words without a source digit → NOT flagged', !flags('one of the best', 'אחד הטובים', 'R14-digits'));
+ok('placeholder digits ignored', !flags('Tap {s_1} now', 'הקש/הקישי על {s_1} עכשיו, אחת ושתיים', 'R14-digits'));
 ok('{num}k flagged', flags('{num}k views', '{num}k צפיות', 'R14-km'));
 ok('{num},000 NOT flagged', !flags('{num}k views', '{num},000 צפיות', 'R14-km'));
 ok('%{s_num} flagged', flags('({s_num}%)', '(%{s_num})', 'R-percent'));

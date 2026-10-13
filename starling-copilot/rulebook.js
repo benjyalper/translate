@@ -18,7 +18,7 @@
 })(typeof self !== 'undefined' ? self : (typeof globalThis !== 'undefined' ? globalThis : this), function () {
   'use strict';
 
-  const VERSION = '2026-10-12.2';
+  const VERSION = '2026-10-13.1';
 
   // ---- The rulings (Benjy, 2026-09-28) — machine-readable index ------------------------------
   const RULINGS = [
@@ -82,7 +82,7 @@
     '- PUNCTUATION: straight double quotes only (" "), never “ ” or single quotes. No "&" — use ו. Avoid semicolons. Few exclamation marks; never add one the source lacks. The sentence-final period MIRRORS the source exactly (added if the source has it, absent if not). SPLIT SENTENCES (a main line with a {placeholder} plus a separate bold part, keys ending _bold): mirror the period at SENTENCE level — it goes at the end of whichever Hebrew string ends the sentence. If the bold part lands mid-sentence in Hebrew, drop its period and end the main line with it (main לחיי {s_nextMilestone} הבאה. + bold אבן הדרך). Never a period mid-sentence. Ellipsis: keep the source\'s form (… or ...).\n' +
     '- UI ELEMENT NAMES inside a sentence: if the source marks the name with <b>…</b> or **…**, keep that markup around the Hebrew name and add no quotes. If the source has NO markup, translate the name and wrap it in straight double quotes, with the prefix attached directly: עבור/עברי לכרטיסייה "סדרות", מעבר ל"כולם", בלחיצה על "שליחה", אל "פרופיל" > "ההזמנות שלך". Never leave a UI element name in English.\n' +
     '- HEBREW PREFIX BEFORE A {placeholder}: decide by what the placeholder will contain, judged from its NAME. Hebrew-valued placeholders (names containing link, policy, settings, setting, page, tab, section, type, category, reason, guidelines, cg, terms, center, title, feature) → prefix attached WITHOUT hyphen: ב{s_privacyPolicy}, ל{agreementLink}, ב{s_privacySettings}. Latin- or number-valued placeholders (user, username, nickname, name, creator, author, num, count, amount, price, value, date, time, year, app, percent, id, code) → prefix WITH hyphen: ל-{s_username}, ב-{issue_date}, מ-{s_startDate}. Month, city, region and country names are localized into Hebrew at runtime → no hyphen (ב{s_month}, ב{s_city}). If unsure, use the hyphen. The same no-hyphen rule applies before a bolded or quoted HEBREW word: ב<b>פרופיל</b>, ל"כולם". A Latin word keeps the maqaf: ב-TikTok.\n' +
-    '- NUMBERS: digits, never spelled-out numbers (5 שנים, not חמש שנים). {num}k / {num}m / 5k / 2M shorthand is NOT used in Hebrew: expand to {num},000 / {num},000,000 (5,000); if the value can be a decimal, use words instead ({num} אלף, {num} מיליון). Space between a number and its unit. Hebrew dual for an exact 2 written as a word (יומיים, שעתיים) — never a numeral plus a dual ("2 יומיים").\n' +
+    '- NUMBERS: digits, never spelled-out numbers (5 שנים, not חמש שנים; 1 סרטון, not סרטון אחד, when the source has the digit). The client stressed this in an SG update (Oct 2026): a number the English writes as a digit stays a digit in Hebrew. When the English itself spells a number out ("three tips"), keep the translator\'s choice and flag it for the human — not settled yet. {num}k / {num}m / 5k / 2M shorthand is NOT used in Hebrew: expand to {num},000 / {num},000,000 (5,000); if the value can be a decimal, use words instead ({num} אלף, {num} מיליון). Space between a number and its unit. Hebrew dual for an exact 2 written as a word (יומיים, שעתיים) — never a numeral plus a dual ("2 יומיים").\n' +
     '- RANGES: a HYPHEN with no spaces between the two ends — $20-$30, 10-15, {s_time1}-{s_time2}, Rp70,000-Rp150,000. In a sentence, a date/time span may be written with words: מ-{s_startDate} עד {s_endDate}. Never an en-dash in a range.\n' +
     '- THRESHOLDS: "X+" → "X ומעלה" (inclusive: $100 ומעלה); "Under X" → "פחות מ-X" (פחות מ-$20). Never "מעל ל-" or "מתחת ל-".\n' +
     '- CURRENCY: keep the currency symbol/code exactly where the SOURCE puts it, with the same digits and grouping: $20 stays $20, Rp70,000 stays Rp70,000, 20 kr stays 20 kr. Never move a symbol from one side of the number to the other.\n' +
@@ -238,6 +238,16 @@
     // R4 — thresholds.
     if (/מעל ל-|מתחת ל-/.test(t)) add('R4-threshold', 'error', 'use "X ומעלה" / "פחות מ-X", never "מעל ל-" / "מתחת ל-"');
     // R14 — k/m shorthand.
+    // Numbers (SG, Oct 2026): a digit in the source must not become a Hebrew number word (the dual for 2 is allowed).
+    {
+      const HE_WORD = { 1: 'אחד|אחת', 3: 'שלוש|שלושה|שלושת', 4: 'ארבע|ארבעה|ארבעת', 5: 'חמש|חמישה|חמשת', 6: 'שש|שישה|ששת',
+        7: 'שבע|שבעה|שבעת', 8: 'שמונה|שמונת', 9: 'תשע|תשעה|תשעת', 10: 'עשר|עשרה|עשרת' };
+      const srcNums = new Set((s.replace(/\{[^{}]*\}|[OC]-\d+-\d/g, ' ').match(/(?<![\d.,:/$€£₪%])\d+(?![\d.,:/%])/g) || []).map(Number));
+      for (const n of srcNums) {
+        if (!HE_WORD[n] || new RegExp('(?<!\\d)' + n + '(?!\\d)').test(t)) continue;
+        if (new RegExp('(^|[^א-ת])[ובלמהכש]?(' + HE_WORD[n] + ')(?=$|[^א-ת])').test(t)) add('R14-digits', 'warn', 'the source has the digit ' + n + ' — keep it as a digit, not a Hebrew number word');
+      }
+    }
     if (/(\}|\d)[kKmM](?![A-Za-z])/.test(t)) add('R14-km', 'error', '{num}k/m shorthand → {num},000 / {num},000,000 (or אלף/מיליון)');
     // Percent after the number (LQA ×19).
     if (/%\{|%\d/.test(t) && !/%\{|%\d/.test(s)) add('R-percent', 'error', '% must stay after the number/placeholder');
