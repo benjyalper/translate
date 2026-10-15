@@ -6541,17 +6541,31 @@ async function plWrite() {
   }
   // Read back from the server: every written segment must hold exactly its own forms (catches a write
   // that landed in the wrong segment — the #27/#40 "guests" mix-up of 15 Oct).
+  // The plural boxes autosave on blur, so the last form can reach the server a moment AFTER the write
+  // returns — an immediate read flagged a correct write (#27, 15 Oct). Poll up to ~5 s before warning.
   let vbad = [];
   try {
-    const rb = await send({ type: 'HARVEST_PLURALS' });
-    if (rb && rb.ok) {
+    const written = todo.filter((x) => x.written);
+    let mism = [], readOk = false;
+    for (let attempt = 0; attempt < 6 && written.length; attempt++) {
+      if (attempt) await new Promise((res) => setTimeout(res, 900));
+      const rb = await send({ type: 'HARVEST_PLURALS' });
+      if (!rb || !rb.ok) { log('plural read-back failed: ' + ((rb && rb.error) || '?')); continue; }
+      readOk = true;
       const byRank = new Map((rb.plurals || []).map((x) => [String(x.rank), x]));
-      for (const s of todo.filter((x) => x.written)) {
+      mism = [];
+      for (const s of written) {
         const got = (byRank.get(String(s.rank)) || {}).tgtForms || {};
         const off = Object.keys(s.forms).filter((f) => normWs(got[f]) !== normWs(s.forms[f]));
-        if (off.length) { vbad.push(s.rank); s.written = false; log(`plural #${s.rank} read-back mismatch in ${off.join('/')}: ${off.map((f) => f + '=' + JSON.stringify(got[f] || '')).join(' ')}`); }
+        if (off.length) mism.push({ s, off, got });
       }
-    } else log('plural read-back failed: ' + ((rb && rb.error) || '?'));
+      if (!mism.length) break;
+    }
+    if (!readOk && written.length) log('plural read-back: could not read the task — check the written segments in Starling');
+    for (const { s, off, got } of mism) {
+      vbad.push(s.rank); s.written = false;
+      log(`plural #${s.rank} read-back mismatch in ${off.join('/')}: ${off.map((f) => f + ' saved=' + JSON.stringify(got[f] || '') + ' sent=' + JSON.stringify(s.forms[f] || '')).join(' · ')}`);
+    }
   } catch (e) { log('plural read-back error: ' + e.message); }
   info('pl-write-info', `✅ Wrote ${ok - vbad.length}${bad ? ` · ${bad} failed (see log)` : ''}${vbad.length ? ` · ⚠ #${vbad.join(', #')} did NOT read back as written — check them in Starling (see log)` : ''}`, (bad || vbad.length) ? 'err' : 'good');
   plRender();
