@@ -2360,7 +2360,7 @@ async function doWriteOne(idx, btn) {
     if (p.viaApi && !api) { btn.textContent = '✕ placeholders'; log(`write #${p.seg}: its placeholders no longer match the source — fix them or paste by hand`); return; }
     const r = await send({ type: api ? 'API_WRITE_VERIFY' : 'WRITE', edits: [{ seg: p.seg, text: p.next }] });
     const res = (r && r.results && r.results[0]) || null;
-    if (res && res.ok) { btn.textContent = '✓ written'; p.written = true; if (tmRecordOne(p.src, p.next, p.key, p.context)) await tmSave(); }   // #1 — individual Write now records key/context like bulk writes
+    if (res && res.ok) { btn.textContent = api ? '✓ saved · Ctrl+R to see' : '✓ written'; p.written = true; if (tmRecordOne(p.src, p.next, p.key, p.context)) await tmSave(); }   // #1 — individual Write now records key/context like bulk writes
     else { btn.textContent = '✕ failed'; log(`write #${p.seg} failed: ${(res && res.reason) || (r && r.error) || 'unknown'}`); }
   } catch (e) {
     btn.textContent = '✕ failed'; log(`write #${p.seg} failed: ${e.message}`);
@@ -2484,7 +2484,12 @@ async function doWrite() {
       if (bad.length) parts.push(`${bad.length} failed`);
       const allOk = domN + apiN + apiPhN + storeN === results.length && !bad.length;
       const newNote = filledSegs.size ? ` · ✍ ${newOk}/${filledSegs.size} new translation${filledSegs.size === 1 ? '' : 's'} written${newBad ? ` (${newBad} NOT written — see log)` : ''}` : '';
-      info('write-info', `✅ ${results.length} segment(s): ${parts.join(' · ')}${newNote}${remembered ? ` · 🧠 ${remembered} remembered` : ''}${skipNote}. ${allOk ? (storeN ? 'All verified — if the editor still shows old text, reload (Ctrl+R) to refresh the display.' : 'Starling’s server has them all — if the editor still shows old text, reload (Ctrl+R) to refresh the display.') : ''}`, (bad.length || newBad) ? 'err' : 'good');
+      // API-written rows (📌 placeholder rows, API rescues) are on the server but the open editor
+      // keeps its cached text until the task is re-fetched — reload the tab when everything verified,
+      // the same way ✓ Confirm all does, so the editor shows what was saved.
+      const reloadTab = allOk && (apiPhN + apiN) > 0;
+      info('write-info', `✅ ${results.length} segment(s): ${parts.join(' · ')}${newNote}${remembered ? ` · 🧠 ${remembered} remembered` : ''}${skipNote}. ${allOk ? (reloadTab ? 'All verified — reloading the Starling tab so the editor shows the API-written rows…' : storeN ? 'All verified — if the editor still shows old text, reload (Ctrl+R) to refresh the display.' : 'Starling’s server has them all — if the editor still shows old text, reload (Ctrl+R) to refresh the display.') : ''}`, (bad.length || newBad) ? 'err' : 'good');
+      if (reloadTab) { try { const t = await activeTab(); if (t) { await new Promise((res) => setTimeout(res, 700)); await chrome.tabs.reload(t.id); } } catch (e) { /* the message already says to reload by hand */ } }
     }
   } catch (e) {
     info('write-info', e.message, 'err');
