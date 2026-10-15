@@ -1185,8 +1185,13 @@ function fixApplyText(text, skipSlash) {
     // הם/הן subject precedes the match in the same string.
     const impSlash = to.indexOf('/') >= 0 && /ו$/.test(from);
     let subjRe; if (impSlash) { try { subjRe = new RegExp('(^|[^' + HEB_L + '])ה[םן](?![' + HEB_L + '])'); } catch (_) { subjRe = null; } }
+    // …nor when the word right before it is a plural subject: a noun ending ים/ות, a {placeholder}
+    // or a number — "{s_num} אנשים הצטרפו" (people have joined) is past tense, not "join!" (task
+    // 536300623362 #3 became אנשים הצטרף/י). Groups never take a slash (ruling 19).
+    const pluralSubjBefore = (before) => /(?:[א-ת]{2,}(?:ים|ות)|\}|\d)\s*$/.test(before);
     s = s.replace(re, (m, pre, vav, w, off, whole) => {
       if (impSlash && subjRe && subjRe.test(whole.slice(0, off))) return m;   // 3rd-plural subject before → past tense, leave it
+      if (impSlash && !vav && pluralSubjBefore(whole.slice(0, off + pre.length))) return m;   // plural noun / count right before → past tense
       changes.push({ from, to }); return pre + vav + to;
     });
   }
@@ -1229,7 +1234,18 @@ function promptPatternRe() {
   if (!parts.length) return null;
   try { return new RegExp(parts.join('|'), 'i'); } catch (e) { return null; }
 }
-function isPromptCtx(key) { if (PROMPT.force) return true; const re = promptPatternRe(); return !!(re && key && re.test(String(key))); }
+// "prompt" only counts as a key TOKEN (…_prompt, prompt_…, …_prompts_…) — UI strings such as
+// bbFeedCard…_followPrompt_desc or aliasEntryPoints_profile_aliasPrompt_desc are on-screen nudges
+// for the user, not text sent to an AI (task 536300623362 #2 was wrongly held as 🤖 prompt). The
+// other patterns (Tako, aigc, …) still match anywhere in the key.
+function isPromptCtx(key) {
+  if (PROMPT.force) return true;
+  const k = String(key || ''); if (!k) return false;
+  const pats = String(PROMPT.patterns || '').split(',').map((x) => x.trim()).filter(Boolean);
+  return pats.some((pt) => /^prompts?$/i.test(pt)
+    ? /(^|_)prompts?(_|$)/i.test(k)
+    : k.toLowerCase().indexOf(pt.toLowerCase()) >= 0);
+}
 // A Hebrew gender-slash form anywhere in the string (X/Y on Hebrew letters) — e.g. הפוך/הפכי,
 // לחץ/י, יוצר/ת. In a bot-directed prompt this is the signal that a user-form slipped in.
 function hasHebrewSlashForm(s) { return /[א-ת]{2,}\/[א-ת]{1,7}(?![א-ת])/.test(String(s || '')); }
@@ -6461,7 +6477,7 @@ async function plPropose(idx) {
   try {
     // Tell GPT which item is which CLDR form — the English is often IDENTICAL for one
     // and other (e.g. "{s_number} people" for both), so it can't infer the number position.
-    const plSys = 'These are two Hebrew plural forms of the SAME string (CLDR grammatical-number categories). Item i=1 is the CLDR "one" form (count exactly 1): use the SINGULAR noun and put the {placeholder} AFTER the noun ("שעה {s_num}", "אדם {s_number}"). Item i=2 is the plural form: use the plural noun with the {placeholder} BEFORE it ("{s_num} שעות", "{s_number} אנשים"). CRITICAL: "plural form" here refers ONLY to the grammatical number of the COUNTED noun. The way you ADDRESS the reader does NOT change between the two forms and must follow the normal address rule' + (plural ? ' (לשון רבים).' : ' — singular gender-neutral slash: שלך (not שלכם), המשך/המשיכי (not המשיכו), חזור/חזרי (not חזרו), עשה/עשי (not עשו).');
+    const plSys = 'These are two Hebrew plural forms of the SAME string (CLDR grammatical-number categories). Item i=1 is the CLDR "one" form (count exactly 1): use the SINGULAR noun and put the {placeholder} AFTER the noun ("שעה {s_num}", "אדם {s_number}"). Item i=2 is the plural form: use the plural noun with the {placeholder} BEFORE it ("{s_num} שעות", "{s_number} אנשים"). CRITICAL: "plural form" here refers ONLY to the grammatical number of the COUNTED noun. The way you ADDRESS the reader does NOT change between the two forms and must follow the normal address rule' + (plural ? ' (לשון רבים).' : ' — singular gender-neutral slash: שלך (not שלכם), המשך/המשיכי (not המשיכו), חזור/חזרי (not חזרו), עשה/עשי (not עשו).') + ' A verb whose SUBJECT is the counted people/items is NOT an address form: keep its normal number agreement and never add a slash ("{s_num} אנשים הצטרפו", "אדם {s_num} הצטרף").';
     const out = await gptBatch([{ i: 1, src: srcOne, tgt: s.tgtForms.one || '' }, { i: 2, src: srcOther, tgt: s.tgtForms.other || '' }], 'translate', key, model, plural, plSys, true);   // true = TikTok style guide
     const byI = {}; (out || []).forEach((o) => { if (o && o.i != null && o.text != null) byI[o.i] = o.text; });
     const heOne = polish(srcOne, byI[1] != null ? byI[1] : (s.tgtForms.one || ''));
