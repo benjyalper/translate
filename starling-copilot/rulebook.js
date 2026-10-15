@@ -299,6 +299,11 @@
     const boldPart = /_bold$/i.test(k) && endP(s) && !endP(t);
     const splitMain = /\}\s*$/.test(s) && !endP(s) && endP(t);
     if (endP(s) !== endP(t) && !boldPart && !splitMain) add('R17-period', 'warn', 'final period must mirror the source');
+    // R-newline — Starling's blue ↵: line breaks INSIDE the string must mirror the source (same count).
+    // Edge ↵ (leading/trailing) is mirrored by the write path itself (content.js withEdges, baa5bc1) and
+    // harvested targets are trimmed, so only the interior is compared here.
+    const nl = (x) => (x.trim().match(/\n/g) || []).length;
+    if (nl(s) !== nl(t)) add('R-newline', 'error', 'line breaks (blue ↵) inside the string: source has ' + nl(s) + ', target has ' + nl(t) + ' — mirror the source');
     return out;
   }
 

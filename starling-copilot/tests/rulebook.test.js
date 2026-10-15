@@ -141,6 +141,10 @@ ok('_bold part that drops its period NOT flagged', !flags('milestone.', 'אבן 
 ok('main line ending in {placeholder} that takes the period NOT flagged', !flags("Here's to the next {s_nextMilestone}", 'לחיי {s_nextMilestone} הבאה.', 'R17-period'));
 ok('ordinary string with an added period still flagged', flags('Save', 'שמירה.', 'R17-period'));
 ok('ordinary string missing its period still flagged', flags('Your post is live.', 'הפוסט שלך פורסם', 'R17-period'));
+ok('R-newline: interior line break dropped is flagged', flags('Hotline:\nMon – Fri', 'מוקד: שני – שישי', 'R-newline'));
+ok('R-newline: interior line break added is flagged', flags('Hotline: Mon – Fri', 'מוקד:\nשני – שישי', 'R-newline'));
+ok('R-newline: matching interior line breaks not flagged', !flags('Hotline:\nMon – Fri', 'מוקד:\nשני – שישי', 'R-newline'));
+ok('R-newline: trailing line break only (target trimmed by harvest) not flagged', !flags('Customer Care Hotline:\n', 'מוקד שירות לקוחות:', 'R-newline'));
 
 sec('Stored-state audit (the 2026-09-28 backup)');
 const audit = RB.auditStoredState({
