@@ -13,7 +13,7 @@
   // tab is running an older version, re-injects this file via chrome.scripting so stale tabs
   // self-heal (no page reload needed). Re-injection tears down the previous version's message
   // listener first (below) so there's never a double-listener race.
-  const CS_VERSION = 47;
+  const CS_VERSION = 48;
   if (window.__scVer === CS_VERSION) return;                         // this exact version already live here
   if (typeof window.__scCleanup === 'function') { try { window.__scCleanup(); } catch (e) {} }  // remove an older/stale one
   window.__scVer = CS_VERSION;
@@ -424,6 +424,12 @@
   // direction/zero-width marks (norm handles NBSP + trailing; this also drops RTL/LRM/BOM).
   const stripInvis = (s) => String(s == null ? '' : s).replace(/[\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF\u00AD]/g, '');
   const tgtSame = (a, b) => norm(stripInvis(a)) === norm(stripInvis(b));
+  // Edge whitespace (Starling's blue "·" trailing space / "↵" newline) must mirror the SOURCE exactly —
+  // norm() trims, so tgtSame alone accepted a saved target that had lost its trailing space (task
+  // 543853940738: 58 rows). edgesOf/withEdges/edgesOk make every write and every verify edge-exact.
+  const edgesOf = (s) => { const x = String(s == null ? '' : s); return [(x.match(/^\s*/) || [''])[0], (x.match(/\s*$/) || [''])[0]]; };
+  const withEdges = (source, text) => { const [l, t] = edgesOf(source); const core = String(text == null ? '' : text).replace(/^\s+/, '').replace(/\s+$/, ''); return core ? l + core + t : core; };
+  const edgesOk = (source, target) => { const a = edgesOf(source), b = edgesOf(target); return a[0] === b[0] && a[1] === b[1]; };
   async function writeAll(edits) {
     // 1) Type each edit into the editor — fast, and it keeps the editor's own state live.
     const dom = [];
@@ -464,7 +470,7 @@
     for (let i = 0; i < edits.length; i++) {
       const e = edits[i], d = dom[i] || { seg: e.seg };
       const row = byRank.get(String(e.seg));
-      if (row && tgtSame(row.target, e.text)) { results.push({ seg: e.seg, ok: true, via: 'dom' }); continue; }
+      if (row && tgtSame(row.target, e.text) && edgesOk(row.source, row.target)) { results.push({ seg: e.seg, ok: true, via: 'dom' }); continue; }   // edge-exact: a lost trailing ·/↵ goes to the API rescue
       rescue.push(e);
       results.push({ seg: e.seg, ok: false, via: 'pending', reason: d.reason || 'the typed text did not persist to the task' });
     }
@@ -1418,7 +1424,7 @@
           SubTaskID: String(tid), TextKey: row.key, sourceTextId: row.sourceTextId,
           FlowSequence: row.flowSequence == null ? 2 : row.flowSequence,
           IgnoreQa: ignoreQa !== false, TMScore: '0', PreTranslationType: 0,
-          targetText: { Content: String(e.text == null ? '' : e.text), OrderSourceID: row.sourceTextId, TextKey: row.key }
+          targetText: { Content: withEdges(row.source, e.text), OrderSourceID: row.sourceTextId, TextKey: row.key }   // source's edge ·/↵ mirrored
         };
         try {
           const r = await fetch(API + 'confirmTextTaskTargetV2', {
@@ -1449,7 +1455,7 @@
       if (!x || !x.ok) return { seg: e.seg, ok: false, via: 'fail', reason: (x && (x.msg || x.reason)) || (w && w.error) || 'API write failed' };
       const row = byRank && byRank.get(String(e.seg));
       if (!row) return { seg: e.seg, ok: false, via: 'unverified', reason: 'written via API, but the read-back failed' };
-      return tgtSame(row.target, e.text) ? { seg: e.seg, ok: true, via: 'apiph' }
+      return (tgtSame(row.target, e.text) && edgesOk(row.source, row.target)) ? { seg: e.seg, ok: true, via: 'apiph' }
         : { seg: e.seg, ok: false, via: 'fail', reason: 'saved target differs from what was sent: ' + String(row.target).slice(0, 120) };
     });
     return { ok: results.every((r) => r.ok), results };
