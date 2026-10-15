@@ -326,6 +326,23 @@ function splitParts(t) {
 // copy-by-hand, exactly like a DOM chip. (Not caught by the {x}/%s/<g> detector.)
 const TAG_TOK = /[OC]-\d+-\d|[①-⑳❶-➓⓪]/;              // NO /g — used with .test()
 function hasTags(s) { return TAG_TOK.test(String(s == null ? '' : s)); }
+// 📌 Placeholder chips in the STRING editor are only a rendering: the stored target is plain text
+// ("Expires on {date}" is saved as "…{date}"), so confirmTextTaskTargetV2 can write the whole string
+// byte-for-byte without touching a chip — no typing, no paste-by-hand. A chip row qualifies when it's
+// a string task (not the document editor, whose tags are real objects; state.harvestDoc must be a
+// known false), carries no O-/C- / ①… tag tokens, isn't an ICU plural/select (Scan plurals handles
+// those), and the new text keeps EXACTLY the source's placeholders ({x}, %s, <b>…) and ** bold markers.
+// Anything else stays ✋ paste-by-hand, as before. Such rows are written via the API (and confirmed).
+const ICU_RE = /\{\s*\w+\s*,\s*(plural|select|selectordinal)\s*,/;
+function chipApiSafe(s, next) {
+  if (!s || !s.chip || state.harvestDoc !== false) return false;
+  const src = String(s.src || ''), nx = String(next == null ? '' : next);
+  if (!nx.trim() || hasTags(src) || hasTags(nx) || hasTags(s.tgt)) return false;
+  if (ICU_RE.test(src) || ICU_RE.test(nx)) return false;
+  const bold = (x) => (x.match(/\*\*/g) || []).length;
+  if (!PC.phTokens(src).length && !bold(src)) return false;   // the chip isn't a text placeholder we can see — keep it manual
+  return !PC.phDiff(src, nx).length && bold(src) === bold(nx);
+}
 // Ordered signature of a string's copy-by-hand tag tokens (①…① / O-/C- pairs). Used to guard
 // applying Consistency memory to tagged segments: only substitute the stored target when it carries
 // the SAME tag tokens in the same order as the source, so the per-part Copy splitter still lines up.
@@ -1669,6 +1686,7 @@ async function doHarvest() {
       log(`harvest: task changed ${state.harvestTask} → ${newTask || '?'} — cleared the previous task's review cards`);
     }
     state.harvestTask = newTask; state.harvestAt = Date.now();
+    state.harvestDoc = /\/doc\/editor\//.test((ht && ht.url) || '');   // 📌 chipApiSafe: placeholder chips are API-writable only in string tasks
     const sel = parseSegSel($('seg-filter').value);
     state.segments = sel ? all.filter((s) => sel(s)) : all;
     const filtered = sel && state.segments.length !== all.length;
@@ -1852,9 +1870,10 @@ async function doGpt() {
               // tags. String placeholders ({0}, %s, <g id>…) are plain text GPT keeps
               // byte-for-byte, so those auto-write (⚠ placeholder badge to eyeball them).
               const tagWrapped = hasTags(next) || hasTags(s.src) || hasTags(s.tgt);
-              const manual = !!s.chip || tagWrapped;
+              const viaApi = !tagWrapped && chipApiSafe(s, next);   // 📌 placeholder-chip row → written via the API
+              const manual = (!!s.chip && !viaApi) || tagWrapped;
               const flag = (o.flag && String(o.flag).trim()) ? String(o.flag).trim() : '';
-              proposals.push({ seg: s.seg, src: s.src, old: s.tgt, next: next, tagged: !!s.tagged || tagWrapped, chip: !!s.chip, tagWrapped: tagWrapped, manual: manual, filled: gm === 'translate' && wasEmpty, flag: flag, promptCtx: !!s._promptCtx, key: s.key || '', context: s.context || '', comments: s.comments || '', fullSrc: s.fullSrc || '', shots: s.shots || [], termsUsed: s._terms || [], classified: s._classified || [], risk: s._risk || [], shotImg: imgByI.get(idx + 1) || null, approved: !manual && next !== String(s.tgt) });
+              proposals.push({ seg: s.seg, src: s.src, old: s.tgt, next: next, tagged: !!s.tagged || tagWrapped, chip: !!s.chip, tagWrapped: tagWrapped, manual: manual, viaApi: viaApi, filled: gm === 'translate' && wasEmpty, flag: flag, promptCtx: !!s._promptCtx, key: s.key || '', context: s.context || '', comments: s.comments || '', fullSrc: s.fullSrc || '', shots: s.shots || [], termsUsed: s._terms || [], classified: s._classified || [], risk: s._risk || [], shotImg: imgByI.get(idx + 1) || null, approved: !manual && next !== String(s.tgt) });
               dbg('seg', s.seg, { src: s.src, terms: (s._classified || []).map((c) => `${c.term.en}→${c.term.he}${c.term.pos ? ' (' + c.term.pos + ')' : ''} [${c.status}]${c.term.definition ? ' «' + c.term.definition + '»' : ''}`), risk: s._risk || [], key: s.key || '', hasContext: !!s.context, shotAttached: !!imgByI.get(idx + 1), out: next });
               done++;
               if (gm === 'translate' && wasEmpty) filled++;
@@ -1919,14 +1938,16 @@ async function doImportClaude(file) {
     if (e.src != null && wbFold(e.src) !== wbFold(s.src)) { drift.push(e.seg); continue; }   // source changed since export
     const next = String(e.text == null ? '' : e.text);
     const tagWrapped = hasTags(next) || hasTags(s.src) || hasTags(s.tgt);
-    const manual = !!s.chip || tagWrapped;
-    proposals.push({ seg: s.seg, src: s.src, old: s.tgt, next, tagged: !!s.tagged || tagWrapped, chip: !!s.chip, tagWrapped, manual, filled: !String(s.tgt || '').trim(), flag: e.reason ? '🟣 Claude: ' + String(e.reason) : '', promptCtx: isPromptCtx(s.key), key: s.key || '', context: s.context || '', comments: s.comments || '', fullSrc: s.fullSrc || '', shots: s.shots || [], termsUsed: [], classified: [], risk: [], shotImg: null, approved: !manual && next !== String(s.tgt) });
+    const viaApi = !tagWrapped && chipApiSafe(s, next);   // 📌 placeholder-chip row → written via the API
+    const manual = (!!s.chip && !viaApi) || tagWrapped;
+    proposals.push({ seg: s.seg, src: s.src, old: s.tgt, next, tagged: !!s.tagged || tagWrapped, chip: !!s.chip, tagWrapped, manual, viaApi, filled: !String(s.tgt || '').trim(), flag: e.reason ? '🟣 Claude: ' + String(e.reason) : '', promptCtx: isPromptCtx(s.key), key: s.key || '', context: s.context || '', comments: s.comments || '', fullSrc: s.fullSrc || '', shots: s.shots || [], termsUsed: [], classified: [], risk: [], shotImg: null, approved: !manual && next !== String(s.tgt) });
   }
   lockCheck(proposals); consistCheck(proposals); tbCheck(proposals); rbCheck(proposals); btnCheck(proposals); promptGate(proposals); phCheck(proposals);
   state.proposals = proposals;
   state.mode = j.mode || state.mode;
   const manualN = proposals.filter((p) => p.manual).length;
-  info('harvest-info', `📥 Imported ${proposals.length} Claude edit(s)${manualN ? ` · ✋ ${manualN} tagged (copy-by-hand)` : ''}${missing.length ? ` · ${missing.length} segment(s) not in this harvest: ${missing.slice(0, 8).join(', ')}` : ''}${drift.length ? ` · ⚠ ${drift.length} skipped, source changed since export: ${drift.slice(0, 8).join(', ')}` : ''}. Review below, then Write.`, (missing.length || drift.length) ? 'err' : 'good');
+  const apiN = proposals.filter((p) => p.viaApi).length;
+  info('harvest-info', `📥 Imported ${proposals.length} Claude edit(s)${apiN ? ` · 📌 ${apiN} placeholder row(s) will be written via the API` : ''}${manualN ? ` · ✋ ${manualN} tagged (copy-by-hand)` : ''}${missing.length ? ` · ${missing.length} segment(s) not in this harvest: ${missing.slice(0, 8).join(', ')}` : ''}${drift.length ? ` · ⚠ ${drift.length} skipped, source changed since export: ${drift.slice(0, 8).join(', ')}` : ''}. Review below, then Write.`, (missing.length || drift.length) ? 'err' : 'good');
   log('import-claude: ' + proposals.length + ' edits, ' + missing.length + ' missing, ' + drift.length + ' drift');
   revFilter = 'changed';
   renderReview();
@@ -2216,6 +2237,7 @@ function renderReview() {
         ${p.termHint && p.termHint.length ? p.termHint.map((c) => `<span class="rc-warn" style="background:#155e75" title="Starling term base: “${esc(c.en)}” is approved as “${esc(c.he)}”, but this target doesn't appear to use that wording. This is a SOFT hint — a different form can be correct here (e.g. the term used as a verb, or a different sense). Nothing was changed; fix by hand only if it should match.">🏷 term: ${esc(c.en)}</span>`).join('') : ''}
         ${p.termUncertain && p.termUncertain.length ? p.termUncertain.map((c) => `<span class="rc-warn" style="background:#374151" title="Term applicability uncertain: “${esc(c.en)}” (approved as “${esc(c.he)}”) appears here, but its sense/POS may differ in this occurrence (e.g. part of a longer expression like “due to”, or used as a different part of speech), so this is NOT flagged as a definite deviation. Review only if it should match.">🏷 term? ${esc(c.en)}</span>`).join('') : ''}
         ${p.icDrift ? `<span class="rc-warn" style="background:#7c2d12" title="Internal-consistency drift: ${esc(p.icDrift.reason)}. Pick which Hebrew rendering to standardize on (buttons below) — it updates EVERY segment in this task that uses this term. Flag only; nothing changes until you choose.">⚖ drift${p.icDrift.concept ? ': ' + esc(p.icDrift.concept) : ''}</span>` : ''}
+        ${p.viaApi ? '<span class="rc-warn" style="background:#0f766e" title="Placeholder chips ({x}, %s, <b>, **): in the string editor they are plain text in the saved target, so this row is written straight through Starling\'s API (no typing, chips untouched) and read back to verify. The API write also confirms the row. If you edit the text so its placeholders no longer match the source, it falls back to paste-by-hand.">📌 via API</span>' : ''}
         ${p.phMiss ? `<span class="rc-warn" style="background:#b91c1c" title="Placeholder/markup guard: a protected token changed between source and target (${esc(p.phMiss.join(' · '))}). Fix it — a removed, added, or altered placeholder must never ship.">⚠ placeholder guard</span>` : ''}
         ${p.qa && p.qa.status === 'FIX' ? `<span class="rc-warn" style="background:#4338ca" title="Independent GPT reviewer changed this — ${esc(p.qa.type)}: ${esc(p.qa.note)}. Original: ${esc(p.qaPrev || '')}">🔎 QA fix</span>` : ''}
         ${p.qa && p.qa.status === 'FLAG' ? `<span class="rc-warn" style="background:#7a5c0a" title="Reviewer flagged an issue but its rewrite was rejected (would corrupt a placeholder) — ${esc(p.qa.type)}: ${esc(p.qa.note)}. Left as translated; fix by hand.">🔎 QA flag</span>` : ''}
@@ -2317,7 +2339,10 @@ async function doWriteOne(idx, btn) {
   const prev = btn.textContent;
   btn.disabled = true; btn.textContent = '…';
   try {
-    const r = await send({ type: 'WRITE', edits: [{ seg: p.seg, text: p.next }] });
+    // 📌 placeholder-chip rows go through the API (still-matching placeholders only), never typed
+    const api = p.viaApi && chipApiSafe({ chip: true, src: p.src, tgt: p.old }, p.next);
+    if (p.viaApi && !api) { btn.textContent = '✕ placeholders'; log(`write #${p.seg}: its placeholders no longer match the source — fix them or paste by hand`); return; }
+    const r = await send({ type: api ? 'API_WRITE_VERIFY' : 'WRITE', edits: [{ seg: p.seg, text: p.next }] });
     const res = (r && r.results && r.results[0]) || null;
     if (res && res.ok) { btn.textContent = '✓ written'; p.written = true; if (tmRecordOne(p.src, p.next, p.key, p.context)) await tmSave(); }   // #1 — individual Write now records key/context like bulk writes
     else { btn.textContent = '✕ failed'; log(`write #${p.seg} failed: ${(res && res.reason) || (r && r.error) || 'unknown'}`); }
@@ -2343,22 +2368,29 @@ async function doWrite() {
   const rawNext = (p) => String(p.next == null ? '' : p.next);
   const rawOld = (p) => String(p.old == null ? '' : p.old);
   const writeNeeded = (p) => !p.manual && (p.approved || (!p.tmOverride && !p.promptHold && rawNext(p).trim() && rawNext(p) !== rawOld(p)));
-  const toWrite = (state.proposals || []).filter(writeNeeded);
-  const edits = toWrite.map((p) => ({ seg: p.seg, text: p.next }));
+  const wanted = (state.proposals || []).filter(writeNeeded);
+  // 📌 Placeholder-chip rows go through the API, not the DOM. Re-check them against the CURRENT text
+  // (an inline edit may have changed a placeholder) — any that no longer qualify are held back.
+  const apiStale = wanted.filter((p) => p.viaApi && !chipApiSafe({ chip: true, src: p.src, tgt: p.old }, p.next));
+  const toWrite = wanted.filter((p) => !apiStale.includes(p));
+  const edits = toWrite.filter((p) => !p.viaApi).map((p) => ({ seg: p.seg, text: p.next }));
+  const apiEdits = toWrite.filter((p) => p.viaApi).map((p) => ({ seg: p.seg, text: p.next }));
   // Skip accounting — nothing disappears silently: report how many segments aren't written and why.
   const wset = new Set(toWrite.map((p) => p.seg));
   const skAll = (state.proposals || []).filter((p) => !wset.has(p.seg));
   const skManual = skAll.filter((p) => p.manual).length;
   const skReview = skAll.filter((p) => !p.manual && p.tmOverride).length;   // unticked memory-review
   const skPrompt = skAll.filter((p) => !p.manual && !p.tmOverride && p.promptHold).length;   // 🤖 held AI-prompt rows
-  const skOther = skAll.length - skManual - skReview - skPrompt;             // unchanged / no-op
+  const skStale = apiStale.length;                                          // 📌 rows whose placeholders no longer match
+  const skOther = skAll.length - skManual - skReview - skPrompt - skStale;   // unchanged / no-op
   const skipNote = skAll.length
-    ? ` · skipped ${skAll.length} (${[skManual && `${skManual} tagged (copy-by-hand)`, skReview && `${skReview} 🧠 memory-review — tick to write`, skPrompt && `${skPrompt} 🤖 prompt — decide addressee`, skOther && `${skOther} unchanged`].filter(Boolean).join(' · ')})`
+    ? ` · skipped ${skAll.length} (${[skManual && `${skManual} tagged (copy-by-hand)`, skStale && `${skStale} 📌 placeholders no longer match the source (#${apiStale.map((p) => p.seg).join(', #')}) — fix or paste by hand`, skReview && `${skReview} 🧠 memory-review — tick to write`, skPrompt && `${skPrompt} 🤖 prompt — decide addressee`, skOther && `${skOther} unchanged`].filter(Boolean).join(' · ')})`
     : '';
-  if (!edits.length) { info('write-info', `Nothing to write${skipNote || ' — nothing approved'}.${skReview ? ' Use “🧠 tick memory-review” to include remembered rows.' : ''}`, 'err'); return; }
-  if (!confirm(`Write ${edits.length} segment(s) into Starling?${skAll.length ? ` (${skAll.length} skipped — see the note after)` : ''} This types into each cell — make sure no one else is editing the same task.`)) return;
+  const total = edits.length + apiEdits.length;
+  if (!total) { info('write-info', `Nothing to write${skipNote || ' — nothing approved'}.${skReview ? ' Use “🧠 tick memory-review” to include remembered rows.' : ''}`, 'err'); return; }
+  if (!confirm(`Write ${total} segment(s) into Starling?${apiEdits.length ? ` (${apiEdits.length} 📌 placeholder row(s) go through Starling's API — written AND confirmed, chips untouched.)` : ''}${skAll.length ? ` (${skAll.length} skipped — see the note after)` : ''} This types into each cell — make sure no one else is editing the same task.`)) return;
   $('write').disabled = true;
-  info('write-info', `Writing ${edits.length} segment(s)…`);
+  info('write-info', `Writing ${total} segment(s)…`);
   $('write-bar').style.width = '0%';
   try {
     // stream progress by writing in small chunks so the bar moves
@@ -2368,8 +2400,17 @@ async function doWrite() {
       const chunk = edits.slice(i, i + CH);
       const r = await send({ type: 'WRITE', edits: chunk });
       (r && r.results || []).forEach((x) => results.push(x));
-      $('write-bar').style.width = Math.round(Math.min(i + CH, edits.length) / edits.length * 100) + '%';
-      info('write-info', `Wrote ${Math.min(i + CH, edits.length)}/${edits.length}…`);
+      $('write-bar').style.width = Math.round(Math.min(i + CH, edits.length) / total * 100) + '%';
+      info('write-info', `Wrote ${Math.min(i + CH, edits.length)}/${total}…`);
+    }
+    // 📌 Placeholder-chip rows: straight through the API (writes + confirms), then read back.
+    for (let i = 0; i < apiEdits.length; i += 10) {
+      const chunk = apiEdits.slice(i, i + 10);
+      const r = await send({ type: 'API_WRITE_VERIFY', edits: chunk });
+      if (r && Array.isArray(r.results)) r.results.forEach((x) => results.push(x));
+      else chunk.forEach((e) => results.push({ seg: e.seg, ok: false, via: 'fail', reason: (r && r.error) || 'API write failed — reload the extension AND the Starling tab so the new content script loads' }));
+      $('write-bar').style.width = Math.round(Math.min(edits.length + i + 10, total) / total * 100) + '%';
+      info('write-info', `Wrote ${Math.min(edits.length + i + 10, total)}/${total}…`);
     }
     // Doc-editor rescue: Starling's read-back API (getSourceTextListWithTargetText) returns 1002
     // for Document-editor tasks, so those writes come back "unverified" even when they landed.
@@ -2402,6 +2443,7 @@ async function doWrite() {
     const domN = results.filter((r) => r.via === 'dom').length;
     const storeN = results.filter((r) => r.via === 'store').length;
     const apiN = results.filter((r) => r.via === 'api').length;
+    const apiPhN = results.filter((r) => r.via === 'apiph').length;   // 📌 placeholder rows written via the API
     const unv = results.filter((r) => r.via === 'unverified');
     const bad = results.filter((r) => !r.ok && r.via !== 'unverified');
     const okSegs = new Set(results.filter((r) => r.ok && r.via !== 'unverified').map((r) => r.seg));
@@ -2421,9 +2463,10 @@ async function doWrite() {
       const parts = [];
       if (domN) parts.push(`${domN} confirmed on the server`);
       if (apiN) parts.push(`${apiN} rescued via API (auto-confirmed)`);
+      if (apiPhN) parts.push(`📌 ${apiPhN} placeholder row(s) written via API (confirmed)`);
       if (storeN) parts.push(`${storeN} confirmed in the doc editor`);
       if (bad.length) parts.push(`${bad.length} failed`);
-      const allOk = domN + apiN + storeN === results.length && !bad.length;
+      const allOk = domN + apiN + apiPhN + storeN === results.length && !bad.length;
       const newNote = filledSegs.size ? ` · ✍ ${newOk}/${filledSegs.size} new translation${filledSegs.size === 1 ? '' : 's'} written${newBad ? ` (${newBad} NOT written — see log)` : ''}` : '';
       info('write-info', `✅ ${results.length} segment(s): ${parts.join(' · ')}${newNote}${remembered ? ` · 🧠 ${remembered} remembered` : ''}${skipNote}. ${allOk ? (storeN ? 'All verified — if the editor still shows old text, reload (Ctrl+R) to refresh the display.' : 'Starling’s server has them all — if the editor still shows old text, reload (Ctrl+R) to refresh the display.') : ''}`, (bad.length || newBad) ? 'err' : 'good');
     }
@@ -3123,7 +3166,7 @@ function wbBuildIndex() {
 }
 const WB_FIELDS = [['key', 'Key'], ['valid', 'Valid (Y/N)'], ['final', 'Final Translation'], ['src', 'Source (EN)'], ['tgt', 'Current target'], ['lang', 'Language'], ['updated', 'Updated on Starling']];
 const STAR_KEY_URL = 'https://starling.bytedance.com/#/all-task?pageNum=1&pageSize=10&progress=all&translateTypeList=%5B%5D&sortType=1&order=0&sourceLocales=en&targetLocales=he-IL&textKeys=';
-const CS_EXPECT = 45;   // must match content.js CS_VERSION
+const CS_EXPECT = 46;   // must match content.js CS_VERSION
 
 // Direct call surface — invokes the page's window.__wb.* via chrome.scripting.executeScript.
 // This bypasses chrome.runtime messaging entirely, so a stale/duplicate content-script

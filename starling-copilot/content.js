@@ -13,7 +13,7 @@
   // tab is running an older version, re-injects this file via chrome.scripting so stale tabs
   // self-heal (no page reload needed). Re-injection tears down the previous version's message
   // listener first (below) so there's never a double-listener race.
-  const CS_VERSION = 45;
+  const CS_VERSION = 46;
   if (window.__scVer === CS_VERSION) return;                         // this exact version already live here
   if (typeof window.__scCleanup === 'function') { try { window.__scCleanup(); } catch (e) {} }  // remove an older/stale one
   window.__scVer = CS_VERSION;
@@ -1434,6 +1434,27 @@
     } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
   }
 
+  // 📌 Placeholder-chip rows (string editor only — the panel's chipApiSafe gates them): their chips are
+  // just a rendering of plain-text tokens in the saved target, so we skip DOM typing entirely and write
+  // the whole string through confirmTextTaskTargetV2 (writes + confirms), then re-read the task and
+  // check each saved target equals what we sent. via:'apiph' = verified; anything else is reported.
+  async function apiWriteVerify(edits) {
+    if (/\/doc\/editor\//.test(location.href)) return { ok: false, error: 'API placeholder writes are for string-editor tasks only' };
+    const w = await apiWriteConfirm(edits, true);
+    const wmap = new Map(((w && w.results) || []).map((x) => [String(x.seg), x]));
+    let byRank = null;
+    try { const t = await apiTask(taskId()); if (t && t.ok) byRank = new Map((t.rows || []).map((r) => [String(r.rank), r])); } catch (e) {}
+    const results = (edits || []).map((e) => {
+      const x = wmap.get(String(e.seg));
+      if (!x || !x.ok) return { seg: e.seg, ok: false, via: 'fail', reason: (x && (x.msg || x.reason)) || (w && w.error) || 'API write failed' };
+      const row = byRank && byRank.get(String(e.seg));
+      if (!row) return { seg: e.seg, ok: false, via: 'unverified', reason: 'written via API, but the read-back failed' };
+      return tgtSame(row.target, e.text) ? { seg: e.seg, ok: true, via: 'apiph' }
+        : { seg: e.seg, ok: false, via: 'fail', reason: 'saved target differs from what was sent: ' + String(row.target).slice(0, 120) };
+    });
+    return { ok: results.every((r) => r.ok), results };
+  }
+
   // ---- SUBMIT TASK (DOM) ---------------------------------------------------
   // Unlike confirm, the final submit fires over a non-HTTP channel (WebSocket/internal) —
   // there's no endpoint to replay. But its whole flow is TEXT-LABELLED, so a text-matched
@@ -1607,6 +1628,7 @@
           case 'CONFIRM_ALL': sendResponse(await confirmAll(msg.ignoreNormal !== false)); break;
           case 'API_CONFIRM_ALL': sendResponse(await apiConfirmAll(msg.opts || {})); break;
           case 'API_WRITE_CONFIRM': sendResponse(await apiWriteConfirm(msg.edits || [], msg.ignoreQa)); break;
+          case 'API_WRITE_VERIFY': sendResponse(await apiWriteVerify(msg.edits || [])); break;
           case 'SUBMIT_TASK': sendResponse(await domSubmit()); break;
           case 'WB_CTX': sendResponse(wbCtx()); break;
           case 'WB_OPEN': sendResponse(wbOpen(msg.taskId)); break;
