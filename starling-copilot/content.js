@@ -13,7 +13,7 @@
   // tab is running an older version, re-injects this file via chrome.scripting so stale tabs
   // self-heal (no page reload needed). Re-injection tears down the previous version's message
   // listener first (below) so there's never a double-listener race.
-  const CS_VERSION = 46;
+  const CS_VERSION = 47;
   if (window.__scVer === CS_VERSION) return;                         // this exact version already live here
   if (typeof window.__scCleanup === 'function') { try { window.__scCleanup(); } catch (e) {} }  // remove an older/stale one
   window.__scVer = CS_VERSION;
@@ -1548,16 +1548,36 @@
       return { ok: true, taskId: String(tid), count: plurals.length, plurals };
     } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
   }
-  function targetPluralWrappers() { return [...document.querySelectorAll('.plural-wrapper')].filter((w) => w.closest('[class*="target"]')); }
-  function pluralWrapperFor(form) {
-    return targetPluralWrappers().find((w) => { const l = w.querySelector('.plural-no'); return l && l.textContent.trim() === form; });
+  function targetPluralWrappers(scope) { return [...(scope || document).querySelectorAll('.plural-wrapper')].filter((w) => w.closest('[class*="target"]')); }
+  // The row of ONE plural segment, by its segment number. The search can leave SEVERAL plural
+  // segments in view — "guests" matched #27 ({s_number} guests) AND #40 (Up to {s_num} guests), and
+  // #40's forms were written into #27's boxes because we took the first wrapper on screen. Writes are
+  // now scoped to this row; if it isn't found, nothing is written.
+  function pluralRowFor(rank) {
+    const want = String(rank == null ? '' : rank);
+    if (!want) return null;
+    for (const w of targetPluralWrappers()) { const row = pluralRowOf(w); if (row && segOf(row) === want) return row; }
+    return null;
+  }
+  // Like rowFor, but a plural box sits deeper (wrapper → form editor → target cell → row), so walk
+  // further; the first ancestor holding a seg-number element is the segment row.
+  function pluralRowOf(w) {
+    for (let el = w, i = 0; i < 20 && el && el !== document.body; i++, el = el.parentElement) {
+      if (el.querySelector && el.querySelector(CFG.segNo)) return el;
+    }
+    return null;
+  }
+  function pluralWrapperFor(form, rank) {
+    const row = pluralRowFor(rank);
+    if (!row) return null;
+    return targetPluralWrappers(row).find((w) => { const l = w.querySelector('.plural-no'); return l && l.textContent.trim() === form; });
   }
   // Write ONE plural form: mount its (lazy) editor, replace all, settle, verify;
   // retry once on mismatch. Generous waits — a too-fast write races the filter/mount
   // re-render and silently leaves the box unchanged (the v23 bug).
-  async function writeOnePluralForm(form, text) {
+  async function writeOnePluralForm(form, text, rank) {
     for (let attempt = 0; attempt < 2; attempt++) {
-      const w = pluralWrapperFor(form);
+      const w = pluralWrapperFor(form, rank);
       if (!w) { await sleep(350); continue; }
       let ce = w.querySelector('[contenteditable="true"]');
       if (!ce) {
@@ -1570,7 +1590,7 @@
       await sleep(500);
       if (norm(ce.innerText) === norm(String(text))) return { ok: true, got: ce.innerText.slice(0, 60) };
     }
-    const w2 = pluralWrapperFor(form), ce2 = w2 && w2.querySelector('[contenteditable="true"]');
+    const w2 = pluralWrapperFor(form, rank), ce2 = w2 && w2.querySelector('[contenteditable="true"]');
     return { ok: false, reason: 'mount/verify failed', got: ce2 ? ce2.innerText.slice(0, 60) : '' };
   }
   // Distinctive English chunk for the search box: strip {placeholders}/ICU braces.
@@ -1601,10 +1621,18 @@
     let n = -1;
     for (let i = 0; i < 30; i++) { await sleep(120); const c = targetPluralWrappers().length; if (c > 0 && c === n) break; n = c; }
     if (!targetPluralWrappers().length) { searchClear(); return { ok: false, rank: edit.rank, error: 'plural segment not in view (search "' + q + '")' }; }
+    // Make sure THIS segment (by number) is among the results — never write into a neighbour.
+    let row = pluralRowFor(edit.rank);
+    for (let i = 0; i < 10 && !row; i++) { await sleep(150); row = pluralRowFor(edit.rank); }
+    if (!row) {
+      const seen = targetPluralWrappers().map((w) => segOf(pluralRowOf(w))).filter(Boolean);
+      searchClear();
+      return { ok: false, rank: edit.rank, error: 'segment #' + edit.rank + ' not found in the search results for "' + q + '" (in view: #' + [...new Set(seen)].join(', #') + ') — nothing written' };
+    }
     for (const form of PLURAL_FORMS) {
       const text = edit.forms && edit.forms[form];
       if (text == null) continue;
-      results[form] = await writeOnePluralForm(form, String(text));
+      results[form] = await writeOnePluralForm(form, String(text), edit.rank);
     }
     searchClear();
     return { ok: Object.keys(results).length > 0 && Object.values(results).every((r) => r.ok), rank: edit.rank, results };

@@ -3166,7 +3166,7 @@ function wbBuildIndex() {
 }
 const WB_FIELDS = [['key', 'Key'], ['valid', 'Valid (Y/N)'], ['final', 'Final Translation'], ['src', 'Source (EN)'], ['tgt', 'Current target'], ['lang', 'Language'], ['updated', 'Updated on Starling']];
 const STAR_KEY_URL = 'https://starling.bytedance.com/#/all-task?pageNum=1&pageSize=10&progress=all&translateTypeList=%5B%5D&sortType=1&order=0&sourceLocales=en&targetLocales=he-IL&textKeys=';
-const CS_EXPECT = 46;   // must match content.js CS_VERSION
+const CS_EXPECT = 47;   // must match content.js CS_VERSION
 
 // Direct call surface — invokes the page's window.__wb.* via chrome.scripting.executeScript.
 // This bypasses chrome.runtime messaging entirely, so a stale/duplicate content-script
@@ -6501,6 +6501,8 @@ function plUpdateWrite() {
   $('pl-write').hidden = n === 0;
   $('pl-write').textContent = `✍ Write ${n} approved plural segment(s)`;
 }
+// Whitespace/invisible-mark-insensitive compare for the plural read-back.
+const normWs = (x) => String(x == null ? '' : x).replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '').replace(/\s+/g, ' ').trim();
 async function plWrite() {
   if (!$('pl-enable-write').checked) { info('pl-write-info', 'Tick "enable writing plural forms" first.', 'err'); return; }
   const todo = PL.segs.filter((s) => s.forms && s.approved && !s.written);
@@ -6516,7 +6518,21 @@ async function plWrite() {
       else { bad++; log(`plural #${s.rank} failed: ${(r && (r.error || JSON.stringify(r.results))) || '?'}`); }
     } catch (e) { bad++; log(`plural #${s.rank} error: ${e.message}`); }
   }
-  info('pl-write-info', `✅ Wrote ${ok}${bad ? ` · ${bad} failed (see log)` : ''}`, bad ? 'err' : 'good');
+  // Read back from the server: every written segment must hold exactly its own forms (catches a write
+  // that landed in the wrong segment — the #27/#40 "guests" mix-up of 15 Oct).
+  let vbad = [];
+  try {
+    const rb = await send({ type: 'HARVEST_PLURALS' });
+    if (rb && rb.ok) {
+      const byRank = new Map((rb.plurals || []).map((x) => [String(x.rank), x]));
+      for (const s of todo.filter((x) => x.written)) {
+        const got = (byRank.get(String(s.rank)) || {}).tgtForms || {};
+        const off = Object.keys(s.forms).filter((f) => normWs(got[f]) !== normWs(s.forms[f]));
+        if (off.length) { vbad.push(s.rank); s.written = false; log(`plural #${s.rank} read-back mismatch in ${off.join('/')}: ${off.map((f) => f + '=' + JSON.stringify(got[f] || '')).join(' ')}`); }
+      }
+    } else log('plural read-back failed: ' + ((rb && rb.error) || '?'));
+  } catch (e) { log('plural read-back error: ' + e.message); }
+  info('pl-write-info', `✅ Wrote ${ok - vbad.length}${bad ? ` · ${bad} failed (see log)` : ''}${vbad.length ? ` · ⚠ #${vbad.join(', #')} did NOT read back as written — check them in Starling (see log)` : ''}`, (bad || vbad.length) ? 'err' : 'good');
   plRender();
   $('pl-write').disabled = false;
 }
