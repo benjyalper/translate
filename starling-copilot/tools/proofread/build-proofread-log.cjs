@@ -20,13 +20,21 @@ const {
 const LOG_DIR = process.env.PROOFREAD_LOG_DIR || 'G:/My Drive/תכנות/adar1/tranlation-code/proofreading-log';
 const OUT = process.env.PROOFREAD_LOG_OUT || path.join(LOG_DIR, '..', 'Starling proofreading.docx');
 
+// LQA basis per change (category + authority) and the rulings appendix, so every decision can be
+// defended in an LQA without other files. rulings.md on G: is refreshed from Claude's memory copy
+// (the authoritative text) on each build, and the G: copy is what the log reads.
+const { basisFor } = require(path.join(LOG_DIR, 'basis.cjs'));
+const RULINGS_MEM = 'C:/Users/Benjy/.claude/projects/C--Users-Benjy-Desktop-adar1/memory/project_starling_rulings_2026_09.md';
+const RULINGS_G = path.join(LOG_DIR, 'rulings.md');
+if (fs.existsSync(RULINGS_MEM)) fs.writeFileSync(RULINGS_G, fs.readFileSync(RULINGS_MEM, 'utf8').replace(/^---[\s\S]*?---\s*/, ''));
+
 const FONT = 'Arial';
 const ACCENT = '0F6F7A', RED = 'B42318', BLUE = '1F5FBF', GREY = '5A6875', LINE = 'D0D7DE';
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const longDate = (iso) => { const [y, m, d] = iso.split('-').map(Number); return `${d} ${MONTHS[m - 1]} ${y}`; };
 
 // Starling tag tokens → circled numbers (①…①), as the editor shows them; O-/C- codes scramble inside RTL text.
-const tagify = (x) => String(x == null ? '' : x).replace(/[OC]-(\d+)-\d/g, (m, n) => String.fromCharCode(0x2460 + (+n - 1)));
+const tagify = (x) => String(x == null ? '' : x).replace(/[OC]-(\d+)(?:-\d+)+/g, (m, n) => String.fromCharCode(0x2460 + (+n - 1)));
 const TAGGED = /[\u2460-\u2473]/;
 
 // Word-level diff (LCS) → [{t, op:'eq'|'del'|'ins'}]
@@ -92,7 +100,7 @@ function taskSection(rec, first) {
       cell([p(run(e.src)), ...(tagged ? [p(run('pasted by hand (tags)', { size: 15, color: GREY }))] : [])], CW[1]),
       cell(p(heRuns(e.old, e.text, 'before'), { rtl: true }), CW[2]),
       cell(p(heRuns(e.old, e.text, 'after'), { rtl: true }), CW[3]),
-      cell(p(run(tagify(e.reason))), CW[4])
+      cell([p(run(tagify(e.reason)), { after: 60 }), p([run('LQA basis: ', { bold: true, size: 15, color: ACCENT }), run(basisFor(e), { size: 15, color: GREY })])], CW[4])
     ] }));
   }
   const changes = new Table({ width: { size: CW.reduce((a, b) => a + b, 0), type: WidthType.DXA }, columnWidths: CW, rows });
@@ -106,6 +114,21 @@ function taskSection(rec, first) {
     new Paragraph({ heading: HeadingLevel.HEADING_2, spacing: { before: 280, after: 60 }, children: [new TextRun({ text: `Changes (${edits.length} segments)`, font: FONT, size: 24, bold: true })] }),
     new Paragraph({ spacing: { after: 120 }, children: [run('In Before, removed words are red and struck through. In After, new words are blue and bold. ①…① mark Starling\'s formatting tags, as in the editor.', { size: 17, color: GREY })] }),
     changes
+  ];
+}
+
+// Appendix: the rulings and precedents the "LQA basis" lines cite, verbatim from rulings.md.
+function rulingsAppendix() {
+  if (!fs.existsSync(RULINGS_G)) return [];
+  const lines = fs.readFileSync(RULINGS_G, 'utf8').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const clean = (l) => l.replace(/\*\*|`/g, '').replace(/\[\[([^\]]+)\]\]/g, '$1');
+  return [
+    new Paragraph({ heading: HeadingLevel.HEADING_1, pageBreakBefore: true, spacing: { after: 120 }, children: [new TextRun({ text: 'Appendix — rulings and precedents cited', font: FONT, size: 30, bold: true })] }),
+    new Paragraph({ spacing: { after: 160 }, children: [run('Benjy\'s style rulings for TikTok / Starling he-IL (from 28 Sep 2026, with later additions and dated precedents). They outrank older house rules where they conflict; the current Starling term base wins for terminology, applied by sense.', { size: 18, color: GREY })] }),
+    ...lines.map((l) => {
+      const h = /^#+\s/.test(l);
+      return new Paragraph({ spacing: { after: 90 }, bidirectional: false, children: [run(clean(l.replace(/^#+\s*/, '').replace(/^[-*]\s+/, '• ')), { size: h ? 20 : 17, bold: h })] });
+    })
   ];
 }
 
@@ -125,7 +148,9 @@ const doc = new Document({
     children: [
       new Paragraph({ heading: HeadingLevel.TITLE, spacing: { after: 80 }, children: [new TextRun({ text: 'Starling proofreading', font: FONT, size: 44, bold: true, color: ACCENT })] }),
       new Paragraph({ spacing: { after: 240 }, children: [run(`A running record of proofreading changes, one section per task: what changed in each segment and why. ${recs.length} task${recs.length === 1 ? '' : 's'}, ${totalEdits} segments changed. Last updated ${longDate(recs[recs.length - 1].date)}.`, { size: 20, color: GREY })] }),
-      ...recs.flatMap((r, i) => taskSection(r, i === 0))
+      new Paragraph({ spacing: { after: 240 }, children: [run('Each change gives its reason ("Why") and its LQA basis: the error category a reviewer would use and the authority it rests on — the source text, the Starling term base, the TikTok Hebrew Style Guide (SG), or Benjy\'s numbered rulings. The rulings and precedents are reproduced in full in the appendix at the end.', { size: 18, color: GREY })] }),
+      ...recs.flatMap((r, i) => taskSection(r, i === 0)),
+      ...rulingsAppendix()
     ]
   }]
 });
