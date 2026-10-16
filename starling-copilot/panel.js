@@ -916,6 +916,15 @@ function rbCheck(proposals) {
     const f = RB.checkSegment(p.src, p.next, { key: p.key || (p.seg && p.seg.key) || '' });
     p.rbFind = f.length ? f : null;
   }
+  // R-register is task-level: siblings of the same role share one register, so judge every row of the
+  // task (a proposal's text wins over the harvested target) and attach findings to the proposals.
+  const next = new Map(proposals.filter((p) => !p.manual).map((p) => [String(p.seg), p.next]));
+  const items = (state.segments || []).map((s) => ({ seg: String(s.seg), key: s.key || '', src: s.src, tgt: next.has(String(s.seg)) ? next.get(String(s.seg)) : s.tgt }));
+  const reg = RB.checkRegister(items);
+  for (const p of proposals) {
+    const f = !p.manual && reg.get(String(p.seg));
+    if (f) p.rbFind = (p.rbFind || []).concat(f);
+  }
 }
 function tbCheck(proposals) {
   for (const p of proposals) { p.termHint = null; p.termUncertain = null; }
@@ -1751,6 +1760,7 @@ async function doExportForClaude() {
   const taskId = state.harvestTask || starlingTaskId(t && t.url) || CUR_TASK || '';
   const srcs = state.segments.map((s) => String(s.src || ''));
   const locks = RB.activeLockTerms((LOCK && LOCK.terms) || []).filter((l) => l && l.en && srcs.some((x) => lockSrcHas(x, l.en)));
+  const regFind = RB.checkRegister(state.segments.map((s) => ({ seg: String(s.seg), key: s.key || '', src: s.src, tgt: s.tgt })));   // task-level R-register
   const segs = state.segments.map((s) => {
     const o = { seg: s.seg, key: s.key || '', src: String(s.src || ''), tgt: String(s.tgt || '') };
     if (s.context) o.context = String(s.context);
@@ -1760,7 +1770,7 @@ async function doExportForClaude() {
     if (s.chip) o.chip = true;
     if (isPromptCtx(s.key)) o.machinePrompt = true;
     const th = tbHintsFor(o.src); if (th.length) o.terms = th;
-    const f = o.tgt.trim() ? RB.checkSegment(o.src, o.tgt, { key: o.key }) : [];
+    const f = (o.tgt.trim() ? RB.checkSegment(o.src, o.tgt, { key: o.key }) : []).concat(regFind.get(String(s.seg)) || []);
     if (f.length) o.rulebook = f;
     // Your earlier approved wording for this exact source (consistency memory), strongest first —
     // exported whether or not "Apply remembered wording" is switched on, so Claude can stay consistent.

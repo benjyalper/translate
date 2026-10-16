@@ -18,7 +18,7 @@
 })(typeof self !== 'undefined' ? self : (typeof globalThis !== 'undefined' ? globalThis : this), function () {
   'use strict';
 
-  const VERSION = '2026-10-13.1';
+  const VERSION = '2026-10-16.1';
 
   // ---- The rulings (Benjy, 2026-09-28) — machine-readable index ------------------------------
   const RULINGS = [
@@ -68,7 +68,7 @@
   const STYLE =
     '\nTIKTOK HEBREW RULEBOOK (he-IL, v' + VERSION + ' — overrides older style notes, glossary entries and house rules below when they conflict):\n' +
     '- VOICE: inclusive, approachable, conversational, clear, casual; short and natural. REGISTER medium-low: אנחנו (not אנו), עכשיו (not כעת), על (not אודות).\n' +
-    '- INTERNAL CONSISTENCY: when the same word, verb or fixed phrase recurs in this batch, render it ONE way throughout (same meaning + same UI role → same Hebrew). Never alternate synonyms arbitrarily.\n' +
+    '- INTERNAL CONSISTENCY: when the same word, verb or fixed phrase recurs in this batch, render it ONE way throughout (same meaning + same UI role → same Hebrew). Never alternate synonyms arbitrarily. REGISTER too: sibling strings of the same UI role in the same feature (helper texts, descriptions, error messages, the tips of one article) share ONE register — all slash imperative, or all impersonal (יש ל…/ניתן…/אפשר…), or all gerund; when you fix a row\'s meaning, re-check that its register still matches its siblings.\n' +
     '- GENDER SLASH — WHO GETS ONE: use the slash ONLY for a single person of unknown gender: the user (את/ה, לחץ/י, שלך) or ONE other person (הוסיף/ה, עוקב/ת חדש/ה, singular "their" → שלו/שלה) — including ONE guardian: אפוטרופוס/ית, also on role buttons (המשך כאפוטרופוס/ית). A GROUP of people takes the plain masculine plural with NO slash: יוצרים דומים, עוקבים חדשים, בני נוער, אפוטרופוסים — never יוצרים/ות, חדשים/ות, בני/בנות. This includes the two/many/other branches of ICU plurals.\n' +
     '- GENDER SLASH — HOW TO WRITE IT: the short form "masculine/י" is correct ONLY when the feminine is exactly the masculine + י (a final letter becomes its regular form): לחץ/י (לחצי), בחר/י, שתף/י (שתפי), שלח/י, התחבר/י, הישאר/י, השתמש/י. In EVERY other case write BOTH words in full: ל״ה verbs נסה/נסי, גלה/גלי, צפה/צפי, ראה/ראי, קנה/קני, פנה/פני, העלה/העלי, תיהנה/תיהני; hif\'il verbs הקש/הקישי, השלם/השלימי, הוסף/הוסיפי, הזן/הזיני, הפעל/הפעילי, הצג/הציגי, הורד/הורידי, הסר/הסירי, החזק/החזיקי, הגדר/הגדירי; holam verbs בדוק/בדקי, שמור/שמרי, כתוב/כתבי, עבור/עברי, זכור/זכרי, משוך/משכי, אסוף/אספי. NEVER נסה/י, צפה/י, גלה/י, הקש/י, השלם/י, בדוק/י. Conversely, do NOT write both in full when the short form is correct (שתף/י, not שתף/שתפי). The final letter goes BEFORE the slash (לחץ/י, never לח/יץ).\n' +
     '- UI ROLE decides the verb form (decide the role FIRST from "key", "context", then source signals):\n' +
@@ -307,6 +307,88 @@
     return out;
   }
 
+  // R-register — TASK-level check (Benjy, 2026-10-16; 550648463874 #31 and the 15 Oct sweep): sibling
+  // strings of the same UI role in the same feature family share ONE register. Rows whose source
+  // starts with an imperative ("Select…", "Please try…") are classified by how the Hebrew opens:
+  // slash imperative (נסה/נסי), impersonal (יש ל / ניתן / אפשר / כדאי / מומלץ) or נא + infinitive.
+  // Gerunds can't be told from nouns and infinitives are allowed in banners/lists, so neither is
+  // compared. Families are the first key token (pipoKyb_*, toko_*) × the role (title / error·toast /
+  // step / other text); action roles (btn/label/tab/placeholder/link/option — R8's job) are skipped.
+  // Document tasks (no keys) form one family. The outlier is flagged against the majority; a tie
+  // flags every member.
+  // Also flags one string whose sentences open in two different registers. Flag-only, like checkSegment.
+  const REG_VERBS = new Set(('add allow apply avoid browse buy cancel change check choose claim click close compare complete confirm connect ' +
+    'contact continue copy create decide delete discover download drag edit enable disable enter explore fill find follow get go hide ' +
+    'invite join keep learn link log make manage move mute open pay pick pin play post press preview provide rate read record refresh ' +
+    'remove rename reply report request reset retry review save scan search see select send set share sign skip start stay stop submit ' +
+    'swipe switch tap take tell track try turn type unlink unmute update upgrade upload use verify view visit wait watch withdraw write').split(' '));
+  const REG_NAME = { slash: 'slash imperative (נסה/נסי)', imp: 'impersonal (יש ל / נא ל / ניתן / אפשר / כדאי)', inf: 'infinitive (לבחור)' };
+  const regClean = (x) => String(x || '').replace(/[OC]-\d+-\d+|<[^>]+>|\{\{[^}]*\}\}|\{[^{}]*\}/g, ' ').replace(/[\u200e\u200f]/g, '').trim();
+  const regSentences = (x) => regClean(x).split(/(?<=[.!?])\s+|\n+/).map((y) => y.replace(/^\s*(\d+[.)]|[•\-–])\s*/, '').trim()).filter(Boolean);
+  function regSrcImperative(sent) {
+    const y = sent.replace(/^[^.!?:]{1,40}:\s+(?=[A-Za-z])/, '');                     // "Content patterns: Compare…"
+    if (/^(keep in mind|note|remember that)\b/i.test(y)) return false;                  // notes take יש לזכור / הערה: — not instructions
+    const w = (y.match(/^(?:please\s+)?([A-Za-z]+)/i) || [])[1];
+    return !!w && REG_VERBS.has(w.toLowerCase()) && !/^[A-Z][a-z]+ [A-Z][a-z]+$/.test(y);   // skip 2-word Title Case names
+  }
+  function regClass(sent) {
+    const y = sent.replace(/^[^.!?:]{1,40}:\s+(?=[א-ת])/, '');                        // "דפוסי תוכן: …"
+    if (new RegExp('^[' + HEB + '"\']+/[' + HEB + '"\']+').test(y)) return 'slash';
+    if (/^((יש|אין)\s+ל|(ניתן|אפשר|כדאי|מומלץ|באפשרותך)\s)/.test(y)) return 'imp';
+    if (/^נא\s/.test(y)) return 'imp';                                                 // נא ל… is impersonal too
+    if (new RegExp('^ל[' + HEB + ']{3,}(\\s|$)').test(y)) return 'inf';
+    return null;
+  }
+  // Role of a key, read from its END (camelCase split into tokens: …_selectLabel, …_error_min_char,
+  // …_helper_text); a token earlier in the key is a feature name (webform_2_5_link_or_unlink_…).
+  // Action labels are R8's job; titles mix headlines and steps and are not compared; errors/toasts
+  // and step lists are compared only with their own kind.
+  function regRole(key) {
+    const toks = String(key || '').replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase().split(/_+/).filter(Boolean).map((x) => x.replace(/\d+$/, ''));
+    const tail = (n, re) => toks.slice(-n).some((x) => re.test(x));
+    if (tail(2, /^(btn|button|cta|label|tab|placeholder|link|option|menu|chip)$/)) return 'action';
+    if (toks.some((x) => /^(step|steps|bullet|how|bottomsheet)$/.test(x))) return 'step';
+    if (tail(3, /^(title|header|heading|headline)$/)) return 'title';
+    if (tail(3, /^(error|err|toast|fail|failed|invalid|warning|alert)$/) || toks.some((x) => /^error/.test(x))) return 'error';
+    return 'text';
+  }
+  function checkRegister(items) {
+    const out = new Map(), add = (seg, msg) => { if (!out.has(seg)) out.set(seg, []); out.get(seg).push({ rule: 'R-register', severity: 'warn', msg }); };
+    const groups = new Map();
+    for (const it of items || []) {
+      const s = String(it.src || ''), t = String(it.tgt || ''), key = String(it.key || '');
+      if (!t.trim() || /\{\s*\w+\s*,\s*(plural|select)\s*,/.test(s)) continue;
+      // Mixed inside one string: two sentences opening in different registers.
+      const own = [...new Set(regSentences(t).map(regClass).filter((c) => c && c !== 'inf'))];
+      if (own.length > 1) add(it.seg, 'one string mixes ' + own.map((c) => REG_NAME[c]).join(' and ') + ' — use one register');
+      const role = regRole(key);
+      if (role === 'action' || role === 'title') continue;
+      const ss = regSentences(s), ts = regSentences(t);
+      if (!ss.length || ss[0].split(/\s+/).length < 2 || !regSrcImperative(ss[0])) continue;
+      const c = regClass(ts[0] || '');
+      if (!c || c === 'inf') continue;                                                  // infinitives are allowed in banners/lists
+      if (role === 'error' && c === 'imp' && !/^please\b/i.test(ss[0])) continue;      // validation rules take יש ל… (ruling 10)
+      const fam = key.split(/_+/)[0] + '|' + role;
+      if (!groups.has(fam)) groups.set(fam, []);
+      groups.get(fam).push({ seg: it.seg, c });
+    }
+    for (const rows of groups.values()) {
+      if (rows.length < 2) continue;
+      const cnt = {}; for (const r of rows) cnt[r.c] = (cnt[r.c] || 0) + 1;
+      const order = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a]);
+      if (order.length < 2) continue;
+      const tie = cnt[order[0]] === cnt[order[1]], maj = order[0];
+      for (const r of rows) {
+        if (!tie && r.c === maj) continue;
+        const sib = rows.filter((x) => x.c !== r.c).map((x) => '#' + x.seg).slice(0, 4).join(', ');
+        add(r.seg, tie
+          ? 'register: ' + REG_NAME[r.c] + ' here, but sibling(s) ' + sib + ' use another register — siblings of the same role share one register'
+          : 'register: ' + REG_NAME[r.c] + ' here, but ' + cnt[maj] + ' sibling(s) (' + rows.filter((x) => x.c === maj).map((x) => '#' + x.seg).slice(0, 4).join(', ') + ') use ' + REG_NAME[maj] + ' — siblings of the same role share one register');
+      }
+    }
+    return out;
+  }
+
   // Cleanup advice for the user's stored state (the panel shows it; nothing is deleted automatically).
   function auditStoredState(state) {
     const st = state || {}, issues = [];
@@ -325,5 +407,5 @@
     return issues;
   }
 
-  return { VERSION, RULINGS, LATIN_ALLOW, RULED_TERMS, FOREIGN_CLIENT_TERMS, FOREIGN_CLIENT_FIXES, STYLE, systemPrompt, userMessage, lockBlock, activeLockTerms, fixRuleActive, checkSegment, shortSlashWrong, auditStoredState };
+  return { VERSION, RULINGS, LATIN_ALLOW, RULED_TERMS, FOREIGN_CLIENT_TERMS, FOREIGN_CLIENT_FIXES, STYLE, systemPrompt, userMessage, lockBlock, activeLockTerms, fixRuleActive, checkSegment, checkRegister, shortSlashWrong, auditStoredState };
 });

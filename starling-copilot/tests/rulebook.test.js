@@ -146,6 +146,46 @@ ok('R-newline: interior line break added is flagged', flags('Hotline: Mon – Fr
 ok('R-newline: matching interior line breaks not flagged', !flags('Hotline:\nMon – Fri', 'מוקד:\nשני – שישי', 'R-newline'));
 ok('R-newline: trailing line break only (target trimmed by harvest) not flagged', !flags('Customer Care Hotline:\n', 'מוקד שירות לקוחות:', 'R-newline'));
 
+sec('R-register — siblings of the same role share one register (2026-10-16)');
+const reg = (items) => RB.checkRegister(items.map(([seg, key, src, tgt]) => ({ seg, key, src, tgt })));
+// 550648463874 #29–#31 (helper texts): #31 kept the slash imperative beside impersonal #30.
+const r31 = reg([[29, 'webform_2_5_find_tiktok_videos_to_add_ip_links_helper_text', 'Find TikTok videos to add IP links', 'מציאת סרטוני TikTok להוספת קישורי IP'],
+  [30, 'webform_2_5_avoid_adding_ip_links_to_tiktok_accounts_helper_text', 'Avoid adding IP links to TikTok accounts', 'יש להימנע מהוספת קישורי IP לחשבונות TikTok'],
+  [31, 'webform_2_5_link_or_unlink_ip_lists_to_posts_helper_text', 'Link or unlink IP lists to the posts', 'קשר/י רשימות IP לפוסטים או בטל/י את הקישור']]);
+ok('#31 slash beside impersonal #30 flagged (a "link" token inside the key is not a role)', r31.has(31));
+ok('fixed #31 (gerund) not flagged', reg([[30, 'webform_2_5_avoid_adding_ip_links_to_tiktok_accounts_helper_text', 'Avoid adding IP links to TikTok accounts', 'יש להימנע מהוספת קישורי IP לחשבונות TikTok'],
+  [31, 'webform_2_5_link_or_unlink_ip_lists_to_posts_helper_text', 'Link or unlink IP lists to the posts', 'קישור רשימות IP לפוסטים או ביטול הקישור']]).size === 0);
+// 543853940738 KYB descriptions: one slash among יש ל… siblings → only the outlier is flagged.
+const kyb = reg([[597, 'pipoKyb_cashAdvance_bizOcr_errorBanner', 'Complete missing fields to continue.', 'יש למלא את השדות החסרים כדי להמשיך.'],
+  [613, 'pipoKyb_cashAdvance_reviewInfo_prefillNote', 'Make sure all details match your ID.', 'יש לוודא שכל הפרטים תואמים לתעודה המזהה שלך.'],
+  [629, 'pipoKyb_cashAdvance_personnel_prefillDesc', 'Review and update if needed.', 'יש לבדוק ולעדכן במקרה הצורך.'],
+  [608, 'pipoKyb_cashAdvance_idConfirm_noneDesc', 'Verify new identity.', 'אמת/י זהות חדשה.']]);
+ok('KYB slash outlier #608 flagged', kyb.has(608));
+ok('KYB majority (יש ל…) not flagged', !kyb.has(613) && !kyb.has(629));
+ok('message names the majority siblings', /#613/.test((kyb.get(608) || [{}])[0].msg || ''));
+// 550648012034 self-serve errors: "Please check…" נא ל… beside "Please contact…" slash → both flagged (tie).
+const ss = reg([[16, 'selfServe_errorNoInternet_desc', 'Please check your network.', 'נא לבדוק את הרשת שלך.'],
+  [19, 'selfServe_errorResubmit_desc', 'Please contact your partner manager if you have any questions or concerns.', 'פנה/פני למנהל/ת השותפים שלך אם יש לך שאלות או חששות.']]);
+ok('נא ל… vs slash in sibling errors flagged (tie flags both)', ss.has(16) && ss.has(19));
+ok('validation errors (יש להזין) beside "Try again" (נסה/נסי) NOT flagged', reg([
+  [254, 'toko_insurance_common_error_min_char', 'Enter at least {minValue} characters', 'יש להזין לפחות {minValue} תווים'],
+  [260, 'toko_insurance_common_error_processing_file', 'Please try again.', 'נסה/נסי שוב.'],
+  [262, 'toko_insurance_common_error_technical_interruption', 'Please try again.', 'נסה/נסי שוב.']]).size === 0);
+ok('buttons/labels are skipped (R8\'s job)', reg([[1, 'x_cta_btn', 'Try again', 'ניסיון חוזר'], [2, 'x_retry_btn', 'Try again', 'נסה/נסי שוב'], [3, 'x_more_btn', 'View more', 'יש לצפות']]).size === 0);
+ok('"You can…" (ניתן) is not an instruction — not compared with slash steps', reg([[1, '', 'You can report any problems.', 'ניתן לדווח על כל בעיה.'],
+  [2, '', 'Tap Settings.', 'הקש/הקישי על "הגדרות".'], [3, '', 'Select Report a problem.', 'בחר/י "דיווח על בעיה".']]).size === 0);
+ok('"Keep in mind" (יש לזכור) is not compared with slash steps', reg([[1, '', 'Keep in mind that changes apply to all devices.', 'יש לזכור ששינויים חלים על כל המכשירים.'],
+  [2, '', 'Tap Settings.', 'הקש/הקישי על "הגדרות".'], [3, '', 'Select Screen time.', 'בחר/י "זמן מסך".']]).size === 0);
+// 515492244226 (help-center article, no keys): כדאי tips among slash tips → outliers flagged.
+const art = reg([[29, '', 'Compare your best-performing posts.', 'השווה/השווי בין הפוסטים המצליחים ביותר שלך.'],
+  [30, '', 'Search queries: See what viewers searched.', 'שאילתות חיפוש: ראה/ראי מה הצופים חיפשו.'],
+  [37, '', 'Pick one pattern to test in your next post.', 'בחר/י דפוס אחד לבדיקה בפוסט הבא שלך.'],
+  [35, '', 'O-1-0Content patterns:C-1-0 Compare the topics and formats of posts.', 'O-1-0דפוסי תוכן:C-1-0 כדאי להשוות בין הנושאים והפורמטים של פוסטים.']]);
+ok('article: כדאי tip (#35, behind a tagged "label:") flagged against slash tips', art.has(35) && !art.has(29) && !art.has(37));
+// 543854209794 #12: one string mixing a gerund sentence with אפשר… is not detectable (gerund), but slash + impersonal is.
+ok('one string mixing slash and impersonal flagged', reg([[15, 'dm_saCloset_introProfile_body', 'Explore new versions of yourself. Share with friends.', 'גלה/גלי גרסאות חדשות של עצמך. אפשר לשתף עם חברים.']]).has(15));
+ok('ICU plural rows skipped', reg([[1, 'a_desc', '{n, plural, one {Try # time} other {Try # times}}', '{n, plural, one {נסה/נסי פעם אחת} other {יש לנסות # פעמים}}'], [2, 'a_desc', 'Tap here.', 'יש להקיש כאן.']]).size === 0);
+
 sec('Stored-state audit (the 2026-09-28 backup)');
 const audit = RB.auditStoredState({
   lockedTerms: { terms: [{ en: 'button', he: 'לחצן' }, { en: '{s_num}%', he: '%{s_num}' }, { en: 'TikTok', he: 'TikTok' }] },
