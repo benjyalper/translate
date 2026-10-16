@@ -7,6 +7,12 @@ to load the unpacked extension and test Detect → Harvest → Propose → Write
 
 Date: 2026-07-27. Target server used for discovery: `memoq.terratranslations.com`.
 
+**Update 2026-10-15:** Detect + Harvest + ⬇ Export task for Claude **verified live** on Terra job P-X120182
+(216 rows, tags exported as ①②, statuses `manuallyConfirmed` / `notStarted` / `partiallyEdited`).
+**Write is still untested.** Job notes: `G:\My Drive\תרגום\Terra\P-X120182\P-X120182-log.md`
+(and section 4d of `tranlation-code\STARLING-COPILOT-HANDOFF.md`). That job contains PHI: save its exports
+only under `C:\Users\Benjy\Downloads\P-X120182 CCH AVS (Terra memoQ)\work\`, never on Google Drive.
+
 ---
 
 ## What this feature is
