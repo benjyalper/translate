@@ -143,6 +143,18 @@ sec('🏷 Place tags (the model only places tags; wording must not change)');
   ok('panel has the 🏷 Place tags button (hidden until rows are flagged)', /<button id="place-tags"[^>]*hidden/.test(HTML) && /\$\('place-tags'\)\.hidden = /.test(PANEL));
 })().then(() => {
 
+sec('🤖 AI-prompt keys: only keys ENDING in _prompt (prompt suggestions are user-facing copy, written normally)');
+{
+  const grab = (re) => PANEL.match(re)[0];
+  const isPrompt = new Function('let PROMPT = { force: false, patterns: "prompt,Tako,aigc,createHub,genai,imagine" };' + grab(/function isPromptCtx[\s\S]*?\n}\n/) + ';return isPromptCtx;')();
+  ok('key ending _prompt is a machine prompt (visualSearch_camera_viewfinder_prompt)', isPrompt('visualSearch_camera_viewfinder_prompt'));
+  ok('key ending _prompts is a machine prompt', isPrompt('aiSelf_generation_prompts'));
+  ok('prompt-suggestion catalogue key is NOT held (dm_playable_prompt_snakeBuddies, 538388404226 #2)', !isPrompt('dm_playable_prompt_snakeBuddies'));
+  ok('prompt-suggestion FYP variant is NOT held (dm_playable_prompt_squadSlither_fyp)', !isPrompt('dm_playable_prompt_squadSlither_fyp'));
+  ok('UI nudge keys are NOT held (…_followPrompt_desc)', !isPrompt('bbFeedCardFull_brandCard_followPrompt_desc_stayUpdated'));
+  ok('other patterns still match anywhere (Tako)', isPrompt('tako_chat_thinking_header'));
+}
+
 sec('Prompt guarantees (Tests A/B/C live in the model prompt)');
 ok('term hints include the definition field', /if\s*\(t\.def\)\s*h\.definition/.test(SRC));
 ok('prompt sends {en,he,pos,definition} shape', /"en","he","pos","definition"/.test(SRC));

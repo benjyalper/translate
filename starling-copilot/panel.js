@@ -1247,12 +1247,16 @@ function promptPatternRe() {
 // bbFeedCard…_followPrompt_desc or aliasEntryPoints_profile_aliasPrompt_desc are on-screen nudges
 // for the user, not text sent to an AI (task 536300623362 #2 was wrongly held as 🤖 prompt). The
 // other patterns (Tako, aigc, …) still match anywhere in the key.
+// And only as the LAST token (ruling 20: "keys ending _prompt are machine prompts", e.g.
+// visualSearch_camera_viewfinder_prompt). A "prompt" token in the MIDDLE names a catalogue of
+// prompt SUGGESTIONS the user sees and taps (dm_playable_prompt_snakeBuddies, …_prompt_title) —
+// user-facing copy, written normally (task 538388404226 #2–#8 were held as 🤖 and never written).
 function isPromptCtx(key) {
   if (PROMPT.force) return true;
   const k = String(key || ''); if (!k) return false;
   const pats = String(PROMPT.patterns || '').split(',').map((x) => x.trim()).filter(Boolean);
   return pats.some((pt) => /^prompts?$/i.test(pt)
-    ? /(^|_)prompts?(_|$)/i.test(k)
+    ? /(^|_)prompts?$/i.test(k)
     : k.toLowerCase().indexOf(pt.toLowerCase()) >= 0);
 }
 // A Hebrew gender-slash form anywhere in the string (X/Y on Hebrew letters) — e.g. הפוך/הפכי,
