@@ -9,7 +9,12 @@ Date: 2026-07-27. Target server used for discovery: `memoq.terratranslations.com
 
 **Update 2026-10-15:** Detect + Harvest + ⬇ Export task for Claude **verified live** on Terra job P-X120182
 (216 rows, tags exported as ①②, statuses `manuallyConfirmed` / `notStarted` / `partiallyEdited`).
-**Write is still untested.** Job notes: `G:\My Drive\תרגום\Terra\P-X120182\P-X120182-log.md`
+**Update 2026-10-19: the Write request is verified live.** Claude (claude-in-chrome) sent memoq.js's exact
+`PUT …/rows/18` (`{side:"target", symbols:[{type:1,value:cp}…], trackChanges:[]}`, headers X-Requested-With +
+X-CSRF-TOKEN from the cookie) from the editor page for seg #19 → HTTP 200, status `partiallyEdited` (unconfirmed),
+read back after a page reload; neighbours untouched; editor and save channel fine (status bar TR 215 / Ed 1).
+The side-panel button itself was not clicked (Claude can't drive the side panel) — same request, so the panel path
+should behave the same. Earlier note (kept for history): Job notes: `G:\My Drive\תרגום\Terra\P-X120182\P-X120182-log.md`
 (and section 4d of `tranlation-code\STARLING-COPILOT-HANDOFF.md`). That job contains PHI: save its exports
 only under `C:\Users\Benjy\Downloads\P-X120182 CCH AVS (Terra memoQ)\work\`, never on Google Drive.
 
