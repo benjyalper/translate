@@ -415,6 +415,25 @@
     }
     footer span { color: var(--accent); }
 
+    /* ── EXPERIENCE ── */
+    #experience { background: var(--light); }
+    .exp-list { display: grid; gap: 1.2rem; max-width: 980px; }
+    .exp-item {
+      background: var(--card); border: 1px solid var(--border);
+      border-left: 4px solid var(--accent);
+      border-radius: var(--radius); padding: 1.5rem 1.8rem;
+    }
+    .exp-head { display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; align-items: baseline; }
+    .exp-role { font-size: 1.05rem; font-weight: 700; color: var(--ink); }
+    .exp-date { font-size: 0.8rem; font-weight: 600; color: var(--accent); white-space: nowrap; }
+    .exp-org { font-size: 0.9rem; color: var(--mid); margin: 0.2rem 0 0.7rem; font-weight: 600; }
+    .exp-desc { font-size: 0.9rem; color: var(--mid); line-height: 1.65; }
+    .exp-tags { margin-top: 0.8rem; display: flex; gap: 0.4rem; flex-wrap: wrap; }
+    .exp-tag {
+      font-size: 0.72rem; font-weight: 600; padding: 0.2rem 0.6rem;
+      border-radius: 999px; background: #eef2ff; color: var(--accent);
+    }
+
     /* ── RESPONSIVE ── */
     @media (max-width: 900px) {
       .hero { grid-template-columns: 1fr; padding-top: 120px; }
@@ -445,6 +464,7 @@
     <li><a href="#services">Services</a></li>
     <li><a href="#samples">Samples</a></li>
     <li><a href="#about">About</a></li>
+    <li><a href="#experience">Experience</a></li>
     <li><a href="#testimonials">Testimonials</a></li>
     <li><a href="#contact">Contact Us</a></li>
   </ul>
@@ -679,7 +699,8 @@
       </p>
       <div class="cert-list">
         <div class="cert-item"><div class="cert-dot"></div> 10+ years of professional Hebrew ↔ English translation</div>
-        <div class="cert-item"><div class="cert-dot"></div> Trados Studio &amp; memoQ CAT tools proficiency</div>
+        <div class="cert-item"><div class="cert-dot"></div> Trados Studio, memoQ, Crowdin &amp; YiCAT CAT tools proficiency</div>
+        <div class="cert-item"><div class="cert-dot"></div> LQA, MTPE and terminology QA for global brands</div>
         <div class="cert-item"><div class="cert-dot"></div> Strict NDA and confidentiality standards</div>
         <div class="cert-item"><div class="cert-dot"></div> Fast turnaround with no compromise on quality</div>
       </div>
@@ -710,6 +731,57 @@
         <div class="skill-header"><span>Literary &amp; Creative</span><span>90%</span></div>
         <div class="skill-bar"><div class="skill-fill" style="width:90%"></div></div>
       </div>
+    </div>
+  </div>
+</section>
+
+<!-- EXPERIENCE -->
+<section id="experience">
+  <div class="section-label">Experience</div>
+  <h2 class="section-title">Recent Work</h2>
+  <p class="section-sub">Ongoing localization, editing and quality work for international agencies and their clients.</p>
+  <div class="exp-list">
+    <div class="exp-item">
+      <div class="exp-head"><div class="exp-role">Hebrew Localization Linguist — global social-media platform</div><div class="exp-date">2026 – present</div></div>
+      <div class="exp-org">International language-services provider</div>
+      <div class="exp-desc">Daily post-editing, proofreading and translation of app strings, help-center articles and marketing copy (English → Hebrew) for one of the world's largest consumer apps, under the client's style guide and term base. Monthly AI-check QA reports, LQA reviews, LLM machine-translation model comparisons, and linguist consultation on product wording.</div>
+      <div class="exp-tags"><span class="exp-tag">MTPE</span><span class="exp-tag">LQA</span><span class="exp-tag">UI / UX</span><span class="exp-tag">Help center</span></div>
+    </div>
+    <div class="exp-item">
+      <div class="exp-head"><div class="exp-role">Editor &amp; LQA Reviewer — global cybersecurity brand</div><div class="exp-date">2026 – present</div></div>
+      <div class="exp-org">International translation agency</div>
+      <div class="exp-desc">Editing of VPN and security product web pages in Crowdin under strict brand and legal wording rules, and member of the client's quarterly language-quality panel: LQI error scoring, translator feedback and review rounds. LQA evaluations of security and password-manager marketing texts.</div>
+      <div class="exp-tags"><span class="exp-tag">Crowdin</span><span class="exp-tag">LQI scoring</span><span class="exp-tag">Marketing</span></div>
+    </div>
+    <div class="exp-item">
+      <div class="exp-head"><div class="exp-role">Medical Editor — leading US children's hospital</div><div class="exp-date">2026 – present</div></div>
+      <div class="exp-org">International translation agency</div>
+      <div class="exp-desc">Editing English → Hebrew patient materials such as After Visit Summaries, following the hospital's style guide, checklist and confidential patient-data procedures.</div>
+      <div class="exp-tags"><span class="exp-tag">memoQ</span><span class="exp-tag">Medical</span><span class="exp-tag">TEP</span></div>
+    </div>
+    <div class="exp-item">
+      <div class="exp-head"><div class="exp-role">Technical Translator &amp; MTPE Editor — LGMG, Dreame, TEXA</div><div class="exp-date">2021 – present</div></div>
+      <div class="exp-org">GEL (Good Enterprise Limited)</div>
+      <div class="exp-desc">Operator and service manuals for aerial work platforms, robot vacuums and automotive diagnostics. Large multi-file MTPE projects, terminology consistency across manuals, and translation-memory revision lists that correct errors in client TMs.</div>
+      <div class="exp-tags"><span class="exp-tag">YiCAT</span><span class="exp-tag">Trados Studio</span><span class="exp-tag">Xbench QA</span><span class="exp-tag">Technical</span></div>
+    </div>
+    <div class="exp-item">
+      <div class="exp-head"><div class="exp-role">Manga Translator — official Hebrew edition</div><div class="exp-date">2026 – present</div></div>
+      <div class="exp-org">International comics localization agency</div>
+      <div class="exp-desc">Translating chapters of a long-running Japanese manga series into Hebrew for official release: dialogue, sound effects and recurring terminology, with a maintained series glossary of names and terms.</div>
+      <div class="exp-tags"><span class="exp-tag">Literary</span><span class="exp-tag">Comics</span><span class="exp-tag">Glossary management</span></div>
+    </div>
+    <div class="exp-item">
+      <div class="exp-head"><div class="exp-role">Translator &amp; Subtitler</div><div class="exp-date">2026 – present</div></div>
+      <div class="exp-org">UK/US marketing localization agency</div>
+      <div class="exp-desc">Subtitle translation and review for theatrical film trailers under high-security protocols, and HR-software content for an enterprise client.</div>
+      <div class="exp-tags"><span class="exp-tag">Subtitling</span><span class="exp-tag">Subtitle Edit</span><span class="exp-tag">HR content</span></div>
+    </div>
+    <div class="exp-item">
+      <div class="exp-head"><div class="exp-role">Audio Projects — transcription, translation and recording</div><div class="exp-date">2021 – present</div></div>
+      <div class="exp-org">Mission Translate · Ulatus</div>
+      <div class="exp-desc">Hebrew → English transcription and translation of audio files, and Hebrew voice recordings for a speech-data project.</div>
+      <div class="exp-tags"><span class="exp-tag">Transcription</span><span class="exp-tag">Audio</span></div>
     </div>
   </div>
 </section>
